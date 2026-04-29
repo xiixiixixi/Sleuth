@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { resolveOutputDir, ensureOutputDir } from './lib/output.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SITE_PATTERNS_DIR = path.join(ROOT, 'references', 'site-patterns');
+const SITE_PATTERNS_DIR = path.join(os.homedir(), '.sleuth', 'site-patterns');
 
 // --- TCP 端口探测 ---
 function checkPort(port, host = '127.0.0.1', timeoutMs = 2000) {

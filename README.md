@@ -156,7 +156,7 @@ sleuth/                                    项目根目录
 | `~/.sleuth/sessions/*.json` | 会话日志（操作记录、域名访问、成功/失败） |
 | `~/.sleuth/chrome-debug/` | Chrome CDP 调试 profile（Default 软链接到用户真实 profile） |
 | `~/.sleuth/output/` | 备用输出目录（当前目录不可写时回退） |
-| `references/site-patterns/*.md` | 站点经验文件（YAML frontmatter + 经验正文 + 自动统计） |
+| `~/.sleuth/site-patterns/*.md` | 站点经验文件（YAML frontmatter + 经验正文 + 自动统计） |
 
 ---
 
@@ -555,7 +555,7 @@ node /path/to/sleuth/scripts/check-deps.mjs
 
 ### 站点经验系统
 
-按域名存储在 `references/site-patterns/` 下：
+按域名存储在 `~/.sleuth/site-patterns/` 下：
 
 ```markdown
 ---

@@ -4,11 +4,12 @@
 // 输出：匹配到的站点经验内容，无匹配则静默
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PATTERNS_DIR = path.join(ROOT, 'references', 'site-patterns');
+const PATTERNS_DIR = path.join(os.homedir(), '.sleuth', 'site-patterns');
 const query = (process.argv[2] || '').trim();
 
 if (!query || !fs.existsSync(PATTERNS_DIR)) {

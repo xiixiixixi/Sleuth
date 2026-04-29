@@ -4,4 +4,5 @@ __pycache__/
 *.pyc
 references/site-patterns/**/*.md
 node_modules/
-sleuth-output/
+sleuth-output/*
+!sleuth-output/.gitkeep

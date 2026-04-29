@@ -7,7 +7,7 @@
 //   node scripts/update-site-stats.mjs --stats              # 仅打印统计摘要，不写入文件
 //
 // 统计数据来源：~/.sleuth/sessions/ 下的会话日志 JSON 文件
-// 目标文件：references/site-patterns/<domain>.md
+// 目标文件：~/.sleuth/site-patterns/<domain>.md
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SESSIONS_DIR = path.join(os.homedir(), '.sleuth', 'sessions');
-const PATTERNS_DIR = path.join(ROOT, 'references', 'site-patterns');
+const PATTERNS_DIR = path.join(os.homedir(), '.sleuth', 'site-patterns');
 
 // --- 参数解析 ---------------------------------------------------------------
 function parseArgs(argv) {

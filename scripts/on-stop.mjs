@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SESSIONS_DIR = path.join(os.homedir(), '.sleuth', 'sessions');
-const PATTERNS_DIR = path.join(ROOT, 'references', 'site-patterns');
+const PATTERNS_DIR = path.join(os.homedir(), '.sleuth', 'site-patterns');
 const SEARCH_ENGINES = new Set(['google.com', 'google.com.hk', 'bing.com', 'baidu.com', 'duckduckgo.com', 'yahoo.com']);
 const COMPLEX_OP_TYPES = new Set(['captcha', 'login_wall', 'paywall', 'anti_bot']);
 const DOMAIN_REGEX = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/;

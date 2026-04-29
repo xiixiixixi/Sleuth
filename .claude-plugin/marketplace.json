@@ -1,18 +1,19 @@
 {
   "name": "sleuth",
+  "description": "梦里寻 — 联网检索与浏览器操作 Skill。教 AI Agent 如何像人一样浏览网页。",
   "owner": {
     "name": "Wei Xi Li"
-  },
-  "metadata": {
-    "description": "梦里寻 — 联网检索与浏览器操作 Skill。教 AI Agent 如何像人一样浏览网页：搜索、阅读、提取、交互，全程在真实浏览器中完成。"
   },
   "plugins": [
     {
       "name": "sleuth",
-      "description": "梦里寻 — 联网检索与浏览器操作 Skill。教 AI Agent 如何像人一样浏览网页：搜索、阅读、提取、交互，全程在真实浏览器中完成。",
-      "source": "./",
+      "description": "梦里寻 — 联网检索与浏览器操作。教 AI Agent 如何像人一样浏览网页：搜索、阅读、提取、交互，全程在真实浏览器中完成。支持 Plan Mode 两阶段调研、子 Agent 并行搜索、站点经验自学习。",
+      "source": {
+        "source": "github",
+        "repo": "xiixiixixi/Sleuth"
+      },
       "category": "web",
-      "tags": ["browser-automation", "agent-browser", "cdp", "chrome", "retrieval", "scraping"]
+      "tags": ["browser-automation", "agent-browser", "cdp", "chrome", "retrieval", "scraping", "web-research"]
     }
   ]
 }
