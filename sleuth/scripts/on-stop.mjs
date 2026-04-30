@@ -252,20 +252,35 @@ async function main() {
   const candidateDomains = new Set();
   const freq = countDomainFrequency();
 
+  // 处理刚关闭的孤儿 session
   for (const session of finished) {
-    // 条件 A：该 session 中有复杂操作（CAPTCHA 等）的域名
     const complexDomains = getComplexDomainsFromSession(session);
     for (const d of complexDomains) {
-      if (SEARCH_ENGINES.has(d)) continue; // 排除搜索引擎
+      if (SEARCH_ENGINES.has(d)) continue;
       candidateDomains.add(d);
     }
-    // 条件 B：该域名累计出现在 3+ 个 session 中（高频访问，值得记录）
     const domains = getDomainsFromSession(session);
     for (const d of domains) {
       if (SEARCH_ENGINES.has(d)) continue;
       if ((freq[d] || 0) >= DOMAIN_FREQUENCY_THRESHOLD) {
         candidateDomains.add(d);
       }
+    }
+  }
+
+  // 同时扫描所有 session（包括已完成的），只要域名出现 >= 3 次就记录
+  if (existsSync(SESSIONS_DIR)) {
+    for (const entry of readdirSync(SESSIONS_DIR).filter(e => e.endsWith('.json'))) {
+      try {
+        const session = JSON.parse(readFileSync(path.join(SESSIONS_DIR, entry), 'utf-8'));
+        const domains = getDomainsFromSession(session);
+        for (const d of domains) {
+          if (SEARCH_ENGINES.has(d)) continue;
+          if ((freq[d] || 0) >= DOMAIN_FREQUENCY_THRESHOLD) {
+            candidateDomains.add(d);
+          }
+        }
+      } catch {}
     }
   }
 

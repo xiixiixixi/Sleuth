@@ -81,7 +81,28 @@ agent-browser --auto-connect --session <session-name> tab close 2
 4. 用 `eval` 提取页面内容
 5. 记录关键发现和来源 URL
 
-中文关键词用百度，英文用 Google/Bing，技术话题优先 DuckDuckGo。
+### 搜索引擎选择
+
+| 场景 | 首选 | 补充 |
+|------|------|------|
+| 英文通用 | Google | Bing、DuckDuckGo |
+| 中文内容 | 百度 | Google 中文 |
+| 创始人访谈/产品演示/播客 | **YouTube** | Google `site:youtube.com` |
+| 技术细节 | DuckDuckGo | Google |
+| 特定网站内容 | `site:域名 关键词` | — |
+
+### YouTube 搜索
+
+YouTube 有大量创始人访谈、产品演示、行业分析视频。搜索时**必须**尝试 YouTube：
+
+```bash
+# 直接搜索 YouTube
+agent-browser --auto-connect --session <session-name> open "https://www.youtube.com/results?search_query=Sierra+AI+Bret+Taylor+interview"
+# 或用 Google 站内搜
+agent-browser --auto-connect --session <session-name> open "https://www.google.com/search?q=site:youtube.com+Decagon+AI+founder+interview"
+```
+
+找到视频后提取字幕或 shownotes（见内容提取部分）。
 
 ---
 
