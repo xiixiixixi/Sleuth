@@ -6,9 +6,19 @@
 
 ---
 
-## 连接 Chrome
+## 连接 Chrome（强制）
 
-连接用户的日常 Chrome 以复用登录态和书签。Chrome 必须通过 `--remote-debugging-port` 启动（`chrome://inspect` 复选框方式不兼容）。
+**所有 agent-browser 命令必须带 `--auto-connect`，否则会启动独立的 Chrome for Testing，丢失用户登录态。**
+
+```bash
+# ❌ 错误：会启动独立的 Chrome for Testing
+agent-browser open https://example.com
+
+# ✅ 正确：连接用户日常 Chrome
+agent-browser --auto-connect open https://example.com
+```
+
+连接用户日常 Chrome 以复用登录态和书签。Chrome 必须通过 `--remote-debugging-port` 启动（`chrome://inspect` 复选框方式不兼容）。
 
 ```bash
 # macOS 手动启动 Chrome（CDP 端口 9222）
@@ -17,8 +27,13 @@
 # 通过 check-deps 自动检测和重启（推荐）
 node check-deps.mjs
 
-# agent-browser 连接
+# 方式 1：每条命令带 --auto-connect（推荐）
+agent-browser --auto-connect open https://example.com
+agent-browser --auto-connect snapshot -i
+
+# 方式 2：先 connect 建立连接
 agent-browser connect 9222
+agent-browser open https://example.com
 ```
 
 ## 导航

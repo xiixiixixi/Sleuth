@@ -328,7 +328,11 @@ Agent({
 
 ## 浏览器操作
 
-agent-browser 直连用户日常 Chrome，通过 `--cdp <port>` 或 `--auto-connect` 指定。若无用户明确要求，不主动操作用户已有 tab——所有操作在 agent-browser 自己管理的 tab 中进行。完整命令参考 `references/tool-guide.md`。
+**强制规则：必须连接用户日常 Chrome，不得使用 agent-browser 自带的 Chrome for Testing。** 用户 Chrome 有登录态和 cookies，能访问需要登录的站点。
+
+连接方式：check-deps.mjs 检测到 CDP 端口后，所有 agent-browser 命令**必须**带 `--auto-connect` 参数（如 `agent-browser --auto-connect open <url>`），或先执行 `agent-browser connect <port>` 建立连接。不带 `--auto-connect` 会导致启动独立的 Chrome for Testing，丢失登录态——**这是错误行为**。
+
+若无用户明确要求，不主动操作用户已有 tab——所有操作在新 tab 中进行。完整命令参考 `references/tool-guide.md`。
 
 ### Snapshot-first 工作流
 
