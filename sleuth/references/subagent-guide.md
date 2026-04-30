@@ -85,10 +85,9 @@ agent-browser --auto-connect --session <session-name> tab close 2
 
 | 场景 | 首选 | 补充 |
 |------|------|------|
-| 英文通用 | Google | Bing、DuckDuckGo |
+| 英文通用 | Google | — |
 | 中文内容 | 百度 | Google 中文 |
 | 创始人访谈/产品演示/播客 | **YouTube** | Google `site:youtube.com` |
-| 技术细节 | DuckDuckGo | Google |
 | 特定网站内容 | `site:域名 关键词` | — |
 
 ### YouTube 搜索
