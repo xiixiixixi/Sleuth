@@ -47,12 +47,11 @@ config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解
 
 1. 检查 `~/.sleuth/config.json` 中的 `profileDir` 字段（之前保存过的路径）
 2. 检查环境变量 `CLAUDE_CONFIG_DIR`
-3. 检查 `~/.claude/settings.local.json` 是否存在
-4. 用 `Bash` 运行 `ls -d ~/.claude*/settings.local.json 2>/dev/null` 列出所有可能的 profile
-5. 以上都失败时，用 `AskUserQuestion` 询问用户，提供以下选项：
-   - `~/.claude/`（默认 profile）
-   - 步骤 4 扫描到的其他 profile（动态生成选项）
-   - `其他`（用户手动输入）
+3. 用 `Bash` 运行 `ls -d ~/.claude*/settings.json 2>/dev/null` 列出所有可能的 profile
+4. 根据步骤 3 的结果判断：
+   - **只找到一个** → 直接使用该路径
+   - **找到多个** → 用 `AskUserQuestion` 让用户选择，选项从扫描结果动态生成
+   - **没找到** → 用 `AskUserQuestion` 让用户手动输入
 
 检测到路径后，将其保存到 `~/.sleuth/config.json` 的 `profileDir` 字段，后续操作直接使用，不再重复检测。
 
