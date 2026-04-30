@@ -61,7 +61,7 @@ sleuth/                                    项目根目录
 │
 ├── references/                            参考文档
 │   ├── tool-guide.md                      agent-browser 命令速查
-│   └── site-patterns/                     站点经验文件（运行时累积，gitignore）
+│   └── site-patterns/                     （已废弃，保留 .gitkeep）
 │       └── .gitkeep
 │
 └── sleuth-output/                         运行时交付文件（gitignore）
@@ -128,7 +128,7 @@ sleuth/                                    项目根目录
 │                                                              │
 │  references/          参考文档                                │
 │    tool-guide.md      agent-browser 关键命令速查              │
-│    site-patterns/     站点经验累积目录（运行时写入）           │
+│    site-patterns/     （已废弃，实际存 ~/.sleuth/site-patterns/） │
 │                                                              │
 │  .claude-plugin/      Claude Code 插件注册                    │
 └──────────────────────────────────────────────────────────────┘
@@ -208,313 +208,65 @@ Chrome 147+ 要求非默认 `--user-data-dir` 才能开启远程调试。`check-
 
 ## Claude Code 配置详解
 
+sleuth 以 Claude Code 插件形式分发，hooks 自动注册，无需手动配置 settings.json。
+
 ### 配置文件位置
 
-Claude Code 使用两个全局配置文件。如果你用的是默认 profile，路径为 `~/.claude/`；如果用了命名 profile（如 `deepseek`），则为 `~/.claude-<profile>/`：
+Claude Code 使用 `~/.claude/`（默认 profile）或 `~/.claude-<profile>/`（命名 profile）存放配置：
 
 ```
-# 默认 profile
-~/.claude/settings.json
-~/.claude/settings.local.json
-
-# 命名 profile（如 deepseek）
-~/.claude-deepseek/settings.json
-~/.claude-deepseek/settings.local.json
+~/.claude/                           或 ~/.claude-<profile>/
+├── settings.json                    全局设置（hooks、模型、插件）
+└── settings.local.json              本地权限（allow / deny 规则）
 ```
 
-下文示例统一使用 `~/.claude/` 路径，请根据实际 profile 替换。Hook 脚本同理（`~/.claude/hooks/` 或 `~/.claude-deepseek/hooks/`）。
+### 插件自动注册
 
-```
-~/.claude/                         或 ~/.claude-<profile>/
-├── settings.json              全局设置（hooks、模型、插件）
-├── settings.local.json        本地权限（allow / deny 规则）
-└── hooks/
-    ├── block-web-tool-shortcuts.sh    PreToolUse hook 脚本
-    └── route-web-requests.sh          UserPromptSubmit hook 脚本
-```
+安装插件后，以下 hooks 自动生效（由 `hooks/hooks.json` 注册，使用 `${CLAUDE_PLUGIN_ROOT}` 定位脚本）：
 
-### 一、settings.json — 全局设置
+| Hook | 事件 | 脚本 | 作用 |
+|------|------|------|------|
+| PreToolUse | 工具调用前 | `hooks/block-web-tools.py` | 拦截封禁列表中的 Web 工具 |
+| UserPromptSubmit | 用户输入后 | `hooks/route-search-intent.py` | 检测搜索意图，路由到 sleuth |
+| Stop | 对话结束 | `scripts/on-stop.mjs` | 清理 session、记录站点经验、关闭 tab |
 
-需要在 `hooks` 中配置三项：
+### 交互配置向导
 
-#### 1. PreToolUse hook — 拦截 Web 工具
+运行 `/sleuth:config setup` 完成以下配置：
 
-阻止 Agent 使用 WebSearch、WebFetch、Fetch 及 MCP web 工具，强制所有联网操作走 sleuth。
+1. **发现可用工具**：扫描 MCP 配置，列出所有可用工具
+2. **选择封禁项**：勾选要拦截的 Web/搜索类工具（默认选中推荐项）
+3. **配置权限**：向 `settings.local.json` 添加 allow 规则（agent-browser、curl、scripts）
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "WebSearch|WebFetch|Fetch|mcp__tavily__tavily_search|mcp__tavily__tavily_extract|mcp__tavily__tavily_crawl|mcp__web_reader__webReader|mcp__web_search_prime__webSearchPrime",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/block-web-tool-shortcuts.sh",
-            "statusMessage": "拦截 WebSearch/WebFetch/Fetch 及 MCP web 工具，请用 /sleuth..."
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+向导会自动检测你的 profile 目录，并将检测结果保存到 `~/.sleuth/config.json`。
 
-Hook 脚本 `~/.claude/hooks/block-web-tool-shortcuts.sh`：
+其他配置命令：
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-INPUT_JSON=$(cat)
-export INPUT_JSON
-
-python3 - <<'PY'
-import json, os, sys
-
-payload = json.loads(os.environ["INPUT_JSON"])
-tool_name = str(payload.get("tool_name", "") or "")
-tool_name_lower = tool_name.lower()
-
-blocked = False
-reason = None
-
-blocked_mcp_tools = {
-    "mcp__web_search_prime__websearchprime",
-    "mcp__web_reader__webreader",
-    "mcp__tavily__tavily_search",
-    "mcp__tavily__tavily_extract",
-    "mcp__tavily__tavily_crawl",
-}
-
-if tool_name in {"WebSearch", "WebFetch", "Fetch"}:
-    blocked = True
-    reason = "Web search/fetch tools blocked. Use `/sleuth` skill."
-elif tool_name_lower in blocked_mcp_tools:
-    blocked = True
-    reason = "MCP web tools blocked. Use `/sleuth` skill."
-
-response = {"continue": True, "suppressOutput": True}
-if blocked:
-    response["hookSpecificOutput"] = {"hookEventName": "PreToolUse", "permissionDecision": "deny"}
-    response["systemMessage"] = reason
-
-json.dump(response, sys.stdout, ensure_ascii=False)
-PY
-```
-
-#### 2. UserPromptSubmit hook — 搜索意图路由
-
-检测用户 prompt 中的搜索意图，注入提示让 Agent 使用 sleuth skill。
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/route-web-requests.sh",
-            "statusMessage": "检测搜索意图，路由到 sleuth skill..."
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Hook 脚本 `~/.claude/hooks/route-web-requests.sh`：
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-INPUT_JSON=$(cat)
-export INPUT_JSON
-
-python3 - <<'PY'
-import json, os, re, sys
-
-payload = json.loads(os.environ["INPUT_JSON"])
-prompt = payload.get("user_prompt") or payload.get("prompt") or ""
-if not isinstance(prompt, str):
-    prompt = ""
-text = prompt.strip()
-
-search_patterns = [
-    r"搜索", r"搜一下", r"查一下", r"查一查", r"帮我查", r"联网搜索",
-    r"look\s+up", r"\bsearch\b", r"\bgoogle\b",
-    r"\bfind\s+latest\b", r"\blatest\s+(?:news|updates|info|information)\b",
-]
-
-system_message = None
-if any(re.search(p, text, re.IGNORECASE) for p in search_patterns):
-    system_message = "Web search detected. Do not use WebSearch/WebFetch/Fetch. Use `/sleuth` skill."
-
-response = {"continue": True, "suppressOutput": True}
-if system_message:
-    response["systemMessage"] = system_message
-
-json.dump(response, sys.stdout, ensure_ascii=False)
-PY
-```
-
-#### 3. Stop hook — 会话清理
-
-对话结束时自动执行：关闭未完成的 session → 为复杂站点创建经验 stub → 关闭残留 tab。
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node /absolute/path/to/sleuth/scripts/on-stop.mjs",
-            "statusMessage": "清理未关闭 session、记录复杂站点经验、关闭残留 tab..."
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-**注意**：`command` 中必须使用 on-stop.mjs 的绝对路径（不能用 `~` 或 `$HOME`）。
-
-#### 完整 settings.json 示例
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "WebSearch|WebFetch|Fetch|mcp__tavily__tavily_search|mcp__tavily__tavily_extract|mcp__tavily__tavily_crawl|mcp__web_reader__webReader|mcp__web_search_prime__webSearchPrime",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/block-web-tool-shortcuts.sh",
-            "statusMessage": "拦截 Web 工具，请用 /sleuth..."
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/route-web-requests.sh",
-            "statusMessage": "检测搜索意图，路由到 sleuth..."
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node /Users/you/git/sleuth/scripts/on-stop.mjs",
-            "statusMessage": "清理 session、记录经验、关闭 tab..."
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-### 二、settings.local.json — 权限配置
-
-自动放行 sleuth 相关命令，避免每次操作都弹确认框。
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(agent-browser *)",
-      "Bash(node /Users/you/git/sleuth/scripts/*.mjs *)",
-      "Bash(curl http://127.0.0.1:9*)",
-      "Bash(find /Users/you/git/sleuth/sleuth-output*)"
-    ],
-    "deny": [
-      "Fetch",
-      "WebFetch",
-      "WebSearch",
-      "mcp__tavily__tavily_search",
-      "mcp__tavily__tavily_extract",
-      "mcp__tavily__tavily_crawl",
-      "mcp__web_reader__webReader",
-      "mcp__web_search_prime__webSearchPrime"
-    ]
-  }
-}
-```
-
-| 规则 | 说明 |
+| 命令 | 作用 |
 |------|------|
-| `Bash(agent-browser *)` | 放行所有 agent-browser 操作 |
-| `Bash(node .../scripts/*.mjs *)` | 放行 sleuth 所有脚本 |
-| `Bash(curl http://127.0.0.1:9*)` | 放行 CDP 端口检测 |
-| `Bash(find .../sleuth-output*)` | 放行输出目录搜索 |
-| `deny: WebSearch/WebFetch/Fetch/MCP web tools` | 权限层兜底拦截 Web 工具 |
-
-**注意**：将路径中的 `/Users/you/git/sleuth` 替换为你的实际安装路径。
+| `/sleuth:config show` | 显示当前配置 |
+| `/sleuth:config block-web on/off` | 开关 Web 工具拦截 |
+| `/sleuth:config block-web list` | 重新选择要封禁的工具 |
+| `/sleuth:config permissions` | 重新配置权限规则 |
+| `/sleuth:config uninstall` | 卸载：逆向清理所有配置 |
 
 ### 三层防护体系
 
-配置完成后，Web 工具拦截形成三层防护：
-
-| 层级 | 机制 | 文件 |
+| 层级 | 机制 | 来源 |
 |------|------|------|
-| **意图检测** | UserPromptSubmit hook 扫描 prompt 中的搜索关键词，注入 redirect 消息 | `route-web-requests.sh` |
-| **工具拦截** | PreToolUse hook 拒绝 WebSearch/WebFetch/Fetch 及 MCP web 工具的调用 | `block-web-tool-shortcuts.sh` |
-| **权限兜底** | settings.local.json 的 deny 列表在权限层阻止 | `settings.local.json` |
+| **意图检测** | UserPromptSubmit hook 扫描搜索关键词，注入 redirect 消息 | `hooks/route-search-intent.py` |
+| **工具拦截** | PreToolUse hook 拒绝封禁列表中的工具调用 | `hooks/block-web-tools.py` |
+| **权限兜底** | settings.local.json deny 列表阻止内置 Web 工具 | 由 config 向导写入 |
 
-### 四、hook 脚本部署
-
-```bash
-# 创建 hooks 目录（根据你的 profile 替换路径）
-mkdir -p ~/.claude/hooks
-# 如果用命名 profile：mkdir -p ~/.claude-deepseek/hooks
-
-# 将上方两个 hook 脚本放到 hooks 目录中
-# 文件名：block-web-tool-shortcuts.sh、route-web-requests.sh
-
-# 设置可执行权限
-chmod +x ~/.claude/hooks/block-web-tool-shortcuts.sh
-chmod +x ~/.claude/hooks/route-web-requests.sh
-# 注意：settings.json 中 command 路径要与此处一致
-# 如使用命名 profile，command 应写 ~/.claude-deepseek/hooks/xxx.sh
-```
-
-### 五、验证配置
+### 验证配置
 
 ```bash
-# 1. 验证 JSON 语法
-python3 -c "import json; json.load(open('$HOME/.claude/settings.json'))"
-python3 -c "import json; json.load(open('$HOME/.claude/settings.local.json'))"
-
-# 2. 验证 hook 脚本可执行
-~/.claude/hooks/block-web-tool-shortcuts.sh <<< '{"tool_name":"WebSearch"}'
-~/.claude/hooks/route-web-requests.sh <<< '{"user_prompt":"搜索今日汇率"}'
-
-# 3. 验证 on-stop.mjs
-node /path/to/sleuth/scripts/on-stop.mjs
-
-# 4. 验证环境
+# 1. 验证环境
 node /path/to/sleuth/scripts/check-deps.mjs
 
-# 5. 验证 skill 加载
-# 在 Claude Code 中输入 /sleuth，应能看到 SKILL.md 内容
+# 2. 在 Claude Code 中验证
+#    输入 /sleuth → 应看到 SKILL.md 内容
+#    输入 /sleuth:config show → 应显示当前配置
 ```
 
 ---

@@ -29,6 +29,18 @@ allowed-tools: [Read, Write, Bash, AskUserQuestion]
 
 ---
 
+## 插件根目录检测
+
+config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解析到 `skills/config/` 而非插件根目录。
+脚本都在插件根目录的 `scripts/` 下，因此需要先检测插件根目录的绝对路径。
+
+检测方法（按优先级）：
+1. 用 `Bash` 运行 `node -e "console.log(require('path').resolve('${CLAUDE_SKILL_DIR}', '..', '..'))"` 获取插件根目录
+2. 验证该路径下存在 `scripts/check-deps.mjs`，如不存在则依次向上查找
+3. 将检测到的路径保存到变量 `PLUGIN_ROOT`，后续所有涉及脚本路径的操作都使用此变量
+
+**关键**：写入 `settings.local.json` 的 allow 规则必须是**绝对路径字面量**（如 `Bash(node /Users/xxx/.claude/plugins/sleuth-abc/scripts/*.mjs *)`），不能用 `${CLAUDE_SKILL_DIR}` 等变量——`settings.local.json` 不支持变量展开。
+
 ## Profile 路径检测
 
 多个操作需要读写当前 profile 的 `settings.local.json`。按以下优先级检测 profile 路径：
@@ -39,7 +51,7 @@ allowed-tools: [Read, Write, Bash, AskUserQuestion]
 4. 用 `Bash` 运行 `ls -d ~/.claude*/settings.local.json 2>/dev/null` 列出所有可能的 profile
 5. 以上都失败时，用 `AskUserQuestion` 询问用户，提供以下选项：
    - `~/.claude/`（默认 profile）
-   - `~/.claude-deepseek/`（如检测到存在）
+   - 步骤 4 扫描到的其他 profile（动态生成选项）
    - `其他`（用户手动输入）
 
 检测到路径后，将其保存到 `~/.sleuth/config.json` 的 `profileDir` 字段，后续操作直接使用，不再重复检测。
@@ -71,11 +83,14 @@ allowed-tools: [Read, Write, Bash, AskUserQuestion]
 
 1. 按"Profile 路径检测"流程确认 profile 目录
 2. 读取 `{profileDir}/settings.local.json`（如不存在则创建空结构）
-3. 计算需要添加的 allow 规则：
+3. 按"插件根目录检测"流程获取 `PLUGIN_ROOT` 绝对路径
+4. 计算需要添加的 allow 规则（注意：必须用绝对路径字面量，不能包含变量）：
    ```
    Bash(agent-browser *)
+   Bash(node {PLUGIN_ROOT}/scripts/*.mjs *)
    Bash(curl http://127.0.0.1:9*)
    ```
+   其中 `{PLUGIN_ROOT}` 替换为检测到的实际绝对路径
 4. 如规则已存在则跳过
 5. 用 `AskUserQuestion` 展示将要写入的规则，请求用户确认
 6. 用户确认后，用 `Write` 工具写入更新后的 `settings.local.json`
@@ -86,7 +101,7 @@ allowed-tools: [Read, Write, Bash, AskUserQuestion]
 最终写入 `~/.sleuth/config.json`：
 ```json
 {
-  "profileDir": "/Users/xxx/.claude-deepseek",
+  "profileDir": "<检测到的 profile 绝对路径>",
   "blockWebTools": true,
   "routeSearchIntent": true,
   "blockedTools": ["WebSearch", "WebFetch", ...]
@@ -103,14 +118,14 @@ allowed-tools: [Read, Write, Bash, AskUserQuestion]
 ```
 sleuth 配置:
 
-  Profile 目录:     ~/.claude-deepseek/
+  Profile 目录:     <profileDir 或 未配置>
   拦截 Web 工具:    ✓ 开启
   搜索意图路由:     ✓ 开启
 
-  封禁工具列表 (3):
+  封禁工具列表 (<数量>):
     • WebSearch
     • WebFetch
-    • mcp__tavily__tavily_search
+    • <其他用户选择的工具>
 
   配置文件: ~/.sleuth/config.json
 
@@ -157,8 +172,10 @@ sleuth 配置:
 
 1. 按"Profile 路径检测"流程确认 profile 目录
 2. 读取 `{profileDir}/settings.local.json`
-3. 从 `permissions.allow` 中删除 sleuth 添加的规则：
+3. 按"插件根目录检测"流程获取 `PLUGIN_ROOT`
+4. 从 `permissions.allow` 中删除 sleuth 添加的规则：
    - `Bash(agent-browser *)`
+   - `Bash(node {PLUGIN_ROOT}/scripts/*.mjs *)`（用检测到的实际路径）
    - `Bash(curl http://127.0.0.1:9*)`
 4. 从 `permissions.deny` 中删除 sleuth 添加的规则（如有）：
    - `WebSearch`、`WebFetch`、`Fetch`
@@ -213,4 +230,4 @@ sleuth 已卸载:
 }
 ```
 
-注意：默认不包含 `blockedTools` 字段 — 此时 hook 使用内置的默认封禁列表（WebSearch、WebFetch、Fetch + 常见 MCP web 工具）。用户运行 `/sleuth:config setup` 或 `/sleuth:config block-web list` 后才会生成自定义的 `blockedTools` 列表。
+注意：默认不包含 `blockedTools` 字段 — 此时 hook 仅封禁 Claude Code 内置 Web 工具（WebSearch、WebFetch、Fetch）。MCP 工具需运行 `/sleuth:config setup` 由向导发现并选择。
