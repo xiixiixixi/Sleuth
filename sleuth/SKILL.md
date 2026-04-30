@@ -164,7 +164,7 @@ Agent({
   subagent_type: "general-purpose",
   run_in_background: true,
   prompt: `
-    你是一个调研执行者。先 Read references/subagent-guide.md，严格遵循其中的指引。
+    你是一个调研执行者。先 Read ${SKILL_DIR}/references/subagent-guide.md，严格遵循其中的指引。
 
     禁止使用 Agent 工具。禁止加载 sleuth 主 skill。你只能自己用 agent-browser 搜索。
 
