@@ -238,7 +238,7 @@ function createSitePatternStubs(domains) {
  */
 function closeBrowserTabs() {
   try {
-    execSync('agent-browser close --all 2>/dev/null', { timeout: 5000, stdio: 'ignore' });
+    execSync('agent-browser --auto-connect close --all 2>/dev/null', { timeout: 5000, stdio: 'ignore' });
   } catch { /* 无 tab 或 agent-browser 不可用 */ }
 }
 
