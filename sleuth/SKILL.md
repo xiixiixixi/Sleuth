@@ -72,6 +72,12 @@ node "${CLAUDE_SKILL_DIR}/scripts/match-site.mjs" "<域名>"
 - **失败即信号**：重试无改善时换方向，不在同一方式上反复
 - **达成立止**：确认成功标准后立即停止
 
+## 强制规则
+
+1. **复杂问题必须用 `deliver.mjs --action save` 保存文件**。不等全部完成，每积累一批重要发现就保存一次。
+2. **每访问一个重要页面必须用 `session-logger --action log` 记录**。这是站点经验生成的数据源。
+3. **子 Agent 结果增量整合**：收到一个子 Agent 结果就立即写入最终文件，不要等全部子 Agent 完成再一次性整合。每个子 Agent 返回后立刻 Read + Edit。
+
 ## 搜索与发现
 
 sleuth 是你（包括子 Agent）唯一的联网工具。不使用 WebSearch、WebFetch 等外部工具。完整命令参考 `references/tool-guide.md`。
@@ -143,8 +149,13 @@ node "${CLAUDE_SKILL_DIR}/scripts/find-url.mjs" [关键词...] [--only bookmarks
 - **禁止加载 sleuth skill**，改为读取 subagent-guide.md
 - 描述目标不指定手段，用「获取」「调研」而非「搜索」「抓取」
 - 给上下文，子 Agent 不需要从头开始
+- **必须传入 SID、SKILL_DIR、SLEUTH_OUTPUT 三个变量**
 
 ```
+SKILL_DIR="/Users/xxx/.claude/plugins/marketplaces/sleuth/sleuth"  # 从 check-deps 输出获取绝对路径
+SID="2026-04-30-xxxx"       # session-logger start 返回的 SID
+SLEUTH_OUTPUT="~/.sleuth/output/2026-04-30/xxxx"  # check-deps --output-dir --sid $SID 返回
+
 Agent({
   description: "3-5 词描述任务",
   subagent_type: "general-purpose",
@@ -154,23 +165,28 @@ Agent({
 
     禁止使用 Agent 工具。禁止加载 sleuth 主 skill。你只能自己用 agent-browser 搜索。
 
+    关键变量（原样使用，不要自己创建新 session）：
+    - SKILL_DIR=${SKILL_DIR}
+    - SID=${SID}
+    - SLEUTH_OUTPUT=${SLEUTH_OUTPUT}
+
     任务：${目标描述}
     已知上下文：${主 Agent 提供的已知信息}
-    浏览器隔离：所有 agent-browser 命令带 --auto-connect --session ${session-name}
-    Session ID：${SID}
-    输出目录：${SLEUTH_OUTPUT}
+    浏览器隔离：所有 agent-browser 命令带 --auto-connect --session ${SID}
 
     要求：
     1. 只返回摘要（关键发现 + 来源 URL），不要返回原始页面内容
-    2. 重要文件通过 deliver.mjs 保存
-    3. 每访问一个重要页面，用 session-logger --action log 记录操作（type: visit + url + title）
-    4. 遇到反爬/CAPTCHA/登录墙，记录到 session log（type: "captcha" / "login_wall" / "paywall"）
-    5. 完成后关闭自己创建的 tab
+    2. 完成时必须用 deliver.mjs --action save --sid ${SID} 保存关键发现
+    3. 每访问一个重要页面，必须用 session-logger --action log --sid ${SID} 记录
+    4. 完成后必须用 session-logger --action finish --sid ${SID} 结束
+    5. 关闭自己创建的 tab
   `
 })
 ```
 
-主 Agent 等待 background notification 收集结果，去重 + 交叉验证。
+**增量整合**：每收到一个子 Agent 的 background notification 结果，**立即** Read 最终文件 → Edit 写入该子 Agent 的发现。不要等所有子 Agent 完成再整合——每个结果都是一次编辑窗口。
+
+主 Agent 等待 background notification 收集结果，每收到一个立即整合，最后去重 + 交叉验证。
 
 ## 浏览器操作
 

@@ -6,7 +6,20 @@
 
 1. **禁止使用 Agent 工具**。你不能派出子 Agent。所有浏览器操作你自己用 agent-browser 直接完成。
 2. **禁止加载 sleuth 主 skill**。不要用 Skill 工具调用 `/sleuth`。你的指令全在这份文档里。
-3. **所有 agent-browser 命令必须带 `--auto-connect` 和 `--session <name>`**。
+3. **所有 agent-browser 命令必须带 `--auto-connect` 和 `--session <session-name>`**。
+4. **必须用主 Agent 传入的 SID 和输出目录**。不要自己创建新 session。你的 prompt 里会包含 `SID` 和 `输出目录`，所有 session-logger 和 deliver.mjs 调用都使用这些值。
+
+---
+
+## 关键变量（从主 Agent prompt 中获取）
+
+你在 prompt 中会看到以下变量，**必须原样使用**：
+
+- **`SKILL_DIR`**：脚本绝对路径，如 `/Users/xxx/.claude/plugins/marketplaces/sleuth/sleuth`
+- **`SID`**：主 session ID，如 `2026-04-30-213828170-aisierra-decagon-cre`
+- **`SLEUTH_OUTPUT`**：输出目录绝对路径，如 `/Users/xxx/.sleuth/output/2026-04-30/2026-04-30-213828170-aisierra-decagon-cre`
+
+**禁止** `session-logger --action start`。session 已由主 Agent 创建，你直接用 SID 即可。
 
 ---
 
@@ -72,41 +85,30 @@ agent-browser --auto-connect --session <session-name> tab close 2
 
 ---
 
-## 3. 脚本调用
+## 3. 脚本调用（强制执行）
 
-### 环境检查（开始时调用一次）
+### 记录操作（每访问一个重要页面必须调用）
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
+node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" --type visit --url "https://example.com" --title "页面标题"
 ```
 
-### 创建会话日志
+### 保存交付文件（完成时必须调用）
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action start --query "查询描述" --type 调研报告
-# 返回 session ID，如 2026-04-30-165117855-ai
-```
+# 从 stdin 保存（推荐）
+cat <<'CONTENT' | node "${SKILL_DIR}/scripts/deliver.mjs" --action save --source /dev/stdin --type doc --name "report-name" --sid "${SID}"
+你的调研内容...
+CONTENT
 
-### 记录操作
-
-```bash
-node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid <SESSION_ID> --type visit --url "https://example.com" --title "页面标题"
-```
-
-### 保存交付文件
-
-```bash
 # 从文件保存
-node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action save --source /tmp/report.md --type doc --name "report-name" --sid <SESSION_ID>
-
-# 从 stdin 保存
-echo "内容" | node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action save --source /dev/stdin --type doc --name "report-name" --sid <SESSION_ID>
+node "${SKILL_DIR}/scripts/deliver.mjs" --action save --source /tmp/report.md --type doc --name "report-name" --sid "${SID}"
 ```
 
-### 结束会话
+### 结束会话（完成时必须调用）
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid <SESSION_ID> --outcome success
+node "${SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "${SID}" --outcome success
 ```
 
 ---
@@ -123,9 +125,10 @@ node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid <SES
 
 ---
 
-## 5. 完成后
+## 5. 完成后（按顺序执行）
 
-1. 用 `deliver.mjs --action save` 保存关键发现
-2. 关闭自己创建的 tab
-3. 用 `session-logger.mjs --action finish` 结束会话
-4. 向主 Agent 返回摘要：关键发现 + 来源 URL 列表
+1. 用 `deliver.mjs --action save --sid ${SID}` 保存关键发现（**必须**）
+2. 每个重要页面用 `session-logger --action log --sid ${SID}` 记录（**必须**）
+3. 关闭自己创建的 tab
+4. 用 `session-logger --action finish --sid ${SID}` 结束会话（**必须**）
+5. 向主 Agent 返回摘要：关键发现 + 来源 URL 列表
