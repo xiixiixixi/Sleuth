@@ -43,10 +43,12 @@ config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解
 
 ## Profile 路径检测
 
-多个操作需要读写当前 profile 的 `settings.local.json`。按以下优先级检测 profile 路径：
+多个操作需要读写当前 profile 的 `settings.local.json`。**必须先确认 profile 目录，再执行任何其他操作。**
 
-1. 检查 `~/.sleuth/config.json` 中的 `profileDir` 字段（之前保存过的路径）→ 命中则直接使用
-2. 用 `AskUserQuestion` 让用户确认，默认选项为 `~/.claude/`：
+检测流程：
+
+1. 检查 `~/.sleuth/config.json` 中的 `profileDir` 字段（之前保存过的路径）→ 命中则直接使用，**跳过步骤 2**
+2. **用 `AskUserQuestion` 强制让用户选择**（不可跳过）：
    - `~/.claude/`（默认 profile）
    - `其他`（用户手动输入路径）
 
@@ -55,6 +57,8 @@ config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解
 ---
 
 ## 操作一：完整设置向导（setup）
+
+**开始前必须先完成「Profile 路径检测」**，确定 `profileDir` 变量后再继续。
 
 ### 阶段 1 — 发现可用工具
 
