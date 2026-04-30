@@ -9,5 +9,5 @@
   "homepage": "https://github.com/xiixiixixi/Sleuth",
   "repository": "https://github.com/xiixiixixi/Sleuth",
   "keywords": ["browser-automation", "agent-browser", "cdp", "chrome", "retrieval", "scraping", "web-research"],
-  "skills": "./"
+  "skills": ["./", "./skills/"]
 }
