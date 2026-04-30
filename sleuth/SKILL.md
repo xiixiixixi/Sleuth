@@ -321,8 +321,9 @@ Agent({
     要求：
     1. 只返回摘要（关键发现 + 来源 URL），不要返回原始页面内容
     2. 重要文件通过 deliver.mjs 保存
-    3. 遇到反爬/CAPTCHA/登录墙，记录到 session log（type: "captcha" / "login_wall" / "paywall"）
-    4. 完成后关闭自己创建的 tab
+    3. 每访问一个重要页面，用 session-logger --action log 记录操作（type: visit + url + title）
+    4. 遇到反爬/CAPTCHA/登录墙，记录到 session log（type: "captcha" / "login_wall" / "paywall"）
+    5. 完成后关闭自己创建的 tab
   `
 })
 ```
