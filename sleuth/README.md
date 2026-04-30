@@ -64,18 +64,7 @@ sleuth/                                    项目根目录
 │   └── site-patterns/                     （已废弃，保留 .gitkeep）
 │       └── .gitkeep
 │
-└── sleuth-output/                         运行时交付文件（gitignore）
-    └── YYYY-MM-DD/
-        ├── <session-id>/                  每个会话一个子目录
-        │   ├── docs/
-        │   ├── images/
-        │   ├── screenshots/
-        │   ├── transcripts/
-        │   ├── data/
-        │   ├── pages/
-        │   ├── traces/
-        │   └── recordings/
-        └── ...
+└── (输出在 ~/.sleuth/output/ 下，不在项目目录中)
 ```
 
 ### 文件说明
@@ -86,7 +75,7 @@ sleuth/                                    项目根目录
 | `scripts/check-deps.mjs` | 348 | 环境验证：检测 agent-browser、Chrome CDP 端口（含自动重启）、输出目录初始化、site-patterns 列表、可选依赖检查 |
 | `scripts/on-stop.mjs` | 179 | Stop hook：finish 未关闭的 session → 为复杂站点（CAPTCHA/登录墙/付费墙/反爬 或 3+ 次访问）创建经验 stub → 关闭残留 tab |
 | `scripts/session-logger.mjs` | 230 | 会话管理：`start`（创建带时间戳 ID 的 JSON）、`log`（追加操作记录）、`finish`（标记 outcome） |
-| `scripts/deliver.mjs` | 231 | 文件交付：复制源文件到 `sleuth-output/<date>/<session-id>/<type>/`，处理文件名冲突 |
+| `scripts/deliver.mjs` | 231 | 文件交付：复制源文件到 `~/.sleuth/output/<date>/<session-id>/<type>/`，处理文件名冲突 |
 | `scripts/cleanup-output.mjs` | 220 | 清理过期输出：日期目录（7 天）、类型子目录中的旧文件、空目录 |
 | `scripts/update-site-stats.mjs` | 427 | 统计聚合：从 session 日志计算域名访问次数、成功率、死链、CAPTCHA 次数、Bayesian 可信度 |
 | `scripts/match-site.mjs` | 46 | 经验匹配：输入域名 → 搜索 site-patterns → 输出匹配的经验内容 |
@@ -115,7 +104,7 @@ sleuth/                                    项目根目录
 │    check-deps.mjs        环境检查 + Chrome 自动重启            │
 │    on-stop.mjs           Stop hook（session/site/tab 清理）   │
 │    session-logger.mjs    会话生命周期管理                      │
-│    deliver.mjs           文件交付到 sleuth-output/             │
+│    deliver.mjs           文件交付到 ~/.sleuth/output/           │
 │    cleanup-output.mjs    过期输出清理（7 天）                  │
 │    update-site-stats.mjs 域名可信度自动评分                    │
 │    match-site.mjs        站点经验匹配                         │
@@ -124,7 +113,7 @@ sleuth/                                    项目根目录
 │    extract-subtitles.sh  播客/视频字幕提取                    │
 │    srt_to_transcript.py  字幕清洗脚本                         │
 │                                                              │
-│  sleuth-output/           运行时交付文件目录                  │
+│  ~/.sleuth/output/       运行时交付文件目录                  │
 │                                                              │
 │  references/          参考文档                                │
 │    tool-guide.md      agent-browser 关键命令速查              │
@@ -152,10 +141,9 @@ sleuth/                                    项目根目录
 
 | 路径 | 用途 |
 |------|------|
-| `sleuth-output/YYYY-MM-DD/<session-id>/` | 会话交付文件（文档、截图、字幕等） |
+| `~/.sleuth/output/YYYY-MM-DD/<session-id>/` | 会话交付文件（文档、截图、字幕等） |
 | `~/.sleuth/sessions/*.json` | 会话日志（操作记录、域名访问、成功/失败） |
 | `~/.sleuth/chrome-debug/` | Chrome CDP 调试 profile（Default 软链接到用户真实 profile） |
-| `~/.sleuth/output/` | 备用输出目录（当前目录不可写时回退） |
 | `~/.sleuth/site-patterns/*.md` | 站点经验文件（YAML frontmatter + 经验正文 + 自动统计） |
 
 ---

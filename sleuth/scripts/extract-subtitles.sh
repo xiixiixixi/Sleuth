@@ -9,7 +9,7 @@
 #
 # 参数：
 #   URL       - 视频/播客链接（必填）
-#   输出目录  - 字幕保存位置（可选，默认 ./sleuth-output/transcripts）
+#   输出目录  - 字幕保存位置（可选，默认 ~/.sleuth/output/transcripts）
 #
 # 策略（按优先级依次尝试）：
 #   1. yt-dlp 提取内嵌人工中文字幕（SRT/VTT）
@@ -26,7 +26,7 @@
 set -euo pipefail
 
 URL="${1:?用法: $0 <URL> [输出目录]}"
-OUTDIR="${2:-./sleuth-output/transcripts}"
+OUTDIR="${2:-$HOME/.sleuth/output/transcripts}"
 
 mkdir -p "$OUTDIR"
 

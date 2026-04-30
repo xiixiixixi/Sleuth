@@ -2,7 +2,7 @@
 /**
  * cleanup-output.mjs — 过期输出文件清理
  *
- * 清理 sleuth-output/ 下超过指定天数的交付文件，避免磁盘空间无限增长。
+ * 清理 ~/.sleuth/output/ 下超过指定天数的交付文件，避免磁盘空间无限增长。
  * 默认保留 7 天，可配置。
  *
  * 用法：
@@ -11,9 +11,8 @@
  *   --days N    保留最近 N 天的输出，默认 7 天
  *   --dry-run   仅列出将删除的目录/文件，不实际删除
  *
- * 清理范围（两个输出目录都会处理）：
- *   1. ./sleuth-output/（项目目录下的输出）
- *   2. ~/.sleuth/output/（备用输出目录）
+ * 清理范围：
+ *   ~/.sleuth/output/
  *
  * 清理策略：
  *   - 日期目录（YYYY-MM-DD/）：如果目录内最新文件的修改时间超过 N 天，整个目录删除
@@ -253,8 +252,7 @@ function main(options = {}) {
 
   // 两个输出目录都处理
   const baseDirs = [
-    path.join(process.cwd(), 'sleuth-output'),  // 项目目录下的输出
-    path.join(homedir(), '.sleuth', 'output'),    // 备用输出目录
+    path.join(homedir(), '.sleuth', 'output'),
   ];
 
   let totalDeleted = 0;

@@ -7,7 +7,7 @@
  * 检查项：
  *   1. agent-browser 是否安装且可用
  *   2. Chrome CDP 远程调试是否可用（如不可用，自动重启 Chrome 开启 CDP）
- *   3. 输出目录是否可写（不可写时自动创建并降级到 ~/.sleuth/output/）
+ *   3. 输出目录自动创建到 ~/.sleuth/output/
  *   4. 过期输出自动清理（调用 cleanup-output.mjs，保留 7 天）
  *   5. 站点经验文件列表展示
  *   6. 可选依赖检查（sqlite3、yt-dlp、python3）

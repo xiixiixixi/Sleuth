@@ -142,7 +142,7 @@ function cmdSave(source, type, name, sid) {
     process.exit(1);
   }
 
-  // 定位输出目录（如 sleuth-output/2026-04-29/abc123/）
+  // 定位输出目录（如 ~/.sleuth/output/2026-04-29/abc123/）
   const outDir = resolveOutputDir(sid);
   const typeSubdir = getTypeSubdir(type);
 
@@ -154,7 +154,7 @@ function cmdSave(source, type, name, sid) {
   // 确定目标目录
   let targetDir = outDir;
   if (typeSubdir) {
-    targetDir = path.join(outDir, typeSubdir); // 如 sleuth-output/.../screenshots/
+    targetDir = path.join(outDir, typeSubdir); // 如 ~/.sleuth/output/.../screenshots/
   }
 
   // 确保目录存在
