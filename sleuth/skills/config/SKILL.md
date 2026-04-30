@@ -45,13 +45,10 @@ config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解
 
 多个操作需要读写当前 profile 的 `settings.local.json`。按以下优先级检测 profile 路径：
 
-1. 检查 `~/.sleuth/config.json` 中的 `profileDir` 字段（之前保存过的路径）
-2. 检查环境变量 `CLAUDE_CONFIG_DIR`
-3. 用 `Bash` 运行 `ls -d ~/.claude*/settings.json 2>/dev/null` 列出所有可能的 profile
-4. 根据步骤 3 的结果判断：
-   - **只找到一个** → 直接使用该路径
-   - **找到多个** → 用 `AskUserQuestion` 让用户选择，选项从扫描结果动态生成
-   - **没找到** → 用 `AskUserQuestion` 让用户手动输入
+1. 检查 `~/.sleuth/config.json` 中的 `profileDir` 字段（之前保存过的路径）→ 命中则直接使用
+2. 用 `AskUserQuestion` 让用户确认，默认选项为 `~/.claude/`：
+   - `~/.claude/`（默认 profile）
+   - `其他`（用户手动输入路径）
 
 检测到路径后，将其保存到 `~/.sleuth/config.json` 的 `profileDir` 字段，后续操作直接使用，不再重复检测。
 
