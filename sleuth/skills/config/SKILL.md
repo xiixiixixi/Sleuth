@@ -34,12 +34,11 @@ allowed-tools: [Read, Write, Bash, AskUserQuestion]
 config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解析到 `skills/config/` 而非插件根目录。
 脚本都在插件根目录的 `scripts/` 下，因此需要先检测插件根目录的绝对路径。
 
-检测方法（按优先级）：
-1. 用 `Bash` 运行 `node -e "console.log(require('path').resolve('${CLAUDE_SKILL_DIR}', '..', '..'))"` 获取插件根目录（从 `skills/config/` 上溯两级）
-2. 验证该路径下存在 `scripts/check-deps.mjs`，如不存在则继续向上查找（再上一级），直到找到或到达用户 home 目录
-3. 将检测到的路径保存到变量 `PLUGIN_ROOT`，后续所有涉及脚本路径的操作都使用此变量
+检测方法（从 `installed_plugins.json` 读取唯一确定路径）：
+1. 用 `Bash` 运行：`cat ~/.claude/plugins/installed_plugins.json | python3 -c "import sys,json; d=json.load(sys.stdin); plugins=d.get('plugins',{}); [print(v[0]['installPath']) for k,v in plugins.items() if 'sleuth' in k and isinstance(v,list)]"`
+2. 将返回的路径保存到变量 `PLUGIN_ROOT`，后续所有涉及脚本路径的操作都使用此变量
 
-**关键**：写入 `settings.local.json` 的 allow 规则必须是**绝对路径字面量**（如 `Bash(node /Users/xxx/.claude/plugins/sleuth-abc/scripts/*.mjs *)`），不能用 `${CLAUDE_SKILL_DIR}` 等变量——`settings.local.json` 不支持变量展开。
+**关键**：写入 `settings.local.json` 的 allow 规则必须是**绝对路径字面量**（如 `Bash(node /Users/xxx/.claude/plugins/cache/sleuth/sleuth/0.1.0/scripts/*.mjs *)`），不能用变量——`settings.local.json` 不支持变量展开。
 
 ## Profile 路径检测
 
