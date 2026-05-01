@@ -76,8 +76,8 @@ config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解
 ### 阶段 2 — 选择封禁项
 
 1. 读取当前 `~/.sleuth/config.json`（如不存在则创建默认配置）
-2. 用 `AskUserQuestion` 展示工具列表，`multiSelect: true`，默认选中 web/搜索类工具
-3. 用户的实际选择写入 `blockedTools` 字段
+2. 用 `AskUserQuestion` 展示工具列表，`multiSelect: true`，默认选中 web/搜索类工具 + 已有的封禁项
+3. **合并（union）而非覆盖**：将用户选择与现有 `blockedTools` 合并去重后写入。不同 profile 的封禁需求会累积，不会互相覆盖丢失
 
 ### 阶段 3 — 配置权限
 

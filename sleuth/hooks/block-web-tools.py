@@ -34,7 +34,6 @@ def load_config():
         with open(CONFIG_PATH, "r") as f:
             return json.load(f)
     except Exception:
-        # 默认值：开启拦截，开启搜索路由，无自定义封禁列表
         return {"blockWebTools": True, "routeSearchIntent": True, "blockedTools": None}
 
 
