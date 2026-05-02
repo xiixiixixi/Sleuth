@@ -28,5 +28,5 @@
 输出文件保留 7 天，check-deps.mjs 自动清理。手动清理：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/cleanup-output.mjs" [--days N] [--dry-run]
+node "${CLAUDE_SKILL_DIR}/../../scripts/cleanup-output.mjs" [--days N] [--dry-run]
 ```

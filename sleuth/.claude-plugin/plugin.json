@@ -1,7 +1,7 @@
 {
   "name": "sleuth",
   "description": "梦里寻 — 联网检索与浏览器操作。教 AI Agent 如何像人一样浏览网页：搜索、阅读、提取、交互，全程在真实浏览器中完成。",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "author": {
     "name": "Wei Xi Li"
   },

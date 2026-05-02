@@ -5,7 +5,7 @@
 按域名存储在 `~/.sleuth/site-patterns/`。确定目标域名后通过 `match-site.mjs` 查找：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/match-site.mjs" "<域名>"
+node "${CLAUDE_SKILL_DIR}/../../scripts/match-site.mjs" "<域名>"
 ```
 
 读取匹配文件获取先验知识。经验标注发现日期，当作提示而非保证。
@@ -36,7 +36,7 @@ updated: 2026-04-27
 操作成功后发现新站点或新模式，主动写入经验文件。只写验证过的事实。
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/update-site-stats.mjs" [--domain <域名>]
+node "${CLAUDE_SKILL_DIR}/../../scripts/update-site-stats.mjs" [--domain <域名>]
 ```
 
 ## 自动统计

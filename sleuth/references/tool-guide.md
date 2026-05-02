@@ -25,7 +25,7 @@ agent-browser --auto-connect open https://example.com
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 &
 
 # 通过 check-deps 自动检测和重启（推荐）
-node check-deps.mjs
+node "${CLAUDE_SKILL_DIR}/../../scripts/check-deps.mjs"
 
 # 方式 1：每条命令带 --auto-connect（推荐）
 agent-browser --auto-connect open https://example.com
