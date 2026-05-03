@@ -411,7 +411,7 @@ async function main(options = {}) {
 
   // ── 检查 3：输出目录 ──
   const outDir = resolveOutputDir();
-  ensureOutputDir(outDir);
+  fs.mkdirSync(outDir, { recursive: true });
   results.outputDir = outDir;
   console.log(`output-dir: ${outDir}`);
 
