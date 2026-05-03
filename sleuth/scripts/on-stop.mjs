@@ -238,8 +238,16 @@ function createSitePatternStubs(domains) {
  */
 function closeBrowserTabs() {
   try {
-    execSync('agent-browser --auto-connect close --all 2>/dev/null', { timeout: 5000, stdio: 'ignore' });
-  } catch { /* 无 tab 或 agent-browser 不可用 */ }
+    // 通过 CDP 协议直接关闭所有 page 类型的 target（Chrome tab）
+    const resp = execSync('curl -s http://127.0.0.1:9222/json/list', { timeout: 3000, encoding: 'utf-8' });
+    const targets = JSON.parse(resp);
+    const pages = targets.filter(t => t.type === 'page' && t.webSocketDebuggerUrl);
+    for (const page of pages) {
+      try {
+        execSync(`curl -s http://127.0.0.1:9222/json/close/${page.id} > /dev/null 2>&1`, { timeout: 2000 });
+      } catch { /* 单个 tab 关闭失败不影响其他 */ }
+    }
+  } catch { /* CDP 不可用（Chrome 未启动） */ }
 }
 
 // ── 主流程 ────────────────────────────────────────────────────────
