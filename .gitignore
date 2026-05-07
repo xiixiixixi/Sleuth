@@ -5,3 +5,4 @@ __pycache__/
 references/site-patterns/**/*.md
 node_modules/
 sleuth-output/
+docs/

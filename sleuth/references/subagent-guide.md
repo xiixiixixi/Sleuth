@@ -80,7 +80,7 @@ agent-browser --auto-connect --session <session-name> tab close 2
 - **Broad → narrow**：先宽搜看量级，太多加限定，太少扩词或中英文各搜
 - **探索式循环**：搜索 → 点进 2-3 个链接 → 不够换词重搜 → 够了停止。同一页 3 个链接不理想就换词
 - **站内搜索**：找到目标网站后用 `site:域名 关键词` 深挖官网博客、投资人页面、媒体报道
-- **读全文后记录**：每读一个重要页面，用 `session-logger --action log` 记录来源 URL
+- **读全文后记录**：每读一个重要页面，用 `session-logger --action log --operation '{"type":"visit","url":"..."}'` 记录来源 URL
 
 ### 搜索引擎选择
 
@@ -111,7 +111,7 @@ agent-browser --auto-connect --session <session-name> open "https://www.google.c
 ### 记录操作（每访问一个重要页面必须调用）
 
 ```bash
-node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" --type visit --url "https://example.com" --title "页面标题"
+node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" --operation '{"type":"visit","url":"https://example.com"}'
 ```
 
 ### 保存交付文件（完成时必须调用）
@@ -149,7 +149,7 @@ node "${SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "${SID}" --
 ## 5. 完成后（按顺序执行）
 
 1. 用 `deliver.mjs --action save --sid ${SID}` 保存关键发现（**必须**）
-2. 每个重要页面用 `session-logger --action log --sid ${SID}` 记录（**必须**）
+2. 每个重要页面用 `session-logger --action log --sid ${SID} --operation '{"type":"visit","url":"..."}'` 记录（**必须**）
 3. 关闭自己创建的 tab
 4. 用 `session-logger --action finish --sid ${SID}` 结束会话（**必须**）
 5. 向主 Agent 返回摘要：关键发现 + 来源 URL 列表

@@ -60,6 +60,16 @@ SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/../../scripts/check-deps.mjs" --output
 node "${CLAUDE_SKILL_DIR}/../../scripts/match-site.mjs" "<域名>"
 ```
 
+### 知识库查询
+
+搜索前查历史知识库，看是否已有相关调研：
+
+```bash
+node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action query --query "原始问题关键词"
+```
+
+结果包含 `matches`（匹配实体 + 历史提取的关键数据）和 `deliver_files`（相关交付文件路径）。有命中时先 Read 交付文件获取完整历史内容，只搜索增量信息。没命中则正常完整搜索。
+
 > 温馨提示：部分站点对浏览器自动化检测严格，存在账号封禁风险。Agent 继续操作即视为接受。
 
 **隐私**：不对敏感页面截图（银行、邮箱、私信），不提取 cookie/密码，不在不知情下执行会产生记录的操作。
@@ -76,21 +86,43 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/match-site.mjs" "<域名>"
 
 1. **复杂问题必须用 `deliver.mjs --action save` 保存文件**。不等全部完成，每积累一批重要发现就保存一次。
 2. **每访问一个重要页面必须用 `session-logger --action log` 记录**。这是站点经验生成的数据源。
-3. **子 Agent 结果增量整合**：收到一个子 Agent 结果就立即写入最终文件，不要等全部子 Agent 完成再一次性整合。每个子 Agent 返回后立刻 Read + Edit。
+3. **子 Agent 整合方式**：子 Agent 各自 deliver 独立文件到 docs/。全部完成后用 `deliver merge` 合并为一个文件，再 Read 合并文件做最终编辑（去重、调整结构、补写总结）。
 
 ## 搜索与发现
 
 sleuth 是你（包括子 Agent）唯一的联网工具。不使用 WebSearch、WebFetch 等外部工具。完整命令参考 `${CLAUDE_SKILL_DIR}/../../references/tool-guide.md`。
 
-### 搜索策略
+### 搜索哲学
 
-- **多角度**：任何主题至少 4-5 个角度互为补充，读到的关键词作为下一角度的搜索词
+**核心信念：信息有栖息地。** 每条信息都有它最可能存在的地方。搜索前先想：这类信息通常住在哪里？
+
+- 技术实现 → 官方文档、GitHub issues、StackOverflow（人在哪里踩坑，答案就在哪里）
+- 产品评价 → 用户自己的阵地（Reddit、Twitter、独立博客），而不是官网或产品页
+- 商业情报 → 数据的权威来源（Crunchbase 融资、LinkedIn 人员、法院/监管文件）
+- 新闻时效 → 离事件发生地最近的渠道（英文新闻先于中文，官方博客先于媒体转载）
+- 争议观点 → 要看正反两面，不能只看一边
+
+**搜索前三问：**
+
+1. "我要找的信息，最有可能最先发布在哪里？" → 决定搜索渠道
+2. "这个信息的权威来源是谁？" → 一手来源 > 二手转载 > 三手总结
+3. "第一个渠道没找到，下一个最可能的地方是哪里？" → 决定搜索顺序，不要机械地轮一遍所有引擎
+
+**搜索纪律：**
+
 - **读全文**：搜索引擎摘要可能过时/截断，必须点进原文
 - **Broad → narrow**：先宽搜看量级，太多加限定，太少扩词或中英文各搜
 - **探索式循环**：搜索 → 点进 2-3 个链接 → 不够换词重搜 → 够了停止。同一页 3 个链接不理想就换词
-- **站内搜索**：找到目标网站后用 `site:域名 关键词` 深挖。官网博客、投资人页面、媒体报道站内搜
-- **视频/播客**：创始人访谈、产品演示、行业分析**必须搜 YouTube**。Google `site:youtube.com` 或直接打开 YouTube 搜索
+- **站内搜索**：找到目标网站后用 `site:域名 关键词` 深挖
 - **多引擎**：英文用 Google，中文用百度。同一关键词不同引擎结果差异大
+
+**反面原则——不要做的事：**
+
+- 不要所有问题都用同一套搜索引擎组合
+- 不要用中文关键词搜只有英文来源的信息（反之亦然）
+- 不要搜技术问题时优先看新闻媒体
+- 不要用通用搜索去找结构化数据（融资数据、人员信息）
+- 不要只搜一次就放弃——换个角度、换个语言、换个平台
 
 ### 可信度与归因
 
@@ -187,9 +219,9 @@ Agent({
 })
 ```
 
-**增量整合**：每收到一个子 Agent 的 background notification 结果，**立即** Read 最终文件 → Edit 写入该子 Agent 的发现。不要等所有子 Agent 完成再整合——每个结果都是一次编辑窗口。
+**结果整合**：所有子 Agent 完成后，执行 `deliver merge` 合并 docs/ 下所有文件，然后 Read 合并文件，做最终编辑（去重、调整章节、补写总结）。如果需要在子 Agent 完成过程中就查看结果，可以提前 Read 单个子 Agent 的 deliver 文件。
 
-主 Agent 等待 background notification 收集结果，每收到一个立即整合，最后去重 + 交叉验证。
+主 Agent 等待 background notification 收集结果，全部完成后 merge + 编辑。
 
 ## 浏览器操作
 
@@ -200,9 +232,13 @@ Agent({
 ### Snapshot-first 工作流
 
 1. `open <url>` → `wait --load networkidle`
-2. `snapshot -i` → 获取 @ref
-3. `click @e3` / `fill @e5` → `wait --load networkidle`
-4. `snapshot -i` → 页面变化后必须重新 snapshot
+2. **自动记录 visit**：每次 open 后执行 session-logger log
+   ```bash
+   node "${CLAUDE_SKILL_DIR}/../../scripts/session-logger.mjs" --action log --sid $SID --operation '{"type":"visit","url":"<刚才打开的URL>"}'
+   ```
+3. `snapshot -i` → 获取 @ref
+4. `click @e3` / `fill @e5` → `wait --load networkidle`
+5. `snapshot -i` → 页面变化后必须重新 snapshot
 
 **@ref 会过期**：页面变化后立即失效，不确定时多 snapshot 一次。
 
@@ -243,14 +279,30 @@ EOF
 - **登录**：先 eval 穿透遮罩，拿不到内容再请用户登录
 - **CAPTCHA**：暂停，告知用户，5 分钟无响应换渠道
 - **限流**：暂停该域名，换渠道或等 30 秒，重试仍限流则放弃
-- **故障**：agent-browser 非零退出 → check-deps；页面超时 → 加 timeout；连续失败 → 换方式
+- **故障**：agent-browser 命令失败时的处理流程：
+  1. 运行 `check-deps` 修复环境（自动检测并重启 Chrome 开启 CDP）
+  2. 修复后重试原 agent-browser 命令
+  3. 仍然失败 → 换渠道（换搜索引擎、换关键词），不要用 curl 替代浏览器
+  4. 页面超时 → 加 timeout；连续失败 → 换方式
 
 ## 任务收尾
 
+**必要步骤**：
 1. 复杂问题通过 `deliver.mjs --action save` 保存文件
-2. 关闭自行创建的 tab（Stop hook 兜底清理残留）
-3. `session-logger --action finish --sid $SID --outcome success|partial|fail`
-4. 发现新模式时写入站点经验
+2. 所有子 Agent 完成后，合并结果并做最终编辑：
+   ```bash
+   node "${CLAUDE_SKILL_DIR}/../../scripts/deliver.mjs" --action merge --sid $SID
+   ```
+   merge 后 Read 合并文件，去重、调整结构、补写总结
+3. 关闭自行创建的 tab（Stop hook 兜底清理残留）
+4. `session-logger --action finish --sid $SID --outcome success|partial|fail`
+
+**可选增强**：
+5. 索引本次调研到知识库（失败不影响任务完成）：
+   ```bash
+   node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action index --sid $SID
+   ```
+6. 发现新模式时写入站点经验
 
 ## 结果交付
 
@@ -268,8 +320,10 @@ EOF
 ```bash
 node "${CLAUDE_SKILL_DIR}/../../scripts/deliver.mjs" --action save \
   --type <doc|screenshot|image|transcript|data|page> \
-  --source <源文件> --name <文件名> --sid $SID
+  --source <源文件> --name <文件名> --url <来源URL> --sid $SID
 ```
+
+`--url` 是该文件内容来源的网页 URL，用于站点经验系统关联域名。
 
 ## 站点经验
 

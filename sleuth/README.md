@@ -1,6 +1,6 @@
-# sleuth -- 梦里寻
+# Sleuth — 梦里寻
 
-一个 Claude Code Skill，教 AI Agent 如何像人一样浏览网页。
+Claude Code 插件，教 AI Agent 如何像人一样浏览网页。
 
 **agent-browser 负责「怎么操作浏览器」，sleuth 负责「什么时候该用浏览器、该怎么做」。**
 
@@ -12,7 +12,6 @@
 - [目录结构](#目录结构)
 - [架构](#架构)
 - [安装与配置](#安装与配置)
-- [Claude Code 配置详解](#claude-code-配置详解)
 - [依赖](#依赖)
 - [核心设计](#核心设计)
 - [安全性与自学习](#安全性与自学习)
@@ -32,56 +31,48 @@
 ## 目录结构
 
 ```
-sleuth/                                    项目根目录
-├── SKILL.md                               ★ Skill 定义（631 行）：决策框架、工具选择、工作流、规则
-├── README.md                              本文件
-├── LICENSE                                MIT
-├── .gitignore
+sleuth/                                    插件根目录
+├── .claude-plugin/
+│   └── plugin.json                        插件元数据（名称、版本、作者、标签）
 │
-├── .claude-plugin/                        Claude Code 插件注册
-│   ├── plugin.json                        插件元数据（名称、版本、作者、标签）
-│   └── marketplace.json                   市场注册信息
+├── hooks/
+│   ├── hooks.json                         注册 3 个 hook（PreToolUse / UserPromptSubmit / Stop）
+│   ├── block-web-tools.py                 PreToolUse hook：拦截封禁列表中的工具
+│   └── route-search-intent.py             UserPromptSubmit hook：检测搜索意图路由到 /sleuth
 │
-├── scripts/                               辅助工具（Node.js ESM / Bash / Python）
+├── skills/
+│   ├── sleuth/
+│   │   └── SKILL.md                       主 skill：搜索/调研/浏览器操作完整流程
+│   └── config/
+│       └── SKILL.md                       配置 skill：/sleuth:config 设置向导
+│
+├── scripts/
 │   ├── lib/
 │   │   └── output.mjs                     共享输出工具：路径解析、目录创建、类型映射
-│   │
 │   ├── check-deps.mjs                     环境检查：agent-browser + Chrome CDP + 可选依赖
-│   ├── on-stop.mjs                        Stop hook：关闭 orphan session、记录复杂站点经验、关闭残留 tab
+│   ├── on-stop.mjs                        Stop hook：关闭 orphan session、关闭残留 tab、站点经验
 │   ├── session-logger.mjs                 会话生命周期：start / log / finish
-│   ├── deliver.mjs                        文件交付：save / list / init
+│   ├── deliver.mjs                        文件交付：save / list
 │   ├── cleanup-output.mjs                 过期输出清理（默认 7 天）
 │   ├── update-site-stats.mjs              域名可信度自动评分（Bayesian）
 │   ├── match-site.mjs                     站点经验匹配：查询域名 → 输出经验内容
 │   ├── find-url.mjs                       Chrome 书签 / 历史搜索（SQLite）
-│   │
 │   ├── download_subtitles.sh              YouTube 字幕下载（yt-dlp）
 │   ├── extract-subtitles.sh               通用字幕提取（视频 / 播客）
 │   └── srt_to_transcript.py               SRT/VTT 字幕清洗为纯文本
 │
-├── references/                            参考文档
+├── references/
 │   ├── tool-guide.md                      agent-browser 命令速查
-│   └── site-patterns/                     （已废弃，保留 .gitkeep）
-│       └── .gitkeep
+│   ├── subagent-guide.md                  子 Agent 叶子执行者手册
+│   ├── cache-guide.md                     缓存判定与时效性规则
+│   ├── content-extraction.md              内容提取（视频/音频/PDF/图片）
+│   ├── obstacle-handling.md               障碍处理（登录/CAPTCHA/限流/故障）
+│   ├── site-experience.md                 站点经验文件格式与统计
+│   └── site-patterns/.gitkeep             占位（实际经验存 ~/.sleuth/site-patterns/）
 │
-└── (输出在 ~/.sleuth/output/ 下，不在项目目录中)
+├── README.md                              本文件
+└── LICENSE                                MIT
 ```
-
-### 文件说明
-
-| 文件 | 行数 | 职责 |
-|------|------|------|
-| `SKILL.md` | 631 | Skill 核心：问题分诊（简单/复杂）、cache-first 策略、Plan Mode 两阶段调研、子 Agent 并行模板、snapshot-first 工作流、内容提取规则、障碍处理、交付规范、站点经验 |
-| `scripts/check-deps.mjs` | 348 | 环境验证：检测 agent-browser、Chrome CDP 端口（含自动重启）、输出目录初始化、site-patterns 列表、可选依赖检查 |
-| `scripts/on-stop.mjs` | 179 | Stop hook：finish 未关闭的 session → 为复杂站点（CAPTCHA/登录墙/付费墙/反爬 或 3+ 次访问）创建经验 stub → 关闭残留 tab |
-| `scripts/session-logger.mjs` | 230 | 会话管理：`start`（创建带时间戳 ID 的 JSON）、`log`（追加操作记录）、`finish`（标记 outcome） |
-| `scripts/deliver.mjs` | 231 | 文件交付：复制源文件到 `~/.sleuth/output/<date>/<session-id>/<type>/`，处理文件名冲突 |
-| `scripts/cleanup-output.mjs` | 220 | 清理过期输出：日期目录（7 天）、类型子目录中的旧文件、空目录 |
-| `scripts/update-site-stats.mjs` | 427 | 统计聚合：从 session 日志计算域名访问次数、成功率、死链、CAPTCHA 次数、Bayesian 可信度 |
-| `scripts/match-site.mjs` | 46 | 经验匹配：输入域名 → 搜索 site-patterns → 输出匹配的经验内容 |
-| `scripts/find-url.mjs` | 218 | Chrome 书签/历史搜索：支持关键词、时间窗口、排序、书签/历史分离 |
-| `scripts/lib/output.mjs` | 65 | 共享工具：`resolveOutputDir(sid)`、`ensureOutputDir()`、`TYPE_SUBDIR_MAP` |
-| `references/tool-guide.md` | 235 | agent-browser 命令速查：导航、阅读、交互、等待、截图、数据提取、Tab/Session 管理 |
 
 ---
 
@@ -91,7 +82,7 @@ sleuth/                                    项目根目录
 ┌──────────────────────────────────────────────────────────────┐
 │                      sleuth (Skill)                           │
 │                                                              │
-│  SKILL.md             决策框架 & 工作流                       │
+│  skills/sleuth/SKILL.md  决策框架 & 工作流                    │
 │                        · 问题分诊（简单 vs 复杂）              │
 │                        · Cache-first + 时效性分层              │
 │                        · Plan Mode（广度 → 深度两阶段）        │
@@ -99,25 +90,31 @@ sleuth/                                    项目根目录
 │                        · Snapshot-first 工作流                │
 │                        · 障碍处理 + 交付规范                   │
 │                                                              │
+│  skills/config/SKILL.md  配置向导                             │
+│                        · /sleuth:config setup|show|...        │
+│                                                              │
+│  hooks/               Hook 自动注册                          │
+│    block-web-tools.py     PreToolUse: 拦截封禁工具            │
+│    route-search-intent.py UserPromptSubmit: 搜索意图路由      │
+│                                                              │
 │  scripts/             辅助工具（跨平台）                       │
 │    lib/output.mjs        路径解析 & 类型映射                   │
 │    check-deps.mjs        环境检查 + Chrome 自动重启            │
-│    on-stop.mjs           Stop hook（session/site/tab 清理）   │
+│    on-stop.mjs           Stop hook（session/tab 清理）        │
 │    session-logger.mjs    会话生命周期管理                      │
 │    deliver.mjs           文件交付到 ~/.sleuth/output/           │
 │    cleanup-output.mjs    过期输出清理（7 天）                  │
 │    update-site-stats.mjs 域名可信度自动评分                    │
 │    match-site.mjs        站点经验匹配                         │
 │    find-url.mjs          Chrome 书签/历史搜索                  │
-│    download_subtitles.sh YouTube 字幕下载                     │
-│    extract-subtitles.sh  播客/视频字幕提取                    │
-│    srt_to_transcript.py  字幕清洗脚本                         │
 │                                                              │
-│  ~/.sleuth/output/       运行时交付文件目录                  │
-│                                                              │
-│  references/          参考文档                                │
-│    tool-guide.md      agent-browser 关键命令速查              │
-│    site-patterns/     （已废弃，实际存 ~/.sleuth/site-patterns/） │
+│  references/          参考文档（Agent 运行时按需读取）         │
+│    tool-guide.md          agent-browser 命令速查              │
+│    subagent-guide.md      子 Agent 执行手册                   │
+│    cache-guide.md         缓存判定规则                        │
+│    content-extraction.md  内容提取场景                        │
+│    obstacle-handling.md   障碍处理指南                        │
+│    site-experience.md     站点经验格式                        │
 │                                                              │
 │  .claude-plugin/      Claude Code 插件注册                    │
 └──────────────────────────────────────────────────────────────┘
@@ -145,6 +142,7 @@ sleuth/                                    项目根目录
 | `~/.sleuth/sessions/*.json` | 会话日志（操作记录、域名访问、成功/失败） |
 | `~/.sleuth/chrome-debug/` | Chrome CDP 调试 profile（Default 软链接到用户真实 profile） |
 | `~/.sleuth/site-patterns/*.md` | 站点经验文件（YAML frontmatter + 经验正文 + 自动统计） |
+| `~/.sleuth/config.json` | 运行时配置（封禁工具列表、开关状态） |
 
 ---
 
@@ -164,14 +162,12 @@ sleuth/                                    项目根目录
 ### 快速安装
 
 ```bash
-# 1. 克隆到任意位置
-git clone <repo-url> ~/git/sleuth
+# 1. 安装插件
+claude plugin install sleuth
 
-# 2. 安装 agent-browser
-npm i -g agent-browser && agent-browser install
-
-# 3. 检查环境
-node ~/git/sleuth/scripts/check-deps.mjs
+# 2. 运行配置向导（发现工具、选择封禁、配置权限）
+# 在 Claude Code 中执行:
+/sleuth:config setup
 ```
 
 ### Chrome CDP 连接
@@ -185,7 +181,6 @@ Chrome 147+ 要求非默认 `--user-data-dir` 才能开启远程调试。`check-
 如需手动启动：
 
 ```bash
-# macOS
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --remote-debugging-port=9222 \
   --user-data-dir=$HOME/.sleuth/chrome-debug \
@@ -194,39 +189,13 @@ Chrome 147+ 要求非默认 `--user-data-dir` 才能开启远程调试。`check-
 
 ---
 
-## Claude Code 配置详解
-
-sleuth 以 Claude Code 插件形式分发，hooks 自动注册，无需手动配置 settings.json。
-
-### 配置文件位置
-
-Claude Code 使用 `~/.claude/`（默认 profile）或 `~/.claude-<profile>/`（命名 profile）存放配置：
-
-```
-~/.claude/                           或 ~/.claude-<profile>/
-├── settings.json                    全局设置（hooks、模型、插件）
-└── settings.local.json              本地权限（allow / deny 规则）
-```
-
-### 插件自动注册
-
-安装插件后，以下 hooks 自动生效（由 `hooks/hooks.json` 注册，使用 `${CLAUDE_PLUGIN_ROOT}` 定位脚本）：
-
-| Hook | 事件 | 脚本 | 作用 |
-|------|------|------|------|
-| PreToolUse | 工具调用前 | `hooks/block-web-tools.py` | 拦截封禁列表中的 Web 工具 |
-| UserPromptSubmit | 用户输入后 | `hooks/route-search-intent.py` | 检测搜索意图，路由到 sleuth |
-| Stop | 对话结束 | `scripts/on-stop.mjs` | 清理 session、记录站点经验、关闭 tab |
-
-### 交互配置向导
+## 交互配置向导
 
 运行 `/sleuth:config setup` 完成以下配置：
 
 1. **发现可用工具**：扫描 MCP 配置，列出所有可用工具
 2. **选择封禁项**：勾选要拦截的 Web/搜索类工具（默认选中推荐项）
 3. **配置权限**：向 `settings.local.json` 添加 allow 规则（agent-browser、curl、scripts）
-
-向导会自动检测你的 profile 目录，并将检测结果保存到 `~/.sleuth/config.json`。
 
 其他配置命令：
 
@@ -246,17 +215,6 @@ Claude Code 使用 `~/.claude/`（默认 profile）或 `~/.claude-<profile>/`（
 | **工具拦截** | PreToolUse hook 拒绝封禁列表中的工具调用 | `hooks/block-web-tools.py` |
 | **权限兜底** | settings.local.json deny 列表阻止内置 Web 工具 | 由 config 向导写入 |
 
-### 验证配置
-
-```bash
-# 1. 验证环境
-node /path/to/sleuth/scripts/check-deps.mjs
-
-# 2. 在 Claude Code 中验证
-#    输入 /sleuth → 应看到 SKILL.md 内容
-#    输入 /sleuth:config show → 应显示当前配置
-```
-
 ---
 
 ## 核心设计
@@ -273,11 +231,10 @@ node /path/to/sleuth/scripts/check-deps.mjs
 ### Snapshot-first 工作流
 
 ```
-1. agent-browser open <url>         # 打开页面
-2. agent-browser snapshot -i        # 获取交互元素 @ref
-3. agent-browser click @e3          # 基于 ref 操作
-4. agent-browser snapshot -i        # 页面变化后重新快照
-5. agent-browser fill @e5 "text"    # 继续操作
+1. agent-browser --auto-connect open <url>   # 打开页面
+2. agent-browser --auto-connect snapshot -i  # 获取交互元素 @ref
+3. agent-browser --auto-connect click @e3    # 基于 ref 操作
+4. agent-browser --auto-connect snapshot -i  # 页面变化后重新快照
 ```
 
 @ref 每次 snapshot 重新分配，页面变化后立即失效 — 操作前必须重新 snapshot。

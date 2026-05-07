@@ -2,10 +2,10 @@
 /**
  * deliver.mjs — 文件交付工具
  *
- * 统一管理 sleuth 调研产物的文件保存、列表和目录初始化。
+ * 统一管理 sleuth 调研产物的文件保存、列表、目录初始化和文档合并。
  * 所有交付文件按 日期/session/类型 三级目录组织。
  *
- * 三个子命令：
+ * 四个子命令：
  *
  *   save — 保存文件到输出目录
  *     用法：node deliver.mjs --action save --source <源文件> --type <类型> --name <文件名> --sid <session-id>
@@ -24,13 +24,22 @@
  *     用法：node deliver.mjs --action init --sid <session-id>
  *     输出：输出目录的绝对路径
  *
+ *   merge — 合并 docs/ 下所有 .md 文件为一个文件
+ *     用法：node deliver.mjs --action merge --sid <session-id> [--name <文件名>]
+ *     功能：
+ *       1. 扫描 docs/*.md 文件，按文件名排序
+ *       2. 逐文件读取，文件之间插入分隔标题
+ *       3. 写入合并文件到 docs/ 目录
+ *       4. 如果提供了 sid，记录到 session 日志
+ *     输出：合并文件的绝对路径（stdout）
+ *
  * 文件类型与子目录映射（来自 lib/output.mjs）：
  *   screenshot → screenshots/    image → images/    doc → docs/
  *   transcript → transcripts/    data → data/       page → pages/
  *   trace → traces/              recording → recordings/
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -130,7 +139,7 @@ function extractDomainFromPath(filePath) {
  *   5. 输出目标路径到 stdout
  *   6. 如果有 sid → 调用 session-logger.mjs 记录 type=deliver 操作
  */
-function cmdSave(source, type, name, sid) {
+function cmdSave(source, type, name, sid, url) {
   if (!source) {
     console.error('Error: --source is required for action "save"');
     process.exit(2);
@@ -177,7 +186,9 @@ function cmdSave(source, type, name, sid) {
 
   // 可选：记录交付操作到 session 日志
   if (sid) {
-    const domain = extractDomainFromPath(source);
+    let domain;
+    if (url) { try { domain = new URL(url).hostname; } catch { /* fallback */ } }
+    if (!domain) domain = extractDomainFromPath(source);
     // 构造 operation 记录
     const op = JSON.stringify({
       type: 'deliver',
@@ -255,6 +266,76 @@ function walk(baseDir, currentDir, result) {
   }
 }
 
+// ── 子命令：merge ─────────────────────────────────────────────────
+
+/**
+ * merge 命令：将 docs/ 目录下所有 .md 文件合并为一个文件。
+ *
+ * 流程：
+ *   1. 定位 session 输出目录
+ *   2. 扫描 docs/*.md，按文件名排序
+ *   3. 逐文件读取，文件之间插入分隔标题
+ *   4. 写入合并文件到 docs/ 目录
+ *   5. 如果有 sid → 记录到 session 日志
+ *   6. 输出合并文件绝对路径
+ */
+function cmdMerge(sid, name) {
+  const outDir = resolveOutputDir(sid);
+  const docsDir = path.join(outDir, 'docs');
+
+  if (!existsSync(docsDir)) {
+    console.error('Error: docs/ directory not found');
+    process.exit(1);
+  }
+
+  const mergedName = name || 'merged-report.md';
+
+  // 扫描 docs/ 下所有 .md 文件，按文件名排序（排除合并目标文件自身）
+  const files = readdirSync(docsDir)
+    .filter(f => f.endsWith('.md') && f !== mergedName && statSync(path.join(docsDir, f)).isFile())
+    .sort();
+
+  if (files.length === 0) {
+    console.error('Error: no .md files found in docs/');
+    process.exit(1);
+  }
+
+  // 合并：文件之间插入分隔标题
+  const parts = [];
+  for (const file of files) {
+    const content = readFileSync(path.join(docsDir, file), 'utf-8');
+    parts.push(`## 来源: ${file}\n\n${content}`);
+  }
+  const mergedContent = parts.join('\n\n---\n\n');
+
+  // 写入合并文件
+  const mergedPath = path.join(docsDir, mergedName);
+  writeFileSync(mergedPath, mergedContent, 'utf-8');
+  console.log(mergedPath);
+
+  // 记录到 session 日志
+  if (sid) {
+    const domain = extractDomainFromPath(outDir);
+    const op = JSON.stringify({
+      type: 'deliver',
+      content_type: 'doc',
+      file: mergedPath,
+      source: files.join(', '),
+      merged_from: files.length,
+      ...(domain && { domain }),
+    });
+    try {
+      execFileSync(
+        'node',
+        [SESSION_LOGGER, '--action', 'log', '--sid', sid, '--operation', op],
+        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 }
+      );
+    } catch (err) {
+      console.warn(`Warning: session logging failed: ${err.message}`);
+    }
+  }
+}
+
 // ── 子命令：init ──────────────────────────────────────────────────
 
 /** init 命令：初始化输出目录结构（创建所有子目录），输出路径。 */
@@ -274,28 +355,30 @@ async function main() {
       source: { type: 'string' },  // save 时的源文件路径
       name:   { type: 'string' },  // save 时的目标文件名（可选）
       sid:    { type: 'string' },  // session ID
+      url:    { type: 'string' },  // save 时的来源 URL
       help:   { type: 'boolean', short: 'h' },
     },
   });
 
   if (values.help) {
-    console.log('Usage: node deliver.mjs --action <save|list|init> [options]');
-    console.log('  --action save   --source <path> [--type <type>] [--name <name>] [--sid <id>]');
+    console.log('Usage: node deliver.mjs --action <save|list|init|merge> [options]');
+    console.log('  --action save   --source <path> [--type <type>] [--name <name>] [--url <来源URL>] [--sid <id>]');
     console.log('  --action list   [--sid <id>]');
     console.log('  --action init   [--sid <id>]');
+    console.log('  --action merge  --sid <id> [--name <filename>]');
     console.log('');
     console.log('Content types: ' + Object.keys(TYPE_SUBDIR_MAP).join(', '));
     return;
   }
 
   if (!values.action) {
-    console.error('Error: --action is required. Must be save, list, or init.');
+    console.error('Error: --action is required. Must be save, list, init, or merge.');
     process.exit(2);
   }
 
   switch (values.action) {
     case 'save':
-      cmdSave(values.source, values.type, values.name, values.sid);
+      cmdSave(values.source, values.type, values.name, values.sid, values.url);
       break;
     case 'list':
       cmdList(values.sid);
@@ -303,8 +386,11 @@ async function main() {
     case 'init':
       cmdInit(values.sid);
       break;
+    case 'merge':
+      cmdMerge(values.sid, values.name);
+      break;
     default:
-      console.error(`Error: unknown action "${values.action}". Must be save, list, or init.`);
+      console.error(`Error: unknown action "${values.action}". Must be save, list, init, or merge.`);
       process.exit(2);
   }
 }
