@@ -351,8 +351,7 @@ function cmdQuery(query) {
     return;
   }
 
-  const matches = [];
-  const matchedSessions = new Set();
+  const scored = [];
 
   for (const [name, ent] of Object.entries(entities)) {
     // 拼接所有可搜索文本
@@ -363,19 +362,28 @@ function cmdQuery(query) {
       ...(ent.related || []),
     ].join(' ').toLowerCase();
 
-    // 所有关键词都必须匹配
-    const allMatch = keywords.every(kw => searchText.includes(kw));
-    if (allMatch) {
-      matches.push({
-        name,
-        type: ent.type,
-        facts: ent.facts || [],
-        sessions: ent.sessions || [],
-        related: ent.related || [],
-      });
-      for (const s of (ent.sessions || [])) {
-        matchedSessions.add(s);
-      }
+    // 任一关键词命中即匹配，按命中数排序
+    const hitCount = keywords.filter(kw => searchText.includes(kw)).length;
+    if (hitCount > 0) {
+      scored.push({ name, ent, hitCount });
+    }
+  }
+
+  // 按命中数降序排列
+  scored.sort((a, b) => b.hitCount - a.hitCount);
+
+  const matches = [];
+  const matchedSessions = new Set();
+  for (const { name, ent } of scored) {
+    matches.push({
+      name,
+      type: ent.type,
+      facts: ent.facts || [],
+      sessions: ent.sessions || [],
+      related: ent.related || [],
+    });
+    for (const s of (ent.sessions || [])) {
+      matchedSessions.add(s);
     }
   }
 
