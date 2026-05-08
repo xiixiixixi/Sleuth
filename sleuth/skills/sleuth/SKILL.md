@@ -306,16 +306,39 @@ EOF
 
 ## 结果交付
 
-**简单问题**直接内联回复。**复杂问题必须通过 deliver.mjs 保存至少一个文件。**
+**三种交付模式，按用户需求选择：**
 
-| 内容类型 | 交付方式 |
-|---------|---------|
-| 调研报告/总结 | **docs/（必须）** + 内联预览 |
-| 网页文本/摘要 | 内联 + 来源 URL |
-| 图片 | images/ |
-| 视频字幕 | transcripts/ |
-| 截图证据 | screenshots/ |
-| 结构化数据 | data/（>10 行写文件） |
+### 简单问题 → 直接内联回复
+
+不需要文件交付，直接在对话中给出答案。标注来源 URL。
+
+### 复杂问题（用户未指定格式）→ 完整内容回复
+
+复杂问题必须通过 deliver.mjs 保存文件到 output 目录。**但回复不能只给文件路径**，必须把核心内容完整展示给用户：
+
+1. 用 deliver save 保存完整报告到 output
+2. Read 保存的报告文件
+3. 在回复中**完整呈现**报告内容（不是摘要，不是路径）
+4. 格式清晰：标题、分段、表格、来源 URL
+
+### 复杂问题（用户指定格式）→ 生成文档到当前目录
+
+用户明确要求 ppt、pdf、md 等格式时：
+
+1. 先按正常流程完成调研、deliver save 到 output
+2. 在**用户当前工作目录**生成指定格式的文件：
+   - md → 直接 Write 到 cwd
+   - html → 用 Write 生成 HTML 文件到 cwd
+   - 其他格式 → 说明限制，建议 md 或 html 替代
+3. 回复中告知文件路径和简要内容摘要
+
+```bash
+node "${CLAUDE_SKILL_DIR}/../../scripts/deliver.mjs" --action save \
+  --type <doc|screenshot|image|transcript|data|page> \
+  --source <源文件> --name <文件名> --url <来源URL> --sid $SID
+```
+
+`--url` 是该文件内容来源的网页 URL，用于站点经验系统关联域名。
 
 ```bash
 node "${CLAUDE_SKILL_DIR}/../../scripts/deliver.mjs" --action save \

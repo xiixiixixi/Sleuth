@@ -117,13 +117,13 @@ node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" --ope
 ### 保存交付文件（完成时必须调用）
 
 ```bash
-# 从 stdin 保存（推荐）
-cat <<'CONTENT' | node "${SKILL_DIR}/scripts/deliver.mjs" --action save --source /dev/stdin --type doc --name "report-name" --sid "${SID}"
+# 从 stdin 保存（推荐）— --url 传入内容来源的网页 URL
+cat <<'CONTENT' | node "${SKILL_DIR}/scripts/deliver.mjs" --action save --source /dev/stdin --type doc --name "report-name" --url "来源页面URL" --sid "${SID}"
 你的调研内容...
 CONTENT
 
 # 从文件保存
-node "${SKILL_DIR}/scripts/deliver.mjs" --action save --source /tmp/report.md --type doc --name "report-name" --sid "${SID}"
+node "${SKILL_DIR}/scripts/deliver.mjs" --action save --source /tmp/report.md --type doc --name "report-name" --url "来源页面URL" --sid "${SID}"
 ```
 
 ### 结束会话（完成时必须调用）
