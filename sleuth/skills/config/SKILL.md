@@ -38,7 +38,7 @@ config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解
 1. 用 `Bash` 运行：`cat ~/.claude/plugins/installed_plugins.json | python3 -c "import sys,json; d=json.load(sys.stdin); plugins=d.get('plugins',{}); [print(v[0]['installPath']) for k,v in plugins.items() if 'sleuth' in k and isinstance(v,list)]"`
 2. 将返回的路径保存到变量 `PLUGIN_ROOT`，后续所有涉及脚本路径的操作都使用此变量
 
-**关键**：写入 `settings.local.json` 的 allow 规则必须是**绝对路径字面量**（如 `Bash(node /Users/xxx/.claude/plugins/cache/sleuth/sleuth/0.1.0/scripts/*.mjs *)`），不能用变量——`settings.local.json` 不支持变量展开。
+**关键**：写入 `settings.local.json` 的 allow 规则必须是**绝对路径字面量**，版本号目录用 `*` 通配符（如 `Bash(node /Users/xxx/.claude/plugins/cache/sleuth/sleuth/*/scripts/*.mjs *)`），这样插件更新后权限不会失效。不能用变量——`settings.local.json` 不支持变量展开。
 
 ## Profile 路径检测
 
@@ -83,13 +83,13 @@ config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解
 1. 按"Profile 路径检测"流程确认 profile 目录
 2. 读取 `{profileDir}/settings.local.json`（如不存在则创建空结构）
 3. 按"插件根目录检测"流程获取 `PLUGIN_ROOT` 绝对路径
-4. 计算需要添加的 allow 规则（注意：必须用绝对路径字面量，不能包含变量）：
+4. 计算需要添加的 allow 规则。**版本目录用 `*` 通配符**，这样插件更新后权限不会失效：
    ```
    Bash(agent-browser *)
-   Bash(node {PLUGIN_ROOT}/scripts/*.mjs *)
+   Bash(node {PLUGIN_CACHE_DIR}/sleuth/sleuth/*/scripts/*.mjs *)
    Bash(curl http://127.0.0.1:9*)
    ```
-   其中 `{PLUGIN_ROOT}` 替换为检测到的实际绝对路径
+   其中 `{PLUGIN_CACHE_DIR}` 是插件缓存根目录（如 `/Users/xxx/.claude/plugins/cache`），从 `PLUGIN_ROOT` 提取（取 `sleuth/sleuth/` 的父目录）
 4. 如规则已存在则跳过
 5. 用 `AskUserQuestion` 展示将要写入的规则，请求用户确认
 6. 用户确认后，用 `Write` 工具写入更新后的 `settings.local.json`
