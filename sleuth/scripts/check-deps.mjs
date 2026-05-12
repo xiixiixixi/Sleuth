@@ -144,6 +144,33 @@ async function detectChromePort() {
 // ── agent-browser 检查 ─────────────────────────────────────────────
 
 /**
+ * 判断当前运行的 Chrome 是否由 sleuth 启动。
+ * sleuth 启动的 Chrome 使用 --user-data-dir 指向 ~/.sleuth/chrome-debug/。
+ *
+ * @returns {boolean} true = sleuth 启动的 Chrome
+ */
+function isSleuthChrome() {
+  try {
+    if (os.platform() === 'win32') {
+      // Windows: 用 wmic 获取命令行参数
+      const out = execSync('wmic process where "name=\'chrome.exe\'" get commandline /format:list', {
+        encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return out.includes('remote-debugging') && out.includes('chrome-debug');
+    }
+    // macOS/Linux: ps aux 逐行检查
+    const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
+    return ps.split('\n').some(line =>
+      /chrome/i.test(line) && /remote-debugging/.test(line) && /chrome-debug/.test(line)
+    );
+  } catch {
+    return false;
+  }
+}
+
+// ── agent-browser 检查 ─────────────────────────────────────────────
+
+/**
  * 检测 agent-browser 是否已安装。
  * 通过执行 `agent-browser --version` 验证。
  *
@@ -210,10 +237,17 @@ function getDefaultChromeProfile() {
 /** 检测 Chrome 进程是否正在运行 */
 function isChromeRunning() {
   try {
-    const cmd = os.platform() === 'win32'
-      ? 'tasklist /FI "IMAGENAME eq chrome.exe" /NH'
-      : 'pgrep -x "Google Chrome" || pgrep -x "chrome" || pgrep -x "chromium"';
-    const out = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 });
+    if (os.platform() === 'win32') {
+      // Windows: tasklist 输出含 chrome.exe 才算运行（过滤掉标题行和"No tasks"提示）
+      const out = execSync('tasklist /FI "IMAGENAME eq chrome.exe" /NH', {
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000,
+      });
+      return /chrome\.exe/i.test(out);
+    }
+    // macOS/Linux
+    const out = execSync('pgrep -x "Google Chrome" || pgrep -x "chrome" || pgrep -x "chromium"', {
+      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000,
+    });
     return out.trim().length > 0;
   } catch {
     return false;
@@ -255,8 +289,11 @@ async function restartChromeWithCDP(port = 9222) {
       if (os.platform() === 'darwin') {
         // macOS: 用 AppleScript 优雅退出（会保存标签页等）
         execSync('osascript -e \'tell application "Google Chrome" to quit\'', { timeout: 10000 });
+      } else if (os.platform() === 'win32') {
+        // Windows: 用 taskkill 优雅关闭
+        execSync('taskkill /IM chrome.exe', { timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
       } else {
-        // Linux/Windows: 发信号关闭
+        // Linux: 发信号关闭
         execSync('pkill -x "Google Chrome" 2>/dev/null || pkill -x "chrome" 2>/dev/null || pkill -x "chromium" 2>/dev/null', { timeout: 10000 });
       }
     } catch { /* 强制关闭的兜底 */ }
@@ -284,7 +321,9 @@ async function restartChromeWithCDP(port = 9222) {
     const realDefault = path.join(defaultProfile, 'Default');
     try {
       if (!fs.existsSync(linkPath) && fs.existsSync(realDefault)) {
-        fs.symlinkSync(realDefault, linkPath);
+        // Windows: junction 不需要管理员权限；Unix: symlink
+        const type = os.platform() === 'win32' ? 'junction' : undefined;
+        fs.symlinkSync(realDefault, linkPath, type);
       }
     } catch { /* 软链接可能已存在或平台不支持 */ }
   }
@@ -393,20 +432,40 @@ async function main(options = {}) {
     results.chromePort = chromePort;
     console.log(`chrome: ok (port ${chromePort})`);
   } else {
-    // CDP 不可用 → 尝试自动重启 Chrome
-    console.log('chrome: CDP 不可用，正在自动重启 Chrome...');
-    const ok = await restartChromeWithCDP(9222);
-    if (ok) {
-      chromePort = 9222;
-      results.chromePort = chromePort;
-      console.log(`chrome: ok (port ${chromePort})`);
+    // CDP 不可用 → 区分 sleuth Chrome 和用户 Chrome
+    if (isSleuthChrome()) {
+      // sleuth 启动的 Chrome → 可以安全重启
+      console.log('chrome: sleuth Chrome CDP 不可用，正在重启...');
+      const ok = await restartChromeWithCDP(9222);
+      if (ok) {
+        chromePort = 9222;
+        results.chromePort = chromePort;
+        console.log(`chrome: ok (port ${chromePort})`);
+      } else {
+        results.chromePort = null;
+        console.log('chrome: 重启失败');
+      }
     } else {
+      // 用户的 Chrome → 不重启，提示手动开启 CDP
       results.chromePort = null;
-      console.log('chrome: 自动重启失败 — 请手动执行:');
-      console.log('  1. 完全退出 Chrome');
-      console.log('  2. 运行: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 &');
-      console.log('  3. 重新运行 check-deps');
+      console.log('chrome: 用户 Chrome 未开启 CDP，不会自动重启（避免影响用户会话）');
+      console.log('chrome: 如需启用，请退出 Chrome 后重试，sleuth 将以调试模式启动');
     }
+  }
+
+  // ── 检查 2.5：记录初始 tab ID（Stop hook 用于区分用户 tab 和 sleuth tab）──
+  if (chromePort) {
+    try {
+      const sleuthDir = path.join(os.homedir(), '.sleuth');
+      if (!fs.existsSync(sleuthDir)) fs.mkdirSync(sleuthDir, { recursive: true });
+
+      const resp = await fetch(`http://127.0.0.1:${chromePort}/json/list`, { signal: AbortSignal.timeout(3000) });
+      const targets = await resp.json();
+      const pageIds = targets.filter(t => t.type === 'page').map(t => t.id);
+      const markerPath = path.join(sleuthDir, `.initial-tabs-${Date.now()}.json`);
+      // 结构化数据：包含端口号和 tab ID 列表
+      fs.writeFileSync(markerPath, JSON.stringify({ port: chromePort, tabIds: pageIds }), 'utf-8');
+    } catch { /* CDP 不可用则跳过 */ }
   }
 
   // ── 检查 3：输出目录 ──

@@ -42,28 +42,30 @@ config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解
 
 ## Profile 路径检测
 
-多个操作需要读写当前 profile 的 `settings.local.json`。**必须先确认 profile 目录，再执行任何其他操作。**
+setup 和 uninstall 需要读写 `settings.local.json`。每个 Claude Code profile 有自己的 `settings.local.json`。
 
 检测流程：
 
-1. 检查 `~/.sleuth/config.json` 中的 `profileDir` 字段（之前保存过的路径）→ 命中则直接使用，**跳过步骤 2**
-2. **用 `AskUserQuestion` 强制让用户选择**（不可跳过）：
-   - `~/.claude/`（默认 profile）
+1. 用 `Bash` 检测当前平台，计算默认 Claude Code profile 路径：
+   ```bash
+   echo $HOME/.claude
+   ```
+2. **用 `AskUserQuestion` 让用户确认**（不可跳过）：
+   - 上一步计算的默认路径（标注"默认"）
    - `其他`（用户手动输入路径）
-
-检测到路径后，将其保存到 `~/.sleuth/config.json` 的 `profileDir` 字段，后续操作直接使用，不再重复检测。
+3. 将确认的路径保存到变量 `PROFILE_DIR`，后续操作使用
 
 ---
 
 ## 操作一：完整设置向导（setup）
 
-**开始前必须先完成「Profile 路径检测」**，确定 `profileDir` 变量后再继续。
+**开始前必须先完成「Profile 路径检测」**，确定 `PROFILE_DIR` 后再继续。
 
 ### 阶段 1 — 发现可用工具
 
 1. 搜索 MCP 配置文件（以下位置逐一检查，存在就读取）：
    - 项目: `.mcp.json`
-   - 全局: `{profileDir}/settings.json`（从 profileDir 拼接）
+   - 全局: `{PROFILE_DIR}/settings.json`
 2. 从配置中提取所有 MCP 服务器名称（`mcpServers` 对象的 key）
 3. 对每个 MCP 服务器，工具名格式为 `mcp__<server>__<tool>`，列出该服务器下的所有 tool
 4. 如果无法枚举具体 tool 名，则使用服务器名作为分组提示
@@ -80,8 +82,7 @@ config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解
 
 ### 阶段 3 — 配置权限
 
-1. 按"Profile 路径检测"流程确认 profile 目录
-2. 读取 `{profileDir}/settings.local.json`（如不存在则创建空结构）
+1. 读取 `{PROFILE_DIR}/settings.local.json`（如不存在则创建空结构）
 3. 按"插件根目录检测"流程获取 `PLUGIN_ROOT` 绝对路径
 4. 计算需要添加的 allow 规则。**版本目录用 `*` 通配符**，这样插件更新后权限不会失效：
    ```
@@ -100,7 +101,6 @@ config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解
 最终写入 `~/.sleuth/config.json`：
 ```json
 {
-  "profileDir": "<检测到的 profile 绝对路径>",
   "blockWebTools": true,
   "routeSearchIntent": true,
   "blockedTools": ["WebSearch", "WebFetch", ...]
@@ -117,7 +117,6 @@ config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解
 ```
 sleuth 配置:
 
-  Profile 目录:     <profileDir 或 未配置>
   拦截 Web 工具:    ✓ 开启
   搜索意图路由:     ✓ 开启
 
@@ -169,17 +168,17 @@ sleuth 配置:
 
 ### 步骤 1 — 清理 settings 文件
 
-1. 按"Profile 路径检测"流程确认 profile 目录
-2. 读取 `{profileDir}/settings.local.json`
+1. 按"Profile 路径检测"流程让用户确认 profile 目录，确定 `PROFILE_DIR`
+2. 读取 `{PROFILE_DIR}/settings.local.json`
 3. 按"插件根目录检测"流程获取 `PLUGIN_ROOT`
 4. 从 `permissions.allow` 中删除 sleuth 添加的规则：
    - `Bash(agent-browser *)`
    - `Bash(node {PLUGIN_ROOT}/scripts/*.mjs *)`（用检测到的实际路径）
    - `Bash(curl http://127.0.0.1:9*)`
-4. 从 `permissions.deny` 中删除 sleuth 添加的规则（如有）：
+5. 从 `permissions.deny` 中删除 sleuth 添加的规则（如有）：
    - `WebSearch`、`WebFetch`、`Fetch`
-5. 用 `AskUserQuestion` 展示将要删除的规则，请求用户确认
-6. 确认后用 `Write` 写回 `settings.local.json`
+6. 用 `AskUserQuestion` 展示将要删除的规则，请求用户确认
+7. 确认后用 `Write` 写回 `settings.local.json`
 
 ### 步骤 2 — 清理数据（可选）
 

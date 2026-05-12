@@ -46,7 +46,7 @@ Agent({ subagent_type: "Explore", prompt: "在 ~/.sleuth/output/ 和 ~/.sleuth/s
 node "${CLAUDE_SKILL_DIR}/../../scripts/check-deps.mjs"
 ```
 
-自动检测 agent-browser、Chrome CDP 端口、站点经验列表，清理过期输出。Chrome 未开 CDP 时自动重启（保留登录态）。
+自动检测 agent-browser、Chrome CDP 端口、站点经验列表，清理过期输出。Chrome 未开 CDP 时：如果是 sleuth 启动的 Chrome 则自动重启（保留登录态）；如果是用户自己的 Chrome 则提示用户手动退出后重试。
 
 通过后创建 session 和输出目录：
 
@@ -190,6 +190,8 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/find-url.mjs" [关键词...] [--only boo
 SKILL_DIR="/Users/xxx/.claude/plugins/marketplaces/sleuth/sleuth"  # 从 check-deps 输出获取绝对路径
 SID="2026-04-30-xxxx"       # session-logger start 返回的 SID
 SLEUTH_OUTPUT="~/.sleuth/output/2026-04-30/xxxx"  # check-deps --output-dir --sid $SID 返回
+# 每个子 Agent 用不同的 BROWSER_SESSION 实现浏览器 tab 隔离，避免并行冲突
+BROWSER_SESSION="${SID}-<唯一标识>"  # 如 "${SID}-product", "${SID}-pricing"
 
 Agent({
   description: "3-5 词描述任务",
@@ -204,10 +206,11 @@ Agent({
     - SKILL_DIR=${SKILL_DIR}
     - SID=${SID}
     - SLEUTH_OUTPUT=${SLEUTH_OUTPUT}
+    - BROWSER_SESSION=${BROWSER_SESSION}
 
     任务：${目标描述}
     已知上下文：${主 Agent 提供的已知信息}
-    浏览器隔离：所有 agent-browser 命令带 --auto-connect --session ${SID}
+    浏览器隔离：所有 agent-browser 命令带 --auto-connect --session ${BROWSER_SESSION}
 
     要求：
     1. 只返回摘要（关键发现 + 来源 URL），不要返回原始页面内容

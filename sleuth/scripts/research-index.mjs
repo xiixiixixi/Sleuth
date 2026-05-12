@@ -21,7 +21,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
 
@@ -269,7 +269,7 @@ function cmdIndex(sid) {
       continue;
     }
 
-    const filename = filePath.split('/').pop() || '';
+    const filename = basename(filePath);
     const extracted = extractEntities(content);
 
     // 域名作为 related 池

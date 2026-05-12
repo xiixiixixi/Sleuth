@@ -34,7 +34,7 @@
  *   - operation 必须是 JSON 对象，不接受原始类型或数组
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
@@ -164,6 +164,28 @@ function loadSession(sid) {
 }
 
 /**
+ * 用 mkdir 做文件锁（原子操作）。
+ * 获取锁后执行 fn，完成后释放锁。重试直到成功。
+ *
+ * @param {string} lockPath - 锁文件路径
+ * @param {Function} fn - 获取锁后执行的函数
+ */
+function withLock(lockPath, fn) {
+  const maxRetries = 100;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      mkdirSync(lockPath);
+      try { return fn(); } finally { rmSync(lockPath, { recursive: true }); }
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      const end = Date.now() + 50;
+      while (Date.now() < end) {} // busy wait ~50ms
+    }
+  }
+  throw new Error(`Could not acquire lock: ${lockPath}`);
+}
+
+/**
  * 将 session 数据写回磁盘。
  * 格式化为 2 空格缩进的 JSON，方便人工阅读和 git diff。
  *
@@ -215,10 +237,9 @@ function cmdStart(query, queryType) {
  * 如果 operation 中没有 timestamp，会自动添加当前时间。
  */
 function cmdLog(sid, operationJson) {
-  const session = loadSession(sid);
-  if (!session) return;
+  const lockPath = sessionPath(sid) + '.lock';
 
-  // 解析 operation JSON
+  // 解析 operation JSON（在锁之外做，减少持锁时间）
   let op;
   try {
     op = JSON.parse(operationJson);
@@ -227,20 +248,21 @@ function cmdLog(sid, operationJson) {
     return;
   }
 
-  // 安全检查：operation 必须是对象（不接受字符串、数字、数组、null）
+  // 安全检查
   if (typeof op !== 'object' || op === null || Array.isArray(op)) {
     console.error('Warning: operation must be a JSON object');
     return;
   }
 
-  // 自动补充时间戳（如果调用者没提供）
+  // 自动补充时间戳
   op.timestamp = op.timestamp || new Date().toISOString();
-  session.operations.push(op);
-  try {
+
+  withLock(lockPath, () => {
+    const session = loadSession(sid);
+    if (!session) return;
+    session.operations.push(op);
     saveSession(sid, session);
-  } catch (e) {
-    console.error(`Warning: failed to save session: ${e.message}`);
-  }
+  });
 }
 
 /**
@@ -257,16 +279,14 @@ function cmdFinish(sid, outcome) {
     return;
   }
 
-  const session = loadSession(sid);
-  if (!session) return;
-
-  session.finished = new Date().toISOString();
-  session.outcome = outcome;
-  try {
+  const lockPath = sessionPath(sid) + '.lock';
+  withLock(lockPath, () => {
+    const session = loadSession(sid);
+    if (!session) return;
+    session.finished = new Date().toISOString();
+    session.outcome = outcome;
     saveSession(sid, session);
-  } catch (e) {
-    console.error(`Warning: failed to save session: ${e.message}`);
-  }
+  });
 }
 
 // ── 参数解析与路由 ────────────────────────────────────────────────

@@ -21,13 +21,17 @@
  *      排除搜索引擎域名（google.com、bing.com 等）。
  *
  *   ③ 关闭残留浏览器 tab
- *      执行 agent-browser close --all 关闭所有残留 tab。
+ *      通过 CDP 关闭 sleuth 创建的 tab（不影响用户已有 tab）。
  *      场景：子 Agent 创建了 tab 但忘记关闭。
+ *
+ *   ④ 清理残留 agent-browser 进程
+ *      关闭所有 agent-browser session，杀掉守护进程和 Chrome for Testing 子进程。
+ *      场景：子 Agent 结束后 agent-browser 守护进程和 Chrome for Testing 未自动退出。
  *
  * 输出：静默模式，正常无输出，仅异常时打印警告。
  */
 
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, unlinkSync as fsUnlinkSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
@@ -233,21 +237,137 @@ function createSitePatternStubs(domains) {
 // ── ③ 关闭残留浏览器 tab ────────────────────────────────────────────
 
 /**
- * 关闭所有 agent-browser 创建的残留 tab。
- * 静默执行，agent-browser 不可用或无 tab 时也不报错。
+ * 关闭 sleuth 创建的残留 tab（不影响用户自己的 tab）。
+ *
+ * 原理：check-deps 在 session 开始时记录初始 tab 到
+ *   ~/.sleuth/.initial-tabs-{timestamp}.json
+ * 文件结构：{ port: <number>, tabIds: [<string>, ...] }
+ * Stop hook 只关闭不在初始列表中的 tab，使用 marker 中记录的端口。
+ *
+ * 如果没有 marker 文件（兼容旧逻辑），则尝试探测 CDP 端口后关闭所有 tab。
  */
-function closeBrowserTabs() {
-  try {
-    // 通过 CDP 协议直接关闭所有 page 类型的 target（Chrome tab）
-    const resp = execSync('curl -s http://127.0.0.1:9222/json/list', { timeout: 3000, encoding: 'utf-8' });
-    const targets = JSON.parse(resp);
-    const pages = targets.filter(t => t.type === 'page' && t.webSocketDebuggerUrl);
-    for (const page of pages) {
+async function closeBrowserTabs() {
+  // 查找初始 tab 记录文件
+  const sleuthDir = path.join(os.homedir(), '.sleuth');
+  const initialFiles = existsSync(sleuthDir)
+    ? readdirSync(sleuthDir).filter(f => f.startsWith('.initial-tabs-') && f.endsWith('.json'))
+    : [];
+
+  // 从 marker 文件获取 CDP 端口和初始 tab ID
+  let cdpPort = null;
+  const preservedIds = new Set();
+
+  for (const file of initialFiles) {
+    try {
+      const data = JSON.parse(readFileSync(path.join(sleuthDir, file), 'utf-8'));
+      if (data.port) cdpPort = data.port;
+      if (Array.isArray(data.tabIds)) {
+        for (const id of data.tabIds) preservedIds.add(id);
+      } else if (Array.isArray(data)) {
+        for (const id of data) preservedIds.add(id);
+      }
+    } catch {}
+  }
+
+  // 没有端口 → 尝试默认端口探测（用 fetch，不依赖 curl）
+  if (!cdpPort) {
+    for (const port of [9222, 9229, 9333]) {
       try {
-        execSync(`curl -s http://127.0.0.1:9222/json/close/${page.id} > /dev/null 2>&1`, { timeout: 2000 });
-      } catch { /* 单个 tab 关闭失败不影响其他 */ }
+        const resp = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) });
+        if (resp.ok) { cdpPort = port; break; }
+      } catch {}
     }
-  } catch { /* CDP 不可用（Chrome 未启动） */ }
+  }
+
+  if (!cdpPort) return;
+
+  try {
+    const resp = await fetch(`http://127.0.0.1:${cdpPort}/json/list`, { signal: AbortSignal.timeout(3000) });
+    const targets = await resp.json();
+    const pages = targets.filter(t => t.type === 'page' && t.webSocketDebuggerUrl);
+    if (pages.length === 0) return;
+
+    for (const page of pages) {
+      if (preservedIds.size > 0 && preservedIds.has(page.id)) continue;
+      try {
+        await fetch(`http://127.0.0.1:${cdpPort}/json/close/${page.id}`, { signal: AbortSignal.timeout(2000) });
+      } catch {}
+    }
+  } catch {}
+
+  // 清理过期的 marker 文件（超过 24 小时的），保留近期 marker（其他 session 可能还在用）
+  const ONE_DAY_MS = 86400000;
+  for (const file of initialFiles) {
+    const match = file.match(/\.initial-tabs-(\d+)\.json$/);
+    if (!match) continue;
+    const age = Date.now() - parseInt(match[1], 10);
+    if (age > ONE_DAY_MS) {
+      try { fsUnlinkSync(path.join(sleuthDir, file)); } catch {}
+    }
+  }
+}
+
+// ── ④ 清理残留 agent-browser 进程 ────────────────────────────────────
+
+/**
+ * 清理残留的 agent-browser 守护进程和 Chrome for Testing 进程。
+ *
+ * agent-browser 每个会话启动一个守护进程（agent-browser-darwin-arm64），
+ * 如果命令未带 --auto-connect 或 CDP 不可用，还会启动独立的 Chrome for Testing。
+ * 这些进程在 session 结束后不会自动退出，需要显式清理。
+ *
+ * 清理步骤：
+ *   1. agent-browser close --all 关闭所有 session
+ *   2. 杀掉残留的 agent-browser 守护进程（匹配 agent-browser/bin/agent-browser）
+ *   3. 杀掉残留的 Chrome for Testing 进程（匹配 --user-data-dir 含 agent-browser-chrome）
+ */
+function cleanupAgentBrowser() {
+  // 步骤 1：用官方命令关闭所有 session
+  try {
+    execSync('agent-browser close --all', { timeout: 5000, stdio: 'ignore' });
+  } catch { /* 可能已经没有 session */ }
+
+  try {
+    let daemonPids = [];
+    let chromePids = [];
+
+    if (os.platform() === 'win32') {
+      // Windows: 用 wmic 查询进程
+      const out = execSync(
+        'wmic process where "commandline like \'%agent-browser%\'" get processid,commandline /format:list',
+        { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+      for (const block of out.split(/\n\n+/)) {
+        const pidMatch = block.match(/ProcessId=(\d+)/);
+        if (!pidMatch) continue;
+        const pid = parseInt(pidMatch[1]);
+        if (block.includes('agent-browser-chrome')) chromePids.push(pid);
+        else if (block.includes('agent-browser/bin/agent-browser')) daemonPids.push(pid);
+      }
+    } else {
+      // macOS/Linux: ps aux
+      const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
+      for (const line of ps.split('\n')) {
+        if (line.includes('grep')) continue;
+        if (line.includes('agent-browser/bin/agent-browser')) {
+          const m = line.match(/^\S+\s+(\d+)/);
+          if (m) daemonPids.push(parseInt(m[1]));
+        }
+        if (line.includes('agent-browser-chrome')) {
+          const m = line.match(/^\S+\s+(\d+)/);
+          if (m) chromePids.push(parseInt(m[1]));
+        }
+      }
+    }
+
+    // 杀进程（Windows 不支持信号，用 process.kill(pid) 默认 SIGTERM 会被 Node 映射为 TerminateProcess）
+    for (const pid of chromePids) {
+      try { process.kill(pid); } catch {}
+    }
+    for (const pid of daemonPids) {
+      try { process.kill(pid); } catch {}
+    }
+  } catch {}
 }
 
 // ── 主流程 ────────────────────────────────────────────────────────
@@ -305,7 +425,10 @@ async function main() {
   }
 
   // ③ 关闭残留的浏览器 tab
-  closeBrowserTabs();
+  await closeBrowserTabs();
+
+  // ④ 清理残留的 agent-browser 进程
+  cleanupAgentBrowser();
 }
 
 main().catch(() => process.exit(0));
