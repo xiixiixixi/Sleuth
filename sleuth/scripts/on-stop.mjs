@@ -162,6 +162,10 @@ function getDomainsFromSession(session) {
   const domains = new Set();
   for (const op of session.operations || []) {
     if (op.domain) domains.add(op.domain);
+    if (op.url) {
+      const d = extractDomain(op.url);
+      if (d) domains.add(d);
+    }
     if (op.source) {
       const d = extractDomain(op.source);
       if (d) domains.add(d);

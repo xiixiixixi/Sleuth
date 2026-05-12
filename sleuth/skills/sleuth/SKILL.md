@@ -235,13 +235,16 @@ Agent({
 ### Snapshot-first 工作流
 
 1. `open <url>` → `wait --load networkidle`
-2. **自动记录 visit**：每次 open 后执行 session-logger log
+2. `snapshot -i` → 获取 @ref
+3. `click @e3` / `fill @e5` → `wait --load networkidle`
+4. `snapshot -i` → 页面变化后必须重新 snapshot
+5. **提取完成后记录 visit**：
    ```bash
-   node "${CLAUDE_SKILL_DIR}/../../scripts/session-logger.mjs" --action log --sid $SID --operation '{"type":"visit","url":"<刚才打开的URL>"}'
+   # 成功提取内容
+   node "${CLAUDE_SKILL_DIR}/../../scripts/session-logger.mjs" --action log --sid $SID --operation '{"type":"visit","url":"<URL>","domain":"<域名>","extraction_success":true}'
+   # 提取失败或页面不可用
+   node "${CLAUDE_SKILL_DIR}/../../scripts/session-logger.mjs" --action log --sid $SID --operation '{"type":"visit","url":"<URL>","domain":"<域名>","extraction_success":false}'
    ```
-3. `snapshot -i` → 获取 @ref
-4. `click @e3` / `fill @e5` → `wait --load networkidle`
-5. `snapshot -i` → 页面变化后必须重新 snapshot
 
 **@ref 会过期**：页面变化后立即失效，不确定时多 snapshot 一次。
 
@@ -287,6 +290,20 @@ EOF
   2. 修复后重试原 agent-browser 命令
   3. 仍然失败 → 换渠道（换搜索引擎、换关键词），不要用 curl 替代浏览器
   4. 页面超时 → 加 timeout；连续失败 → 换方式
+
+**遇到障碍时必须记录**（用于站点经验系统）：
+```bash
+# CAPTCHA
+node "${CLAUDE_SKILL_DIR}/../../scripts/session-logger.mjs" --action log --sid $SID --operation '{"type":"captcha","url":"<URL>","domain":"<域名>"}'
+# 登录墙
+... --operation '{"type":"login_wall","url":"<URL>","domain":"<域名>"}'
+# 付费墙
+... --operation '{"type":"paywall","url":"<URL>","domain":"<域名>"}'
+# 死链
+... --operation '{"type":"dead_link","url":"<URL>","domain":"<域名>"}'
+# 反爬
+... --operation '{"type":"anti_bot","url":"<URL>","domain":"<域名>"}'
+```
 
 ## 任务收尾
 
