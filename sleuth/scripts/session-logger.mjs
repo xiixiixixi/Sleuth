@@ -230,8 +230,8 @@ function cmdStart(query, queryType) {
  * log 命令：追加一条操作记录到 session。
  *
  * operation JSON 示例：
- *   {"type": "visit", "url": "https://...", "extraction_success": true, "dwell_ms": 3500}
- *   {"type": "captcha", "domain": "example.com"}
+ *   {"type": "visit", "url": "https://...", "domain": "example.com", "extraction_success": true}
+ *   {"type": "captcha", "url": "https://...", "domain": "example.com"}
  *   {"type": "deliver", "content_type": "doc", "file": "/path/to/file.pdf"}
  *
  * 如果 operation 中没有 timestamp，会自动添加当前时间。

@@ -22,7 +22,7 @@ Claude Code 插件，教 AI Agent 如何像人一样浏览网页。
 
 | 方案 | 定位 |
 |------|------|
-| **agent-browser** | 纯操作工具：CDP CLI，提供 open、snapshot、click、fill 等底层操作，不给 Agent 决策框架。Agent 不知道什么时候该搜索、什么时候该 agent-browser、什么时候该 curl。 |
+| **agent-browser** | 纯操作工具：CDP CLI，提供 open、snapshot、click、fill 等底层操作，不给 Agent 决策框架。Agent 不知道什么时候该搜索、什么时候该 agent-browser。 |
 | **WebSearch / WebFetch** | 静态 HTTP 抓取，无法处理反爬、登录态、交互操作。 |
 | **sleuth** | 纯 Skill，内置决策框架。Agent 基于它自主判断用什么工具、什么顺序、怎么验证。 |
 
@@ -195,7 +195,7 @@ Chrome 147+ 要求非默认 `--user-data-dir` 才能开启远程调试。`check-
 
 1. **发现可用工具**：扫描 MCP 配置，列出所有可用工具
 2. **选择封禁项**：勾选要拦截的 Web/搜索类工具（默认选中推荐项）
-3. **配置权限**：向 `settings.local.json` 添加 allow 规则（agent-browser、curl、scripts）
+3. **配置权限**：向 `settings.local.json` 添加 allow 规则（agent-browser、scripts）
 
 其他配置命令：
 
@@ -231,10 +231,10 @@ Chrome 147+ 要求非默认 `--user-data-dir` 才能开启远程调试。`check-
 ### Snapshot-first 工作流
 
 ```
-1. agent-browser --auto-connect open <url>   # 打开页面
-2. agent-browser --auto-connect snapshot -i  # 获取交互元素 @ref
-3. agent-browser --auto-connect click @e3    # 基于 ref 操作
-4. agent-browser --auto-connect snapshot -i  # 页面变化后重新快照
+1. agent-browser --auto-connect --session ${SID}-main open <url>   # 打开页面
+2. agent-browser --auto-connect --session ${SID}-main snapshot -i  # 获取交互元素 @ref
+3. agent-browser --auto-connect --session ${SID}-main click @e3    # 基于 ref 操作
+4. agent-browser --auto-connect --session ${SID}-main snapshot -i  # 页面变化后重新快照
 ```
 
 @ref 每次 snapshot 重新分配，页面变化后立即失效 — 操作前必须重新 snapshot。

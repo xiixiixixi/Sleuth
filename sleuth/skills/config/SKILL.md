@@ -88,7 +88,6 @@ setup 和 uninstall 需要读写 `settings.local.json`。每个 Claude Code prof
    ```
    Bash(agent-browser *)
    Bash(node {PLUGIN_CACHE_DIR}/sleuth/sleuth/*/scripts/*.mjs *)
-   Bash(curl http://127.0.0.1:9*)
    ```
    其中 `{PLUGIN_CACHE_DIR}` 是插件缓存根目录（如 `/Users/xxx/.claude/plugins/cache`），从 `PLUGIN_ROOT` 提取（取 `sleuth/sleuth/` 的父目录）
 4. 如规则已存在则跳过
@@ -174,7 +173,6 @@ sleuth 配置:
 4. 从 `permissions.allow` 中删除 sleuth 添加的规则：
    - `Bash(agent-browser *)`
    - `Bash(node {PLUGIN_ROOT}/scripts/*.mjs *)`（用检测到的实际路径）
-   - `Bash(curl http://127.0.0.1:9*)`
 5. 从 `permissions.deny` 中删除 sleuth 添加的规则（如有）：
    - `WebSearch`、`WebFetch`、`Fetch`
 6. 用 `AskUserQuestion` 展示将要删除的规则，请求用户确认

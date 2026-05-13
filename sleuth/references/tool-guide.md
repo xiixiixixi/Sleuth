@@ -8,7 +8,7 @@
 
 ## 连接 Chrome（强制）
 
-**所有 agent-browser 命令必须带 `--auto-connect`，否则会启动独立的 Chrome for Testing，丢失用户登录态。**
+**所有 agent-browser 命令必须带 `--auto-connect --session ${SID}-main`（子 Agent 用 `--session ${BROWSER_SESSION}`）。不带 `--auto-connect` 会启动独立的 Chrome for Testing，丢失登录态。不带 `--session` 会和用户已有 tab 混在一起。**
 
 ```bash
 # ❌ 错误：会启动独立的 Chrome for Testing
@@ -40,6 +40,7 @@ agent-browser open https://example.com
 
 页面跳转和刷新。
 
+<!-- 以下命令省略 --auto-connect --session ${SID}-main 前缀，实际使用时必须加上 -->
 ```bash
 agent-browser open https://example.com
 agent-browser back
