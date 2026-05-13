@@ -4,20 +4,24 @@
 
 **核心原则**：snapshot + @ref 是推荐工作流。先用 `snapshot -i` 获取交互元素列表（带 @ref 编号），再通过 @ref 操作页面。`find role/text/label` 作为 fallback。CSS selector 是最后手段。
 
-**所有命令必须带 `--auto-connect --session`**：主 Agent 用 `${SID}-main`，子 Agent 用 `${BROWSER_SESSION}`。不带 `--auto-connect` 会启动独立的 Chrome for Testing，丢失登录态。不带 `--session` 会和用户已有 tab 混在一起。
+**所有命令必须连接用户日常/登录态 Chrome，并带 `--auto-connect --session`**：主 Agent 用 `${SID}-main`，子 Agent 用 `${BROWSER_SESSION}`。不带 `--auto-connect` 会启动独立的 Chrome for Testing，丢失登录态。不带 `--session` 会和用户已有 tab 混在一起。
 
 ---
 
 ## 连接 Chrome（强制）
 
-连接用户日常 Chrome 以复用登录态和书签。Chrome 必须通过 `--remote-debugging-port` 启动（`chrome://inspect` 复选框方式不兼容）。
+连接用户日常 Chrome 以复用登录态、Cookie、书签和历史。Chrome 必须在进程启动时带 `--remote-debugging-port=9222`（`chrome://inspect` 复选框方式不兼容）。如果 Chrome 已经在运行，`open -a` 或再次启动时传入的参数会被现有进程忽略；必须先关闭/终止 Chrome，再用正确参数重启。如果连接后不是登录态，不要继续抓取登录态页面，先运行 `check-deps` 或请用户在该 Chrome 中完成登录。
 
 ```bash
-# macOS 手动启动 Chrome（CDP 端口 9222）
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 &
-
-# 通过 check-deps 自动检测和重启（推荐）
+# 通过 check-deps 自动检测、关闭旧 Chrome、带 CDP 参数重启（推荐）
 node "${CLAUDE_SKILL_DIR}/../../scripts/check-deps.mjs"
+
+# macOS 手动启动 Chrome（不推荐，必须先退出旧进程；不要用 open -a 传参）
+osascript -e 'tell application "Google Chrome" to quit'
+pkill -9 -x "Google Chrome" 2>/dev/null || true
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.sleuth/chrome-debug" &
 
 # ✅ 正确：连接用户日常 Chrome
 agent-browser --auto-connect --session ${SID}-main open https://example.com

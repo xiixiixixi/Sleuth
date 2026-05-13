@@ -50,7 +50,7 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action recall --qu
 node "${CLAUDE_SKILL_DIR}/../../scripts/check-deps.mjs"
 ```
 
-自动检测 agent-browser、Chrome CDP 端口、站点经验列表，清理过期输出。Chrome 未开 CDP 时：如果是 sleuth 启动的 Chrome 则自动重启（保留登录态）；如果是用户自己的 Chrome 则提示用户手动退出后重试。
+自动检测 agent-browser、Chrome CDP 端口、站点经验列表，清理过期输出。Chrome 未开 CDP 时，必须先关闭/终止当前 Chrome，再以 `--remote-debugging-port=9222` 重启；Chrome 已运行时追加启动参数会被忽略，所以不能用 `open -a` 直接传参修复。
 
 通过后创建 session 和输出目录：
 
@@ -216,7 +216,7 @@ Agent({
 
     任务：${目标描述}
     已知上下文：${主 Agent 提供的已知信息}
-    浏览器隔离：所有 agent-browser 命令带 --auto-connect --session ${BROWSER_SESSION}
+    浏览器隔离：所有 agent-browser 命令必须连接用户日常/登录态 Chrome，并带 --auto-connect --session ${BROWSER_SESSION}
 
     要求：
     1. 只返回摘要（关键发现 + 来源 URL），不要返回原始页面内容
@@ -235,7 +235,7 @@ Agent({
 
 ## 浏览器操作
 
-**强制：所有 agent-browser 命令必须带 `--auto-connect --session <会话名>`。** 主 Agent 使用 `${SID}-main`；子 Agent 使用主 Agent 传入的 `${BROWSER_SESSION}`，禁止子 Agent 使用 `${SID}-main`。不带 `--auto-connect` 会启动独立的 Chrome for Testing，丢失登录态。不带 `--session` 会和用户已有 tab 混在一起。
+**强制：所有 agent-browser 命令必须连接用户日常/登录态 Chrome，并带 `--auto-connect --session <会话名>`。** 主 Agent 使用 `${SID}-main`；子 Agent 使用主 Agent 传入的 `${BROWSER_SESSION}`，禁止子 Agent 使用 `${SID}-main`。不带 `--auto-connect` 会启动独立的 Chrome for Testing，丢失登录态。不带 `--session` 会和用户已有 tab 混在一起。
 
 不操作用户已有 tab，所有操作在新 tab 中进行。完整命令参考 `${CLAUDE_SKILL_DIR}/../../references/tool-guide.md`。
 

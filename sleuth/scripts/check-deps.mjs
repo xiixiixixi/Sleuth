@@ -16,7 +16,7 @@
  *   Chrome 147+ 要求非默认 --user-data-dir 才能开启远程调试。
  *   本脚本会：
  *     1. 检测 CDP 端口（DevToolsActivePort 文件 + 常用端口探测）
- *     2. 如不可用，自动关闭 Chrome → 创建 ~/.sleuth/chrome-debug/ →
+ *     2. 如不可用，必须先关闭已运行的 Chrome（已运行时新启动参数会被忽略）→ 创建 ~/.sleuth/chrome-debug/ →
  *        以 --remote-debugging-port=9222 重启（Default profile 软链接保留登录态）
  *
  * 用法：
@@ -264,7 +264,7 @@ function sleep(ms) {
  *
  * 流程：
  *   1. 查找 Chrome 二进制文件
- *   2. 如果 Chrome 正在运行 → 优雅关闭（macOS 用 osascript，其他平台用 pkill）
+ *   2. 如果 Chrome 正在运行 → 先优雅关闭，失败则终止进程
  *   3. 创建 ~/.sleuth/chrome-debug/ 目录
  *   4. 将用户真实 Chrome profile 的 Default 目录软链接到 chrome-debug/Default
  *      （保留登录态、书签、Cookie 等用户数据）
@@ -281,10 +281,12 @@ async function restartChromeWithCDP(port = 9222) {
     return false;
   }
 
-  // 如果 Chrome 正在运行，先优雅关闭
+  // 如果 Chrome 正在运行，必须先关闭。
+  // 关键原因：Chrome 已运行时，macOS open -a 或再次启动 Chrome 传入的
+  // --remote-debugging-port 参数会被现有进程忽略，agent-browser 仍然无法连接。
   const running = isChromeRunning();
   if (running) {
-    console.log('chrome: 正在关闭 Chrome...');
+    console.log('chrome: 正在关闭已运行的 Chrome（必须重启才能注入 --remote-debugging-port）...');
     try {
       if (os.platform() === 'darwin') {
         // macOS: 用 AppleScript 优雅退出（会保存标签页等）
@@ -303,8 +305,22 @@ async function restartChromeWithCDP(port = 9222) {
       await sleep(500);
     }
     if (isChromeRunning()) {
-      console.error('chrome: Chrome 未能正常关闭，请手动退出后重试');
-      return false;
+      console.log('chrome: 优雅关闭失败，正在终止 Chrome 进程...');
+      try {
+        if (os.platform() === 'win32') {
+          execSync('taskkill /F /IM chrome.exe /T', { timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
+        } else {
+          execSync('pkill -9 -x "Google Chrome" 2>/dev/null || pkill -9 -x "chrome" 2>/dev/null || pkill -9 -x "chromium" 2>/dev/null', { timeout: 10000 });
+        }
+      } catch {}
+      for (let i = 0; i < 10; i++) {
+        if (!isChromeRunning()) break;
+        await sleep(300);
+      }
+      if (isChromeRunning()) {
+        console.error('chrome: Chrome 未能终止，请手动退出后重试');
+        return false;
+      }
     }
     await sleep(1000); // 额外等待 1 秒确保端口释放
   }
@@ -328,7 +344,8 @@ async function restartChromeWithCDP(port = 9222) {
     } catch { /* 软链接可能已存在或平台不支持 */ }
   }
 
-  // 以 CDP 模式启动 Chrome（后台进程，不阻塞）
+  // 以 CDP 模式启动 Chrome（后台进程，不阻塞）。
+  // 不使用 macOS open -a；如果 Chrome 已运行，open -a 传入的参数会被忽略。
   console.log(`chrome: 启动 Chrome（CDP 端口 ${port}）...`);
   const args = [
     `--remote-debugging-port=${port}`,
@@ -432,24 +449,21 @@ async function main(options = {}) {
     results.chromePort = chromePort;
     console.log(`chrome: ok (port ${chromePort})`);
   } else {
-    // CDP 不可用 → 区分 sleuth Chrome 和用户 Chrome
+    // CDP 不可用 → 必须关闭当前 Chrome 后用 --remote-debugging-port 重启。
+    // 已运行的 Chrome 不会接收后续启动命令传入的新参数。
     if (isSleuthChrome()) {
-      // sleuth 启动的 Chrome → 可以安全重启
       console.log('chrome: sleuth Chrome CDP 不可用，正在重启...');
-      const ok = await restartChromeWithCDP(9222);
-      if (ok) {
-        chromePort = 9222;
-        results.chromePort = chromePort;
-        console.log(`chrome: ok (port ${chromePort})`);
-      } else {
-        results.chromePort = null;
-        console.log('chrome: 重启失败');
-      }
     } else {
-      // 用户的 Chrome → 不重启，提示手动开启 CDP
+      console.log('chrome: 用户 Chrome 未开启 CDP，正在关闭并以调试模式重启...');
+    }
+    const ok = await restartChromeWithCDP(9222);
+    if (ok) {
+      chromePort = 9222;
+      results.chromePort = chromePort;
+      console.log(`chrome: ok (port ${chromePort})`);
+    } else {
       results.chromePort = null;
-      console.log('chrome: 用户 Chrome 未开启 CDP，不会自动重启（避免影响用户会话）');
-      console.log('chrome: 如需启用，请退出 Chrome 后重试，sleuth 将以调试模式启动');
+      console.log('chrome: 重启失败');
     }
   }
 

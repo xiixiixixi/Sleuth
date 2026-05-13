@@ -337,14 +337,14 @@ async function closeBrowserTabs() {
  * 这些进程在 session 结束后不会自动退出，需要显式清理。
  *
  * 清理步骤：
- *   1. agent-browser close --all 关闭所有 session
+ *   1. agent-browser --auto-connect --session sleuth-cleanup close --all 关闭所有 session
  *   2. 杀掉残留的 agent-browser 守护进程（匹配 agent-browser/bin/agent-browser）
  *   3. 杀掉残留的 Chrome for Testing 进程（匹配 --user-data-dir 含 agent-browser-chrome）
  */
 function cleanupAgentBrowser() {
   // 步骤 1：用官方命令关闭所有 session
   try {
-    execSync('agent-browser close --all', { timeout: 5000, stdio: 'ignore' });
+    execSync('agent-browser --auto-connect --session sleuth-cleanup close --all', { timeout: 5000, stdio: 'ignore' });
   } catch { /* 可能已经没有 session */ }
 
   try {

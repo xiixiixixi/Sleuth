@@ -181,7 +181,9 @@ claude plugin install sleuth
 Chrome 147+ 要求非默认 `--user-data-dir` 才能开启远程调试。`check-deps.mjs` 会自动处理：
 
 1. 检测 CDP 端口（`DevToolsActivePort` 文件 + 常用端口探测）
-2. 如不可用，自动：关闭 Chrome → 创建 `~/.sleuth/chrome-debug/`（软链接 Default profile）→ 以 `--remote-debugging-port=9222` 重启
+2. 如不可用，自动：关闭/终止已运行的 Chrome → 创建 `~/.sleuth/chrome-debug/`（软链接 Default profile）→ 以 `--remote-debugging-port=9222` 重启
+
+Chrome 必须在进程启动时带上 `--remote-debugging-port=9222`。如果 Chrome 已经在运行，再用 `open -a` 或其他方式追加启动参数会被现有进程忽略，因此必须先退出/终止旧进程，再用正确参数重启。
 3. 用户无需手动操作
 
 如需手动启动：

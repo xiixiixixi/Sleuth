@@ -6,8 +6,9 @@
 
 1. **禁止使用 Agent 工具**。你不能派出子 Agent。所有浏览器操作你自己用 agent-browser 直接完成。
 2. **禁止加载 sleuth 主 skill**。不要用 Skill 工具调用 `/sleuth`。你的指令全在这份文档里。
-3. **所有 agent-browser 命令必须带 `--auto-connect` 和 `--session <session-name>`**。
+3. **所有 agent-browser 命令必须连接用户日常/登录态 Chrome，并带 `--auto-connect --session "${BROWSER_SESSION}"`**。
 4. **必须用主 Agent 传入的 SID 和输出目录**。不要自己创建新 session。你的 prompt 里会包含 `SID` 和 `输出目录`，所有 session-logger 和 deliver.mjs 调用都使用这些值。
+5. **禁止 finish 主 session**。完成时只记录 `subagent_done`，最终 `finish` 只能由主 Agent 执行。
 
 ---
 
@@ -18,8 +19,10 @@
 - **`SKILL_DIR`**：脚本绝对路径，如 `/Users/xxx/.claude/plugins/marketplaces/sleuth/sleuth`
 - **`SID`**：主 session ID，如 `2026-04-30-213828170-aisierra-decagon-cre`
 - **`SLEUTH_OUTPUT`**：输出目录绝对路径，如 `/Users/xxx/.sleuth/output/2026-04-30/2026-04-30-213828170-aisierra-decagon-cre`
+- **`BROWSER_SESSION`**：主 Agent 分配的浏览器隔离 session，如 `2026-04-30-213828170-aisierra-decagon-cre-pricing`
 
 **禁止** `session-logger --action start`。session 已由主 Agent 创建，你直接用 SID 即可。
+**禁止**自己发明浏览器 session 名。所有 agent-browser 命令都必须原样使用 `${BROWSER_SESSION}`。
 
 ---
 
@@ -28,26 +31,26 @@
 ### 打开页面
 
 ```bash
-agent-browser --auto-connect --session <session-name> open "https://example.com"
-agent-browser --auto-connect --session <session-name> wait --load domcontentloaded --timeout 15000
+agent-browser --auto-connect --session "${BROWSER_SESSION}" open "https://example.com"
+agent-browser --auto-connect --session "${BROWSER_SESSION}" wait --load domcontentloaded --timeout 15000
 ```
 
 ### 读取页面内容
 
 ```bash
 # 交互元素 + @ref（最常用）
-agent-browser --auto-connect --session <session-name> snapshot -i -c
+agent-browser --auto-connect --session "${BROWSER_SESSION}" snapshot -i -c
 
 # 提取文本
-agent-browser --auto-connect --session <session-name> eval "document.body.innerText.substring(0, 12000)"
+agent-browser --auto-connect --session "${BROWSER_SESSION}" eval "document.body.innerText.substring(0, 12000)"
 
 # 提取链接列表
-agent-browser --auto-connect --session <session-name> eval --stdin <<'EOF'
+agent-browser --auto-connect --session "${BROWSER_SESSION}" eval --stdin <<'EOF'
 Array.from(document.querySelectorAll('a')).filter(a => a.href && a.innerText.length > 10).slice(0, 20).map(a => ({text: a.innerText.trim().substring(0, 120), href: a.href}))
 EOF
 
 # 复杂数据提取
-agent-browser --auto-connect --session <session-name> eval --stdin <<'EOF'
+agent-browser --auto-connect --session "${BROWSER_SESSION}" eval --stdin <<'EOF'
 const rows = document.querySelectorAll("table tbody tr");
 Array.from(rows).map(r => ({ name: r.cells[0].innerText, value: r.cells[1].innerText }));
 EOF
@@ -57,16 +60,16 @@ EOF
 
 ```bash
 # 先 snapshot 获取 @ref 编号，再操作
-agent-browser --auto-connect --session <session-name> click @e3
-agent-browser --auto-connect --session <session-name> fill @e5 "search query"
-agent-browser --auto-connect --session <session-name> press Enter
+agent-browser --auto-connect --session "${BROWSER_SESSION}" click @e3
+agent-browser --auto-connect --session "${BROWSER_SESSION}" fill @e5 "search query"
+agent-browser --auto-connect --session "${BROWSER_SESSION}" press Enter
 ```
 
 ### Tab 管理
 
 ```bash
-agent-browser --auto-connect --session <session-name> tab
-agent-browser --auto-connect --session <session-name> tab close 2
+agent-browser --auto-connect --session "${BROWSER_SESSION}" tab
+agent-browser --auto-connect --session "${BROWSER_SESSION}" tab close 2
 ```
 
 ---
@@ -101,9 +104,9 @@ YouTube 有大量创始人访谈、产品演示、行业分析视频。搜索时
 
 ```bash
 # 直接搜索 YouTube
-agent-browser --auto-connect --session <session-name> open "https://www.youtube.com/results?search_query=Sierra+AI+Bret+Taylor+interview"
+agent-browser --auto-connect --session "${BROWSER_SESSION}" open "https://www.youtube.com/results?search_query=Sierra+AI+Bret+Taylor+interview"
 # 或用 Google 站内搜
-agent-browser --auto-connect --session <session-name> open "https://www.google.com/search?q=site:youtube.com+Decagon+AI+founder+interview"
+agent-browser --auto-connect --session "${BROWSER_SESSION}" open "https://www.google.com/search?q=site:youtube.com+Decagon+AI+founder+interview"
 ```
 
 找到视频后提取字幕或 shownotes（见内容提取部分）。
@@ -133,11 +136,13 @@ CONTENT
 node "${SKILL_DIR}/scripts/deliver.mjs" --action save --source /tmp/report.md --type doc --name "report-name" --url "来源页面URL" --sid "${SID}"
 ```
 
-### 结束会话（完成时必须调用）
+### 标记子任务完成（完成时必须调用）
 
 ```bash
-node "${SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "${SID}" --outcome success
+node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" --operation '{"type":"subagent_done","name":"'"${BROWSER_SESSION}"'"}'
 ```
+
+**禁止**执行 `session-logger --action finish`。只有主 Agent 能结束主 session。
 
 ---
 
@@ -171,6 +176,6 @@ node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" --ope
 
 1. 用 `deliver.mjs --action save --sid ${SID}` 保存关键发现（**必须**）
 2. 每个重要页面用 session-logger log 记录，包含 domain 和 extraction_success（**必须**）
-3. 关闭自己创建的 tab
-4. 用 `session-logger --action finish --sid ${SID}` 结束会话（**必须**）
+3. 关闭自己创建的浏览器 session：`agent-browser --auto-connect --session "${BROWSER_SESSION}" close`
+4. 记录 `subagent_done`，不要 finish 主 session（**必须**）
 5. 向主 Agent 返回摘要：关键发现 + 来源 URL 列表
