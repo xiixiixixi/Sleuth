@@ -4,19 +4,11 @@
 
 **核心原则**：snapshot + @ref 是推荐工作流。先用 `snapshot -i` 获取交互元素列表（带 @ref 编号），再通过 @ref 操作页面。`find role/text/label` 作为 fallback。CSS selector 是最后手段。
 
+**所有命令必须带 `--auto-connect --session`**：主 Agent 用 `${SID}-main`，子 Agent 用 `${BROWSER_SESSION}`。不带 `--auto-connect` 会启动独立的 Chrome for Testing，丢失登录态。不带 `--session` 会和用户已有 tab 混在一起。
+
 ---
 
 ## 连接 Chrome（强制）
-
-**所有 agent-browser 命令必须带 `--auto-connect --session ${SID}-main`（子 Agent 用 `--session ${BROWSER_SESSION}`）。不带 `--auto-connect` 会启动独立的 Chrome for Testing，丢失登录态。不带 `--session` 会和用户已有 tab 混在一起。**
-
-```bash
-# ❌ 错误：会启动独立的 Chrome for Testing
-agent-browser open https://example.com
-
-# ✅ 正确：连接用户日常 Chrome
-agent-browser --auto-connect --session ${SID}-main open https://example.com
-```
 
 连接用户日常 Chrome 以复用登录态和书签。Chrome 必须通过 `--remote-debugging-port` 启动（`chrome://inspect` 复选框方式不兼容）。
 
@@ -27,12 +19,10 @@ agent-browser --auto-connect --session ${SID}-main open https://example.com
 # 通过 check-deps 自动检测和重启（推荐）
 node "${CLAUDE_SKILL_DIR}/../../scripts/check-deps.mjs"
 
-# 方式 1：每条命令带 --auto-connect（推荐）
+# ✅ 正确：连接用户日常 Chrome
 agent-browser --auto-connect --session ${SID}-main open https://example.com
-agent-browser --auto-connect --session ${SID}-main snapshot -i
 
-# 方式 2：先 connect 建立连接
-agent-browser connect 9222
+# ❌ 错误：会启动独立的 Chrome for Testing
 agent-browser open https://example.com
 ```
 
@@ -40,12 +30,11 @@ agent-browser open https://example.com
 
 页面跳转和刷新。
 
-<!-- 以下命令省略 --auto-connect --session ${SID}-main 前缀，实际使用时必须加上 -->
 ```bash
-agent-browser open https://example.com
-agent-browser back
-agent-browser forward
-agent-browser reload
+agent-browser --auto-connect --session ${SID}-main open https://example.com
+agent-browser --auto-connect --session ${SID}-main back
+agent-browser --auto-connect --session ${SID}-main forward
+agent-browser --auto-connect --session ${SID}-main reload
 ```
 
 ## 阅读页面
@@ -54,30 +43,30 @@ agent-browser reload
 
 ```bash
 # 交互元素 + @ref（最常用）
-agent-browser snapshot -i
+agent-browser --auto-connect --session ${SID}-main snapshot -i
 
 # 紧凑模式（减少 token 消耗）
-agent-browser snapshot -i -c
+agent-browser --auto-connect --session ${SID}-main snapshot -i -c
 
 # 包含链接 URL
-agent-browser snapshot -i -u
+agent-browser --auto-connect --session ${SID}-main snapshot -i -u
 
 # JSON 输出（程序解析用）
-agent-browser snapshot -i --json
+agent-browser --auto-connect --session ${SID}-main snapshot -i --json
 
 # 限定范围（只扫描指定 CSS selector 内）
-agent-browser snapshot -s "#main"
+agent-browser --auto-connect --session ${SID}-main snapshot -s "#main"
 
 # 获取元素信息
-agent-browser get text @e1          # 可见文本
-agent-browser get html @e1          # innerHTML
-agent-browser get attr @e1 href     # 属性值
-agent-browser get value @e1         # input 当前值
+agent-browser --auto-connect --session ${SID}-main get text @e1          # 可见文本
+agent-browser --auto-connect --session ${SID}-main get html @e1          # innerHTML
+agent-browser --auto-connect --session ${SID}-main get attr @e1 href     # 属性值
+agent-browser --auto-connect --session ${SID}-main get value @e1         # input 当前值
 
 # 获取页面元信息
-agent-browser get title
-agent-browser get url
-agent-browser get count ".item"     # 元素数量
+agent-browser --auto-connect --session ${SID}-main get title
+agent-browser --auto-connect --session ${SID}-main get url
+agent-browser --auto-connect --session ${SID}-main get count ".item"     # 元素数量
 ```
 
 ## 交互
@@ -86,38 +75,38 @@ agent-browser get count ".item"     # 元素数量
 
 ```bash
 # 点击
-agent-browser click @e1
-agent-browser click @e1 --new-tab   # 在新 Tab 打开链接
+agent-browser --auto-connect --session ${SID}-main click @e1
+agent-browser --auto-connect --session ${SID}-main click @e1 --new-tab   # 在新 Tab 打开链接
 
 # 双击
-agent-browser dblclick @e1
+agent-browser --auto-connect --session ${SID}-main dblclick @e1
 
 # 悬停
-agent-browser hover @e1
+agent-browser --auto-connect --session ${SID}-main hover @e1
 
 # 聚焦
-agent-browser focus @e1
+agent-browser --auto-connect --session ${SID}-main focus @e1
 
 # 输入
-agent-browser fill @e1 "text"       # 清空后输入
-agent-browser type @e1 "text"       # 追加输入
+agent-browser --auto-connect --session ${SID}-main fill @e1 "text"       # 清空后输入
+agent-browser --auto-connect --session ${SID}-main type @e1 "text"       # 追加输入
 
 # 按键
-agent-browser press Enter
-agent-browser press Control+a       # 组合键
+agent-browser --auto-connect --session ${SID}-main press Enter
+agent-browser --auto-connect --session ${SID}-main press Control+a       # 组合键
 
 # 表单操作
-agent-browser check @e1             # 勾选
-agent-browser uncheck @e1           # 取消勾选
-agent-browser select @e1 "value"    # 下拉选择
-agent-browser upload @e1 file.pdf   # 文件上传
+agent-browser --auto-connect --session ${SID}-main check @e1             # 勾选
+agent-browser --auto-connect --session ${SID}-main uncheck @e1           # 取消勾选
+agent-browser --auto-connect --session ${SID}-main select @e1 "value"    # 下拉选择
+agent-browser --auto-connect --session ${SID}-main upload @e1 file.pdf   # 文件上传
 
 # 滚动
-agent-browser scroll down 500       # 向下滚动 500px
-agent-browser scrollintoview @e1    # 滚动到元素可见
+agent-browser --auto-connect --session ${SID}-main scroll down 500       # 向下滚动 500px
+agent-browser --auto-connect --session ${SID}-main scrollintoview @e1    # 滚动到元素可见
 
 # 拖拽
-agent-browser drag @e1 @e2          # 从 @e1 拖到 @e2
+agent-browser --auto-connect --session ${SID}-main drag @e1 @e2          # 从 @e1 拖到 @e2
 ```
 
 ## 定位器
@@ -125,13 +114,13 @@ agent-browser drag @e1 @e2          # 从 @e1 拖到 @e2
 不用 snapshot 时，通过角色/文本/标签定位元素并操作。适合简单场景或 fallback。
 
 ```bash
-agent-browser find role button click --name "Submit"
-agent-browser find text "Sign In" click
-agent-browser find label "Email" fill "user@test.com"
-agent-browser find placeholder "Search" type "query"
-agent-browser find testid "submit-btn" click
-agent-browser find first ".card" click
-agent-browser find nth 2 ".card" hover
+agent-browser --auto-connect --session ${SID}-main find role button click --name "Submit"
+agent-browser --auto-connect --session ${SID}-main find text "Sign In" click
+agent-browser --auto-connect --session ${SID}-main find label "Email" fill "user@test.com"
+agent-browser --auto-connect --session ${SID}-main find placeholder "Search" type "query"
+agent-browser --auto-connect --session ${SID}-main find testid "submit-btn" click
+agent-browser --auto-connect --session ${SID}-main find first ".card" click
+agent-browser --auto-connect --session ${SID}-main find nth 2 ".card" hover
 ```
 
 ## 等待
@@ -140,34 +129,34 @@ agent-browser find nth 2 ".card" hover
 
 ```bash
 # 等元素出现（推荐）
-agent-browser wait @e1
+agent-browser --auto-connect --session ${SID}-main wait @e1
 
 # 等文字出现
-agent-browser wait --text "Success"
+agent-browser --auto-connect --session ${SID}-main wait --text "Success"
 
 # 等 URL 匹配
-agent-browser wait --url "**/dashboard"
+agent-browser --auto-connect --session ${SID}-main wait --url "**/dashboard"
 
 # 等网络空闲（SPA 导航后推荐）
-agent-browser wait --load networkidle
+agent-browser --auto-connect --session ${SID}-main wait --load networkidle
 
 # 等 DOM 就绪
-agent-browser wait --load domcontentloaded
+agent-browser --auto-connect --session ${SID}-main wait --load domcontentloaded
 
 # 等 JS 条件满足
-agent-browser wait --fn "window.ready"
+agent-browser --auto-connect --session ${SID}-main wait --fn "window.ready"
 
 # 固定等待（最后手段，仅在上述方法都失效时使用）
-agent-browser wait 2000
+agent-browser --auto-connect --session ${SID}-main wait 2000
 ```
 
 ## 截图
 
 ```bash
-agent-browser screenshot                # 当前视口
-agent-browser screenshot page.png       # 指定路径
-agent-browser screenshot --full         # 全页
-agent-browser screenshot --annotate     # 标注 @ref 编号（给多模态模型用）
+agent-browser --auto-connect --session ${SID}-main screenshot                # 当前视口
+agent-browser --auto-connect --session ${SID}-main screenshot page.png       # 指定路径
+agent-browser --auto-connect --session ${SID}-main screenshot --full         # 全页
+agent-browser --auto-connect --session ${SID}-main screenshot --annotate     # 标注 @ref 编号（给多模态模型用）
 ```
 
 ## 数据提取
@@ -176,10 +165,10 @@ agent-browser screenshot --annotate     # 标注 @ref 编号（给多模态模�
 
 ```bash
 # 简单表达式
-agent-browser eval "document.title"
+agent-browser --auto-connect --session ${SID}-main eval "document.title"
 
 # 复杂提取（推荐用 heredoc）
-agent-browser eval --stdin <<'EOF'
+agent-browser --auto-connect --session ${SID}-main eval --stdin <<'EOF'
 const rows = document.querySelectorAll("table tr");
 Array.from(rows).map(r => ({
   name: r.cells[0].innerText,
@@ -191,10 +180,10 @@ EOF
 ## Tab 管理
 
 ```bash
-agent-browser tab                    # 列出所有 Tab
-agent-browser tab new <url>          # 打开新 Tab
-agent-browser tab 2                  # 切换到 Tab 2
-agent-browser tab close 2            # 关闭 Tab 2
+agent-browser --auto-connect --session ${SID}-main tab                    # 列出所有 Tab
+agent-browser --auto-connect --session ${SID}-main tab new <url>          # 打开新 Tab
+agent-browser --auto-connect --session ${SID}-main tab 2                  # 切换到 Tab 2
+agent-browser --auto-connect --session ${SID}-main tab close 2            # 关闭 Tab 2
 ```
 
 ## Session 管理
@@ -203,14 +192,14 @@ Session 隔离不同任务的浏览器状态。
 
 ```bash
 # 创建隔离 session
-agent-browser --session <name> ...
+agent-browser --auto-connect --session ${SID}-main ...
 
-# 自动保存/恢复状态（跨 Agent 调用可用）
-agent-browser --session-name <name> ...
+# 子 Agent 使用独立 session
+agent-browser --auto-connect --session ${BROWSER_SESSION} ...
 
 # 关闭
-agent-browser close                  # 关闭当前 session
-agent-browser close --all            # 关闭所有 session
+agent-browser --auto-connect --session ${SID}-main close                  # 关闭当前 session
+agent-browser --auto-connect --session ${SID}-main close --all            # 关闭所有 session
 ```
 
 ## 状态持久化
@@ -219,16 +208,16 @@ agent-browser close --all            # 关闭所有 session
 
 ```bash
 # 保存当前状态
-agent-browser state save ./auth.json
+agent-browser --auto-connect --session ${SID}-main state save ./auth.json
 
 # 启动时加载已保存状态
-agent-browser --state ./auth.json ...
+agent-browser --auto-connect --session ${SID}-main --state ./auth.json ...
 
 # 保存登录凭据
-agent-browser auth save <name> ...
+agent-browser --auto-connect --session ${SID}-main auth save <name> ...
 
 # 自动登录
-agent-browser auth login <name>
+agent-browser --auto-connect --session ${SID}-main auth login <name>
 ```
 
 ## 网络
@@ -237,15 +226,15 @@ agent-browser auth login <name>
 
 ```bash
 # 查看请求列表
-agent-browser network requests
+agent-browser --auto-connect --session ${SID}-main network requests
 
 # 拦截请求
-agent-browser network route "**/api" --abort
+agent-browser --auto-connect --session ${SID}-main network route "**/api" --abort
 
 # Mock 响应
-agent-browser network route "**/api" --body '{"mock": true}'
+agent-browser --auto-connect --session ${SID}-main network route "**/api" --body '{"mock": true}'
 
 # HAR 录制
-agent-browser network har start
-agent-browser network har stop /tmp/trace.har
+agent-browser --auto-connect --session ${SID}-main network har start
+agent-browser --auto-connect --session ${SID}-main network har stop /tmp/trace.har
 ```

@@ -7,11 +7,11 @@ description: 梦里寻 — 联网检索与浏览器操作。触发场景：搜�
 
 ## 前置检查
 
-在开始联网操作前，先判断问题复杂度，再按需执行环境检查：
+在开始联网操作前，先召回历史交付物，再判断问题复杂度并按需执行环境检查：
 
 ### 问题分类
 
-先检查 `~/.sleuth/output/` 是否有相关历史文件可复用。
+先用 `research-index recall` 检查是否有相关历史交付物可复用。
 
 | 维度 | 简单问题 | 复杂问题 |
 |------|---------|---------|
@@ -23,21 +23,25 @@ description: 梦里寻 — 联网检索与浏览器操作。触发场景：搜�
 
 简单路径故障：页面不可达换来源，搜索为空扩词或中英文各搜一次，两次失败则降级回复。
 
-**不确定** → 先按简单处理，发现不够再升级为完整流程。
+**不确定** → 只在答案显然是一句话事实时按简单处理；只要涉及「调研 / 深度 / 公司 / 产品 / 竞品 / 多源 / 最新 / 对比 / 客户案例 / 定价 / 融资 / 人员」等关键词，默认复杂流程。
 
-**复杂问题** → 走完整流程：环境检查 → 多角度搜索 → 子 Agent 循环调研 → 交叉验证 → 结果交付。
+**复杂问题** → 走完整流程：环境检查 → 多角度搜索 → 按复杂度启用子 Agent → 交叉验证 → 结果交付。
 
-### 缓存优先
+### 历史复用优先
 
-处理任何请求前检查 `~/.sleuth/output/` 历史交付物。详细判定规则见 `${CLAUDE_SKILL_DIR}/../../references/cache-guide.md`。
+处理任何请求前先召回历史交付物。`~/.sleuth/output/<date>/<sid>/` 是归档目录，真正的跨日期复用入口是 `research-index recall`。
 
 ```bash
-find ~/.sleuth/output/ ~/.sleuth/sessions/ -type f \( -name "*.json" -o -name "*.txt" -o -name "*.md" \) 2>/dev/null | head -30
+node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action recall --query "原始问题关键词" --limit 5
 ```
 
-文件多时用 Explore subagent 搜索缓存：
-```
-Agent({ subagent_type: "Explore", prompt: "在 ~/.sleuth/output/ 和 ~/.sleuth/sessions/ 中搜索「关键词」。返回：是否找到、路径、修改时间、时效性评估。不返回内容。" })
+结果包含 `direct_hits`（最相关历史产物）、`related_sessions`（相关历史会话）和 `useful_artifacts`（可读取文件路径）。有命中时先 Read 相关交付文件，判断哪些内容可复用，只搜索增量信息。没命中再正常完整搜索。
+
+如果 query 是公司、产品、人物、项目、论文等命名实体，且 `recall` 无命中，必须先回填最近 7 天，再执行一次 `recall`：
+
+```bash
+node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action backfill --days 7
+node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action recall --query "原始问题关键词" --limit 5
 ```
 
 ### 环境检查与初始化（仅复杂问题）
@@ -62,13 +66,13 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/match-site.mjs" "<域名>"
 
 ### 知识库查询
 
-搜索前查历史知识库，看是否已有相关调研：
+需要实体级事实时，再查知识库：
 
 ```bash
 node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action query --query "原始问题关键词"
 ```
 
-结果包含 `matches`（匹配实体 + 历史提取的关键数据）和 `deliver_files`（相关交付文件路径）。有命中时先 Read 交付文件获取完整历史内容，只搜索增量信息。没命中则正常完整搜索。
+`query` 只返回实体匹配和相关交付文件；默认复用入口仍然是 `recall`。
 
 > 温馨提示：部分站点对浏览器自动化检测严格，存在账号封禁风险。Agent 继续操作即视为接受。
 
@@ -84,9 +88,11 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action query --que
 
 ## 强制规则
 
-1. **复杂问题必须用 `deliver.mjs --action save` 保存文件**。不等全部完成，每积累一批重要发现就保存一次。
-2. **每访问一个重要页面必须用 `session-logger --action log` 记录**。这是站点经验生成的数据源。
-3. **子 Agent 整合方式**：子 Agent 各自 deliver 独立文件到 docs/。**必须等待所有子 Agent 的 background notification 全部收到后**，才能执行 `deliver merge`。提前 merge 会遗漏尚未完成的子 Agent 文件。合并后再 Read 合并文件做最终编辑（去重、调整结构、补写总结）。
+1. **任何联网/调研前必须先执行 `research-index recall`**。有命中时必须先 Read 相关交付文件，再决定只做增量搜索还是完整搜索。
+2. **复杂问题必须用 `deliver.mjs --action save` 保存文件**。不等全部完成，每积累一批重要发现就保存一次。
+3. **每访问一个重要页面必须用 `session-logger --action log` 记录**。这是站点经验生成的数据源。
+4. **只有主 Agent 能结束 session**。子 Agent 禁止执行 `session-logger --action finish`；主 Agent 在最终 merge、交付和清理后再 finish。
+5. **子 Agent 整合方式**：子 Agent 各自 deliver 独立文件到 docs/。**必须等待所有子 Agent 的 background notification 全部收到后**，才能执行 `deliver merge`。merge 前先执行 `deliver list --sid $SID`，确认每个子任务都有对应文件。提前 merge 会遗漏尚未完成的子 Agent 文件。合并后再 Read 合并文件做最终编辑（去重、调整结构、补写总结）。
 
 ## 搜索与发现
 
@@ -175,7 +181,7 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/find-url.mjs" [关键词...] [--only boo
 3. **判断**：收结果后评估质量
 4. **整合**：合并成完整结论
 
-中等复杂度任务（如对比两个产品）主 Agent 自行搜索，不启动子 Agent。
+中等复杂度任务（如只对比两个明确产品）主 Agent 可以自行搜索。凡是「深度调研公司 / 产品线 / 市场 / 客户案例 / 定价 / 融资 / 人员 / 多语言来源」之一，必须至少拆出 2 个并行角度；预计 3+ 个角度时进入结构化调研。
 
 ### 子 Agent 调用方式
 
@@ -184,10 +190,10 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/find-url.mjs" [关键词...] [--only boo
 - **禁止加载 sleuth skill**，改为读取 subagent-guide.md
 - 描述目标不指定手段，用「获取」「调研」而非「搜索」「抓取」
 - 给上下文，子 Agent 不需要从头开始
-- **必须传入 SID、SKILL_DIR、SLEUTH_OUTPUT 三个变量**
+- **必须传入 SID、SKILL_DIR、SLEUTH_OUTPUT、BROWSER_SESSION 四个变量**
 
 ```
-SKILL_DIR="/Users/xxx/.claude/plugins/marketplaces/sleuth/sleuth"  # 从 check-deps 输出获取绝对路径
+SKILL_DIR="$(cd "${CLAUDE_SKILL_DIR}/../.." && pwd)"  # sleuth 插件根目录；必须是绝对路径
 SID="2026-04-30-xxxx"       # session-logger start 返回的 SID
 SLEUTH_OUTPUT="~/.sleuth/output/2026-04-30/xxxx"  # check-deps --output-dir --sid $SID 返回
 # 每个子 Agent 用不同的 BROWSER_SESSION 实现浏览器 tab 隔离，避免并行冲突
@@ -198,7 +204,7 @@ Agent({
   subagent_type: "general-purpose",
   run_in_background: true,
   prompt: `
-    你是一个调研执行者。先 Read ${CLAUDE_SKILL_DIR}/../../references/subagent-guide.md，严格遵循其中的指引。
+    你是一个调研执行者。先 Read ${SKILL_DIR}/references/subagent-guide.md，严格遵循其中的指引。
 
     禁止使用 Agent 工具。禁止加载 sleuth 主 skill。你只能自己用 agent-browser 搜索。
 
@@ -216,19 +222,20 @@ Agent({
     1. 只返回摘要（关键发现 + 来源 URL），不要返回原始页面内容
     2. 完成时必须用 deliver.mjs --action save --sid ${SID} 保存关键发现
     3. 每访问一个重要页面，必须用 session-logger --action log --sid ${SID} 记录
-    4. 完成后必须用 session-logger --action finish --sid ${SID} 结束
+    4. 完成后记录 subagent_done，不要 finish 主 session：
+       node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" --operation '{"type":"subagent_done","name":"${BROWSER_SESSION}"}'
     5. 关闭自己创建的 tab
   `
 })
 ```
 
-**结果整合**：所有子 Agent 完成后，执行 `deliver merge` 合并 docs/ 下所有文件，然后 Read 合并文件，做最终编辑（去重、调整章节、补写总结）。如果需要在子 Agent 完成过程中就查看结果，可以提前 Read 单个子 Agent 的 deliver 文件。
+**结果整合**：所有子 Agent 完成后，先执行 `deliver list --sid $SID`，确认每个子任务都已 deliver 文件；再执行 `deliver merge` 合并 docs/ 下所有文件，然后 Read 合并文件，做最终编辑（去重、调整章节、补写总结）。如果需要在子 Agent 完成过程中就查看结果，可以提前 Read 单个子 Agent 的 deliver 文件。
 
-主 Agent 等待 background notification 收集结果，全部完成后 merge + 编辑。
+主 Agent 等待 background notification 收集结果，全部完成后 list 校验 + merge + 编辑。
 
 ## 浏览器操作
 
-**强制：所有 agent-browser 命令必须带 `--auto-connect --session ${SID}-main`。** 不带 `--auto-connect` 会启动独立的 Chrome for Testing，丢失登录态。不带 `--session` 会和用户已有 tab 混在一起。
+**强制：所有 agent-browser 命令必须带 `--auto-connect --session <会话名>`。** 主 Agent 使用 `${SID}-main`；子 Agent 使用主 Agent 传入的 `${BROWSER_SESSION}`，禁止子 Agent 使用 `${SID}-main`。不带 `--auto-connect` 会启动独立的 Chrome for Testing，丢失登录态。不带 `--session` 会和用户已有 tab 混在一起。
 
 不操作用户已有 tab，所有操作在新 tab 中进行。完整命令参考 `${CLAUDE_SKILL_DIR}/../../references/tool-guide.md`。
 
@@ -311,18 +318,14 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/session-logger.mjs" --action log --sid $
 1. 复杂问题通过 `deliver.mjs --action save` 保存文件
 2. 所有子 Agent 完成后，合并结果并做最终编辑：
    ```bash
+   node "${CLAUDE_SKILL_DIR}/../../scripts/deliver.mjs" --action list --sid $SID
    node "${CLAUDE_SKILL_DIR}/../../scripts/deliver.mjs" --action merge --sid $SID
    ```
-   merge 后 Read 合并文件，去重、调整结构、补写总结
+   `list` 用于确认每个子任务都有 deliver 文件；merge 后 Read 合并文件，去重、调整结构、补写总结
 3. 关闭自行创建的 tab（Stop hook 兜底清理残留）
 4. `session-logger --action finish --sid $SID --outcome success|partial|fail`
 
-**可选增强**：
-5. 索引本次调研到知识库（失败不影响任务完成）：
-   ```bash
-   node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action index --sid $SID
-   ```
-6. 发现新模式时写入站点经验
+`finish` 会自动索引本次调研到 `~/.sleuth/output/registry.jsonl` 和知识库；失败只警告，不影响交付。发现新模式时写入站点经验。
 
 ## 结果交付
 

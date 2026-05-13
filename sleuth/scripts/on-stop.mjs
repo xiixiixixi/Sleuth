@@ -32,7 +32,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, unlinkSync as fsUnlinkSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +45,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SESSIONS_DIR = path.join(os.homedir(), '.sleuth', 'sessions');
 // 站点经验文件存储目录
 const PATTERNS_DIR = path.join(os.homedir(), '.sleuth', 'site-patterns');
+const RESEARCH_INDEX = path.join(ROOT, 'scripts', 'research-index.mjs');
 
 // ── 过滤常量 ──────────────────────────────────────────────────────
 
@@ -99,6 +100,21 @@ function finishOrphanSessions() {
     }
   }
   return finished;
+}
+
+function indexSessions(sessions) {
+  for (const session of sessions) {
+    const sid = session?.session_id;
+    if (!sid) continue;
+    try {
+      execFileSync('node', [RESEARCH_INDEX, '--action', 'index', '--sid', sid], {
+        timeout: 30000,
+        stdio: 'ignore',
+      });
+    } catch (err) {
+      console.error(`Warning: index failed for ${sid}: ${err.message}`);
+    }
+  }
 }
 
 // ── ② 提取域名并判断复杂站点 ────────────────────────────────────────
@@ -379,6 +395,7 @@ function cleanupAgentBrowser() {
 async function main() {
   // ① 关闭所有未完成的 session（收集被关闭的列表供下一步使用）
   const finished = finishOrphanSessions();
+  indexSessions(finished);
 
   // ② 收集需要记录经验的域名
   const candidateDomains = new Set();

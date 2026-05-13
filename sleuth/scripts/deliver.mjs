@@ -46,6 +46,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { resolveOutputDir, ensureOutputDir, TYPE_SUBDIR_MAP } from './lib/output.mjs';
+import { registerArtifact } from './lib/registry.mjs';
 
 // 项目根目录
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -88,7 +89,11 @@ function deriveFilename(sourcePath, name, type) {
     if (nameExt) return name;
     return name + ext;
   }
-  return path.basename(sourcePath);
+  const baseName = path.basename(sourcePath);
+  // stdin 没有扩展名时补上 type 推导的扩展名
+  const baseExt = path.extname(baseName);
+  if (!baseExt && ext) return baseName + ext;
+  return baseName;
 }
 
 /**
@@ -133,6 +138,22 @@ function extractDomainFromPath(filePath) {
     }
   }
   return null;
+}
+
+function registerDeliveryArtifact({ sid, filePath, type, name, source, url }) {
+  try {
+    registerArtifact({
+      sid,
+      filePath,
+      type,
+      name,
+      source,
+      url,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn(`Warning: registry update failed: ${err.message}`);
+  }
 }
 
 // ── 子命令：save ──────────────────────────────────────────────────
@@ -203,6 +224,15 @@ async function cmdSave(source, type, name, sid, url) {
   // 输出目标路径（供 Agent 获取文件位置）
   console.log(targetPath);
 
+  registerDeliveryArtifact({
+    sid,
+    filePath: targetPath,
+    type,
+    name: filename,
+    source,
+    url,
+  });
+
   // 可选：记录交付操作到 session 日志
   if (sid) {
     let domain;
@@ -214,6 +244,7 @@ async function cmdSave(source, type, name, sid, url) {
       content_type: type,
       file: targetPath,
       source: source,
+      ...(url && { url }),
       ...(domain && { domain }), // 如果能提取到域名则附带
     });
     try {
@@ -331,6 +362,14 @@ function cmdMerge(sid, name) {
   const mergedPath = path.join(docsDir, mergedName);
   writeFileSync(mergedPath, mergedContent, 'utf-8');
   console.log(mergedPath);
+
+  registerDeliveryArtifact({
+    sid,
+    filePath: mergedPath,
+    type: 'doc',
+    name: mergedName,
+    source: files.join(', '),
+  });
 
   // 记录到 session 日志
   if (sid) {

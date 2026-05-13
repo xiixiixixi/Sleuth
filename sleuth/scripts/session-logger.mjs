@@ -35,14 +35,18 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 // ── 常量定义 ──────────────────────────────────────────────────────
 
 // session 文件存储目录
 const SESSIONS_DIR = join(homedir(), '.sleuth', 'sessions');
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const RESEARCH_INDEX = join(SCRIPT_DIR, 'research-index.mjs');
 
 // 合法的问题分类（供 start 命令使用）
 const VALID_QUERY_TYPES = [
@@ -203,6 +207,13 @@ function saveSession(sid, data) {
   writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
+function autoIndexSession(sid) {
+  execFile('node', [RESEARCH_INDEX, '--action', 'index', '--sid', sid], { timeout: 30000 },
+    (err) => {
+      if (err) console.error(`Warning: automatic research index failed for ${sid}: ${err.message}`);
+    });
+}
+
 // ── 子命令实现 ────────────────────────────────────────────────────
 
 /**
@@ -287,6 +298,8 @@ function cmdFinish(sid, outcome) {
     session.outcome = outcome;
     saveSession(sid, session);
   });
+
+  autoIndexSession(sid);
 }
 
 // ── 参数解析与路由 ────────────────────────────────────────────────

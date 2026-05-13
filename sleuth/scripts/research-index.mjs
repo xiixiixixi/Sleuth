@@ -1,29 +1,38 @@
 #!/usr/bin/env node
 /**
- * research-index.mjs — 跨 session 知识库
+ * research-index.mjs — 跨 session 历史召回与知识库
  *
- * 从 session 交付文件中提取实体，存入知识库；支持按关键词查询历史知识。
+ * 从 session 交付文件中登记 artifact registry，并提取实体存入知识库。
+ * registry 存储在 ~/.sleuth/output/registry.jsonl。
  * 知识库存储在 ~/.sleuth/knowledge/entities.json。
  *
- * 两个子命令：
+ * 四个子命令：
  *
- *   index — 从 session 交付文件中提取实体，存入知识库
+ *   index — 从 session 交付文件中登记 registry 并提取实体
  *     用法：node research-index.mjs --action index --sid <session-id>
  *     流程：
  *       1. 读取 session 文件（~/.sleuth/sessions/<sid>.json）
  *       2. 找到 type=deliver 的操作记录
- *       3. 读取交付文件内容，提取实体
- *       4. 更新 entities.json（合并去重）
+ *       3. 登记交付文件到 registry.jsonl
+ *       4. 读取交付文件内容，提取实体
+ *       5. 更新 entities.json（合并去重）
  *
  *   query — 查询知识库，返回与关键词相关的历史知识
  *     用法：node research-index.mjs --action query --query "Decagon AI"
  *     输出：JSON 格式的匹配结果（含 sessions 和交付文件路径）
+ *
+ *   recall — 召回历史 artifact、相关 session 和实体匹配
+ *     用法：node research-index.mjs --action recall --query "Shulex" --limit 5
+ *
+ *   backfill — 从近期 session 回填 registry 和知识库
+ *     用法：node research-index.mjs --action backfill --days 7
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
+import { listSessionFiles, registerSessionArtifacts, searchRegistry, REGISTRY_FILE } from './lib/registry.mjs';
 
 // ── 常量定义 ──────────────────────────────────────────────────────
 
@@ -63,6 +72,21 @@ function saveEntities(entities) {
 function validateSessionId(sid) {
   if (!/^[a-zA-Z0-9_-]+$/.test(sid)) {
     throw new Error(`Invalid session ID: ${sid}`);
+  }
+}
+
+function loadSessionById(sid) {
+  validateSessionId(sid);
+
+  const sessionFile = join(SESSIONS_DIR, sid + '.json');
+  if (!existsSync(sessionFile)) {
+    throw new Error(`session file not found: ${sessionFile}`);
+  }
+
+  try {
+    return JSON.parse(readFileSync(sessionFile, 'utf-8'));
+  } catch (e) {
+    throw new Error(`failed to parse session file: ${e.message}`);
   }
 }
 
@@ -226,34 +250,31 @@ function extractEntities(content) {
 /**
  * index 命令：从 session 交付文件中提取实体，更新知识库。
  */
-function cmdIndex(sid) {
-  validateSessionId(sid);
-
-  // 1. 读取 session 文件
-  const sessionFile = join(SESSIONS_DIR, sid + '.json');
-  if (!existsSync(sessionFile)) {
-    console.error(`Error: session file not found: ${sessionFile}`);
-    process.exit(1);
-  }
-
+function cmdIndex(sid, options = {}) {
   let session;
   try {
-    session = JSON.parse(readFileSync(sessionFile, 'utf-8'));
+    session = loadSessionById(sid);
   } catch (e) {
-    console.error(`Error: failed to parse session file: ${e.message}`);
+    if (options.silent) throw e;
+    console.error(`Error: ${e.message}`);
     process.exit(1);
   }
 
   // 2. 找到 type=deliver 的操作记录
   const delivers = (session.operations || []).filter(op => op.type === 'deliver');
+  const registered = registerSessionArtifacts(session);
   if (delivers.length === 0) {
-    console.log(JSON.stringify({ indexed: 0, message: 'No deliver operations found in session' }));
-    return;
+    const result = {
+      indexed: 0,
+      registry: registered.length,
+      message: 'No deliver operations found in session',
+    };
+    if (!options.silent) console.log(JSON.stringify(result));
+    return result;
   }
 
   // 3. 读取交付文件，提取实体
   const entities = loadEntities();
-  const today = new Date().toISOString().slice(0, 10);
   let newCount = 0;
   let updatedCount = 0;
   const allRelated = new Set();
@@ -322,12 +343,15 @@ function cmdIndex(sid) {
   // 5. 保存
   saveEntities(entities);
 
-  console.log(JSON.stringify({
+  const result = {
     indexed: newCount + updatedCount,
     new: newCount,
     updated: updatedCount,
+    registry: registered.length,
     total_entities: Object.keys(entities).length,
-  }));
+  };
+  if (!options.silent) console.log(JSON.stringify(result));
+  return result;
 }
 
 // ── 子命令：query ─────────────────────────────────────────────────
@@ -336,19 +360,17 @@ function cmdIndex(sid) {
  * query 命令：按关键词查询知识库。
  * 搜索实体的 name、aliases、facts、related 字段。
  */
-function cmdQuery(query) {
+function getEntityQueryResults(query) {
   const entities = loadEntities();
 
   if (Object.keys(entities).length === 0) {
-    console.log(JSON.stringify({ matches: [], deliver_files: [] }));
-    return;
+    return { matches: [], deliver_files: [] };
   }
 
   // 将查询拆分为关键词（空格分隔，去空）
   const keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (keywords.length === 0) {
-    console.log(JSON.stringify({ matches: [], deliver_files: [] }));
-    return;
+    return { matches: [], deliver_files: [] };
   }
 
   const scored = [];
@@ -403,7 +425,119 @@ function cmdQuery(query) {
     }
   }
 
-  console.log(JSON.stringify({ matches, deliver_files: deliverFiles }, null, 2));
+  return { matches, deliver_files: deliverFiles };
+}
+
+function cmdQuery(query) {
+  console.log(JSON.stringify(getEntityQueryResults(query), null, 2));
+}
+
+function formatArtifact(record) {
+  return {
+    score: record.score,
+    matched: record.matched || [],
+    sid: record.sid,
+    type: record.type,
+    name: record.name,
+    path: record.path,
+    createdAt: record.createdAt,
+    summary: record.summary,
+    entities: (record.entities || []).slice(0, 12),
+    sourceUrls: (record.sourceUrls || []).slice(0, 8),
+    taskHint: record.taskHint || '',
+  };
+}
+
+function loadSessionSummary(sid, hitCount = 0) {
+  try {
+    const session = loadSessionById(sid);
+    const operations = session.operations || [];
+    return {
+      sid,
+      query: session.query || '',
+      query_type: session.query_type || '',
+      started: session.started || null,
+      finished: session.finished || null,
+      outcome: session.outcome || null,
+      hit_count: hitCount,
+      deliver_count: operations.filter(op => op.type === 'deliver').length,
+      visit_count: operations.filter(op => op.type === 'visit').length,
+    };
+  } catch {
+    return { sid, hit_count: hitCount };
+  }
+}
+
+function cmdRecall(query, limit) {
+  const normalizedLimit = Math.max(1, Number(limit) || 5);
+  const registryHits = searchRegistry(query, normalizedLimit * 3);
+  const entityResults = getEntityQueryResults(query);
+
+  const directHits = registryHits.slice(0, normalizedLimit).map(formatArtifact);
+  const artifactByPath = new Map();
+  for (const hit of registryHits) {
+    artifactByPath.set(hit.path, formatArtifact(hit));
+  }
+  for (const filePath of entityResults.deliver_files || []) {
+    if (!artifactByPath.has(filePath)) {
+      artifactByPath.set(filePath, { path: filePath, source: 'entity-index' });
+    }
+  }
+
+  const sessionHitCounts = new Map();
+  for (const hit of registryHits) {
+    if (!hit.sid) continue;
+    sessionHitCounts.set(hit.sid, (sessionHitCounts.get(hit.sid) || 0) + 1);
+  }
+  for (const match of entityResults.matches || []) {
+    for (const sid of match.sessions || []) {
+      sessionHitCounts.set(sid, (sessionHitCounts.get(sid) || 0) + 1);
+    }
+  }
+
+  const relatedSessions = [...sessionHitCounts.entries()]
+    .map(([sid, hitCount]) => loadSessionSummary(sid, hitCount))
+    .sort((a, b) => b.hit_count - a.hit_count || String(b.started).localeCompare(String(a.started)))
+    .slice(0, normalizedLimit);
+
+  console.log(JSON.stringify({
+    query,
+    registry_file: REGISTRY_FILE,
+    direct_hits: directHits,
+    related_sessions: relatedSessions,
+    useful_artifacts: [...artifactByPath.values()].slice(0, normalizedLimit),
+    entity_matches: (entityResults.matches || []).slice(0, normalizedLimit),
+  }, null, 2));
+}
+
+function cmdBackfill(days) {
+  const normalizedDays = Math.max(1, Number(days) || 7);
+  const files = listSessionFiles(normalizedDays);
+  let sessions = 0;
+  let indexed = 0;
+  let registry = 0;
+  let errors = 0;
+
+  for (const filePath of files) {
+    const sid = basename(filePath, '.json');
+    try {
+      const result = cmdIndex(sid, { silent: true });
+      sessions++;
+      indexed += result.indexed || 0;
+      registry += result.registry || 0;
+    } catch {
+      errors++;
+    }
+  }
+
+  console.log(JSON.stringify({
+    days: normalizedDays,
+    sessions,
+    indexed,
+    registry,
+    errors,
+    registry_file: REGISTRY_FILE,
+  }, null, 2));
 }
 
 // ── 参数解析与路由 ────────────────────────────────────────────────
@@ -411,18 +545,22 @@ function cmdQuery(query) {
 async function main() {
   const { values } = parseArgs({
     options: {
-      action: { type: 'string' },   // 子命令：index / query
+      action: { type: 'string' },   // 子命令：index / query / recall / backfill
       sid:    { type: 'string' },   // index 时的 session ID
       query:  { type: 'string' },   // query 时的搜索关键词
+      limit:  { type: 'string' },   // recall 返回条数
+      days:   { type: 'string' },   // backfill 回填天数
       help:   { type: 'boolean', short: 'h' },
     },
     allowPositionals: true,
   });
 
   if (values.help) {
-    console.log('Usage: node research-index.mjs --action <index|query> [options]');
+    console.log('Usage: node research-index.mjs --action <index|query|recall|backfill> [options]');
     console.log('  --action index --sid <id>          Index entities from a session');
     console.log('  --action query --query <keywords>  Query knowledge base');
+    console.log('  --action recall --query <keywords> [--limit 5]  Recall prior artifacts and sessions');
+    console.log('  --action backfill [--days 7]       Rebuild registry/index from recent sessions');
     return;
   }
 
@@ -443,8 +581,20 @@ async function main() {
       cmdQuery(values.query);
       break;
     }
+    case 'recall': {
+      if (!values.query) {
+        console.error('Error: --query is required for action "recall"');
+        process.exit(2);
+      }
+      cmdRecall(values.query, values.limit);
+      break;
+    }
+    case 'backfill': {
+      cmdBackfill(values.days);
+      break;
+    }
     default:
-      console.error(`Error: unknown action "${values.action}". Must be index or query.`);
+      console.error(`Error: unknown action "${values.action}". Must be index, query, recall, or backfill.`);
       process.exit(2);
   }
 }

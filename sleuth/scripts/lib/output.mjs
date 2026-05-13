@@ -34,7 +34,9 @@ const TYPE_SUBDIR_MAP = {
  *   ~/.sleuth/output/YYYY-MM-DD/<sessionId>/  ← 有 sessionId 时
  */
 export function resolveOutputDir(sessionId) {
-  const datePart = new Date().toISOString().slice(0, 10);
+  const datePart = (sessionId && /^\d{4}-\d{2}-\d{2}/.test(sessionId))
+    ? sessionId.slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
   const base = path.join(homedir(), '.sleuth', 'output');
 
   return sessionId

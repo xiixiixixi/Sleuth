@@ -48,11 +48,13 @@ sleuth/                                    插件根目录
 │
 ├── scripts/
 │   ├── lib/
-│   │   └── output.mjs                     共享输出工具：路径解析、目录创建、类型映射
+│   │   ├── output.mjs                     共享输出工具：路径解析、目录创建、类型映射
+│   │   └── registry.mjs                   跨 session 交付物 registry 与召回评分
 │   ├── check-deps.mjs                     环境检查：agent-browser + Chrome CDP + 可选依赖
 │   ├── on-stop.mjs                        Stop hook：关闭 orphan session、关闭残留 tab、站点经验
 │   ├── session-logger.mjs                 会话生命周期：start / log / finish
-│   ├── deliver.mjs                        文件交付：save / list
+│   ├── deliver.mjs                        文件交付：save / list / init / merge
+│   ├── research-index.mjs                 历史召回：index / query / recall / backfill
 │   ├── cleanup-output.mjs                 过期输出清理（默认 7 天）
 │   ├── update-site-stats.mjs              域名可信度自动评分（Bayesian）
 │   ├── match-site.mjs                     站点经验匹配：查询域名 → 输出经验内容
@@ -84,7 +86,7 @@ sleuth/                                    插件根目录
 │                                                              │
 │  skills/sleuth/SKILL.md  决策框架 & 工作流                    │
 │                        · 问题分诊（简单 vs 复杂）              │
-│                        · Cache-first + 时效性分层              │
+│                        · Recall-first + 时效性分层             │
 │                        · Plan Mode（广度 → 深度两阶段）        │
 │                        · 子 Agent 并行调研 + prompt 模板       │
 │                        · Snapshot-first 工作流                │
@@ -99,10 +101,12 @@ sleuth/                                    插件根目录
 │                                                              │
 │  scripts/             辅助工具（跨平台）                       │
 │    lib/output.mjs        路径解析 & 类型映射                   │
+│    lib/registry.mjs      跨日期 artifact registry              │
 │    check-deps.mjs        环境检查 + Chrome 自动重启            │
 │    on-stop.mjs           Stop hook（session/tab 清理）        │
 │    session-logger.mjs    会话生命周期管理                      │
 │    deliver.mjs           文件交付到 ~/.sleuth/output/           │
+│    research-index.mjs    历史召回与知识索引                    │
 │    cleanup-output.mjs    过期输出清理（7 天）                  │
 │    update-site-stats.mjs 域名可信度自动评分                    │
 │    match-site.mjs        站点经验匹配                         │
@@ -139,7 +143,9 @@ sleuth/                                    插件根目录
 | 路径 | 用途 |
 |------|------|
 | `~/.sleuth/output/YYYY-MM-DD/<session-id>/` | 会话交付文件（文档、截图、字幕等） |
+| `~/.sleuth/output/registry.jsonl` | 跨日期 artifact registry，用于 recall 召回历史交付物 |
 | `~/.sleuth/sessions/*.json` | 会话日志（操作记录、域名访问、成功/失败） |
+| `~/.sleuth/knowledge/entities.json` | 从交付文件提取的实体/事实索引 |
 | `~/.sleuth/chrome-debug/` | Chrome CDP 调试 profile（Default 软链接到用户真实 profile） |
 | `~/.sleuth/site-patterns/*.md` | 站点经验文件（YAML frontmatter + 经验正文 + 自动统计） |
 | `~/.sleuth/config.json` | 运行时配置（封禁工具列表、开关状态） |
