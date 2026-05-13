@@ -74,12 +74,21 @@ function getTypeSubdir(type) {
  * @param {string} [name] - 用户指定的文件名（不含扩展名）
  * @returns {string} 最终文件名
  */
-function deriveFilename(sourcePath, name) {
-  const ext = path.extname(sourcePath);
-  if (name) {
-    return name + ext; // 用户指定名称 + 保留原扩展名
+function deriveFilename(sourcePath, name, type) {
+  // stdin 没有扩展名，根据 type 推导
+  const typeExtMap = { doc: '.md', screenshot: '.png', image: '.png', transcript: '.srt', data: '.json', page: '.html' };
+  let ext = path.extname(sourcePath);
+  if (!ext && type && typeExtMap[type]) {
+    ext = typeExtMap[type];
   }
-  return path.basename(sourcePath); // 直接用原始文件名
+
+  if (name) {
+    // name 已含扩展名时不重复追加
+    const nameExt = path.extname(name);
+    if (nameExt) return name;
+    return name + ext;
+  }
+  return path.basename(sourcePath);
 }
 
 /**
@@ -139,7 +148,7 @@ function extractDomainFromPath(filePath) {
  *   5. 输出目标路径到 stdout
  *   6. 如果有 sid → 调用 session-logger.mjs 记录 type=deliver 操作
  */
-function cmdSave(source, type, name, sid, url) {
+async function cmdSave(source, type, name, sid, url) {
   if (!source) {
     console.error('Error: --source is required for action "save"');
     process.exit(2);
@@ -170,12 +179,22 @@ function cmdSave(source, type, name, sid, url) {
   mkdirSync(targetDir, { recursive: true });
 
   // 推导文件名并处理冲突
-  const filename = deriveFilename(source, name);
+  const filename = deriveFilename(source, name, type);
   const targetPath = avoidCollision(path.join(targetDir, filename));
 
   // 复制文件（保留源文件不变）
   try {
-    copyFileSync(source, targetPath);
+    // /dev/stdin 不支持 copyFileSync，改用流式读取
+    if (source === '/dev/stdin') {
+      const chunks = [];
+      process.stdin.setEncoding('utf-8');
+      for await (const chunk of process.stdin) {
+        chunks.push(chunk);
+      }
+      writeFileSync(targetPath, chunks.join(''), 'utf-8');
+    } else {
+      copyFileSync(source, targetPath);
+    }
   } catch (err) {
     console.error(`Error: failed to copy file: ${err.message}`);
     process.exit(1);
@@ -378,7 +397,7 @@ async function main() {
 
   switch (values.action) {
     case 'save':
-      cmdSave(values.source, values.type, values.name, values.sid, values.url);
+      await cmdSave(values.source, values.type, values.name, values.sid, values.url);
       break;
     case 'list':
       cmdList(values.sid);

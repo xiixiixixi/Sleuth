@@ -86,7 +86,7 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action query --que
 
 1. **复杂问题必须用 `deliver.mjs --action save` 保存文件**。不等全部完成，每积累一批重要发现就保存一次。
 2. **每访问一个重要页面必须用 `session-logger --action log` 记录**。这是站点经验生成的数据源。
-3. **子 Agent 整合方式**：子 Agent 各自 deliver 独立文件到 docs/。全部完成后用 `deliver merge` 合并为一个文件，再 Read 合并文件做最终编辑（去重、调整结构、补写总结）。
+3. **子 Agent 整合方式**：子 Agent 各自 deliver 独立文件到 docs/。**必须等待所有子 Agent 的 background notification 全部收到后**，才能执行 `deliver merge`。提前 merge 会遗漏尚未完成的子 Agent 文件。合并后再 Read 合并文件做最终编辑（去重、调整结构、补写总结）。
 
 ## 搜索与发现
 
@@ -228,7 +228,7 @@ Agent({
 
 ## 浏览器操作
 
-**强制：所有 agent-browser 命令必须带 `--auto-connect`。** 不带会启动独立的 Chrome for Testing，丢失登录态。
+**强制：所有 agent-browser 命令必须带 `--auto-connect --session ${SID}-main`。** 不带 `--auto-connect` 会启动独立的 Chrome for Testing，丢失登录态。不带 `--session` 会和用户已有 tab 混在一起。
 
 不操作用户已有 tab，所有操作在新 tab 中进行。完整命令参考 `${CLAUDE_SKILL_DIR}/../../references/tool-guide.md`。
 
@@ -269,8 +269,8 @@ Agent({
 文本提取优先。详细场景（视频、音频、PDF、图片）见 `${CLAUDE_SKILL_DIR}/../../references/content-extraction.md`。
 
 ```bash
-agent-browser --auto-connect eval "document.body.innerText"         # 全页文本（首选）
-agent-browser --auto-connect eval --stdin <<'EOF'                   # 复杂提取
+agent-browser --auto-connect --session ${SID}-main eval "document.body.innerText"         # 全页文本（首选）
+agent-browser --auto-connect --session ${SID}-main eval --stdin <<'EOF'                    # 复杂提取
 const rows = document.querySelectorAll("table tbody tr");
 Array.from(rows).map(r => ({ name: r.cells[0].innerText, price: r.cells[1].innerText }));
 EOF

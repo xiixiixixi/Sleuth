@@ -7,7 +7,7 @@
 登录弹窗常只是覆盖遮罩——优先 eval 穿透：
 
 ```bash
-agent-browser --auto-connect eval "document.body.innerText.substring(0, 2000)"
+agent-browser --auto-connect --session ${SID}-main eval "document.body.innerText.substring(0, 2000)"
 ```
 
 eval 能拿到内容则无需登录。确认无法获取且登录能解决时，告知用户在 Chrome 中登录后继续。

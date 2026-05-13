@@ -15,7 +15,7 @@
 agent-browser open https://example.com
 
 # ✅ 正确：连接用户日常 Chrome
-agent-browser --auto-connect open https://example.com
+agent-browser --auto-connect --session ${SID}-main open https://example.com
 ```
 
 连接用户日常 Chrome 以复用登录态和书签。Chrome 必须通过 `--remote-debugging-port` 启动（`chrome://inspect` 复选框方式不兼容）。
@@ -28,8 +28,8 @@ agent-browser --auto-connect open https://example.com
 node "${CLAUDE_SKILL_DIR}/../../scripts/check-deps.mjs"
 
 # 方式 1：每条命令带 --auto-connect（推荐）
-agent-browser --auto-connect open https://example.com
-agent-browser --auto-connect snapshot -i
+agent-browser --auto-connect --session ${SID}-main open https://example.com
+agent-browser --auto-connect --session ${SID}-main snapshot -i
 
 # 方式 2：先 connect 建立连接
 agent-browser connect 9222
