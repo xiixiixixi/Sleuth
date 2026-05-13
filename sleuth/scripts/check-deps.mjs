@@ -291,7 +291,7 @@ async function restartChromeWithCDP(port = 9222) {
         execSync('osascript -e \'tell application "Google Chrome" to quit\'', { timeout: 10000 });
       } else if (os.platform() === 'win32') {
         // Windows: 用 taskkill 优雅关闭
-        execSync('taskkill /IM chrome.exe', { timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
+        execSync('taskkill /IM chrome.exe /T', { timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
       } else {
         // Linux: 发信号关闭
         execSync('pkill -x "Google Chrome" 2>/dev/null || pkill -x "chrome" 2>/dev/null || pkill -x "chromium" 2>/dev/null', { timeout: 10000 });

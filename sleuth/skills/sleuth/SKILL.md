@@ -360,14 +360,6 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/deliver.mjs" --action save \
 
 `--url` 是该文件内容来源的网页 URL，用于站点经验系统关联域名。
 
-```bash
-node "${CLAUDE_SKILL_DIR}/../../scripts/deliver.mjs" --action save \
-  --type <doc|screenshot|image|transcript|data|page> \
-  --source <源文件> --name <文件名> --url <来源URL> --sid $SID
-```
-
-`--url` 是该文件内容来源的网页 URL，用于站点经验系统关联域名。
-
 ## 站点经验
 
 详细说明见 `${CLAUDE_SKILL_DIR}/../../references/site-experience.md`。确定目标域名后用 `match-site.mjs` 查找经验。发现新模式时主动写入 `~/.sleuth/site-patterns/<域名>.md`。
