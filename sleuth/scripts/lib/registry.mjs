@@ -42,8 +42,7 @@ function withRegistryLock(fn) {
         const lockAge = Date.now() - statSync(REGISTRY_LOCK).mtimeMs;
         if (lockAge > 30000) rmSync(REGISTRY_LOCK, { recursive: true, force: true });
       } catch {}
-      const end = Date.now() + 30;
-      while (Date.now() < end) {}
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30);
     }
   }
   throw new Error(`Could not acquire registry lock: ${REGISTRY_LOCK}`);

@@ -256,9 +256,10 @@ function computeStats(domainData) {
     ? new Date(d.lastVisited).toISOString().slice(0, 10)
     : null;
 
-  // Bayesian 可信度评分：Beta(1,1) 先验
-  // 访问量为 0 时评分 0.5（中性），随数据量增加收敛到真实成功率
-  const credibilityScore = ((successCount + 1) / (visitCount + 2));
+  // Bayesian 可信度评分：Beta(1,1) 先验，仅基于明确标记了 extraction_success 的访问
+  // 无标记访问不参与计算，避免频繁访问站点被错误惩罚
+  const ratedCount = successCount + failureCount;
+  const credibilityScore = ((successCount + 1) / (ratedCount + 2));
 
   return {
     visitCount,

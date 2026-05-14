@@ -26,7 +26,7 @@ EOF
 
 ## 视频
 
-- **字幕优先**：YouTube 用 `download_subtitles.sh` + `srt_to_transcript.py`
+- **字幕优先**：`extract-subtitles.sh <URL>` + `srt_to_transcript.py`
 - **帧采样**（无字幕时）：操控 `<video>` + screenshot 采帧。短视频 5-8 帧，中等 10-15 帧
 - **平台内搜索**：B站、YouTube 站内搜索
 

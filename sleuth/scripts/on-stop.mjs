@@ -20,8 +20,8 @@
  *      然后调用 update-site-stats.mjs 为这些域名刷新统计。
  *      排除搜索引擎域名（google.com、bing.com 等）。
  *
- *   ③ 关闭残留浏览器 tab
- *      通过 CDP 关闭 sleuth 创建的 tab（不影响用户已有 tab）。
+ *   ③ 关闭 sleuth Chrome 实例
+ *      杀掉使用 chrome-debug 目录的 Chrome 进程。
  *      场景：子 Agent 创建了 tab 但忘记关闭。
  *
  *   ④ 清理残留 agent-browser 进程
@@ -31,7 +31,7 @@
  * 输出：静默模式，正常无输出，仅异常时打印警告。
  */
 
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, unlinkSync as fsUnlinkSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { execFileSync, execSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
@@ -254,77 +254,41 @@ function createSitePatternStubs(domains) {
   return created;
 }
 
-// ── ③ 关闭残留浏览器 tab ────────────────────────────────────────────
+// ── ③ 关闭 sleuth Chrome 实例 ──────────────────────────────────────────
 
 /**
- * 关闭 sleuth 创建的残留 tab（不影响用户自己的 tab）。
+ * 关闭 sleuth 启动的独立 Chrome 实例。
  *
- * 原理：check-deps 在 session 开始时记录初始 tab 到
- *   ~/.sleuth/.initial-tabs-{timestamp}.json
- * 文件结构：{ port: <number>, tabIds: [<string>, ...] }
- * Stop hook 只关闭不在初始列表中的 tab，使用 marker 中记录的端口。
- *
- * 如果没有 marker 文件（兼容旧逻辑），则尝试探测 CDP 端口后关闭所有 tab。
+ * sleuth Chrome 使用独立 user-data-dir（~/.sleuth/chrome-debug/），
+ * 与用户日常 Chrome 完全隔离。关闭时直接杀掉该实例即可，
+ * 不需要逐个关闭 tab。
  */
-async function closeBrowserTabs() {
-  // 查找初始 tab 记录文件
-  const sleuthDir = path.join(os.homedir(), '.sleuth');
-  const initialFiles = existsSync(sleuthDir)
-    ? readdirSync(sleuthDir).filter(f => f.startsWith('.initial-tabs-') && f.endsWith('.json'))
-    : [];
-
-  // 从 marker 文件获取 CDP 端口和初始 tab ID
-  let cdpPort = null;
-  const preservedIds = new Set();
-
-  for (const file of initialFiles) {
-    try {
-      const data = JSON.parse(readFileSync(path.join(sleuthDir, file), 'utf-8'));
-      if (data.port) cdpPort = data.port;
-      if (Array.isArray(data.tabIds)) {
-        for (const id of data.tabIds) preservedIds.add(id);
-      } else if (Array.isArray(data)) {
-        for (const id of data) preservedIds.add(id);
-      }
-    } catch {}
-  }
-
-  // 没有端口 → 尝试默认端口探测（用 fetch，不依赖 curl）
-  if (!cdpPort) {
-    for (const port of [9222, 9229, 9333]) {
-      try {
-        const resp = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) });
-        if (resp.ok) { cdpPort = port; break; }
-      } catch {}
-    }
-  }
-
-  if (!cdpPort) return;
-
+function closeSleuthChrome() {
   try {
-    const resp = await fetch(`http://127.0.0.1:${cdpPort}/json/list`, { signal: AbortSignal.timeout(3000) });
-    const targets = await resp.json();
-    const pages = targets.filter(t => t.type === 'page' && t.webSocketDebuggerUrl);
-    if (pages.length === 0) return;
-
-    for (const page of pages) {
-      if (preservedIds.size > 0 && preservedIds.has(page.id)) continue;
-      try {
-        await fetch(`http://127.0.0.1:${cdpPort}/json/close/${page.id}`, { signal: AbortSignal.timeout(2000) });
-      } catch {}
+    if (os.platform() === 'win32') {
+      // Windows: 找到使用 chrome-debug 目录的 Chrome 进程并关闭
+      const out = execSync(
+        'wmic process where "commandline like \'%chrome-debug%\'" get processid /format:list',
+        { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+      const pids = [...out.matchAll(/ProcessId=(\d+)/g)].map(m => parseInt(m[1]));
+      for (const pid of pids) {
+        try { process.kill(pid); } catch {}
+      }
+    } else {
+      // macOS/Linux: 找到使用 chrome-debug 目录的 Chrome 进程并关闭
+      const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
+      for (const line of ps.split('\n')) {
+        if (line.includes('grep')) continue;
+        if (line.includes('chrome-debug') && /chrome/i.test(line)) {
+          const m = line.match(/^\S+\s+(\d+)/);
+          if (m) {
+            try { process.kill(parseInt(m[1])); } catch {}
+          }
+        }
+      }
     }
   } catch {}
-
-  // 清理过期的 marker 文件（超过 24 小时的），保留近期 marker（其他 session 可能还在用）
-  const ONE_DAY_MS = 86400000;
-  for (const file of initialFiles) {
-    const match = file.match(/\.initial-tabs-(\d+)\.json$/);
-    if (!match) continue;
-    const age = Date.now() - parseInt(match[1], 10);
-    if (age > ONE_DAY_MS) {
-      try { fsUnlinkSync(path.join(sleuthDir, file)); } catch {}
-    }
-  }
 }
 
 // ── ④ 清理残留 agent-browser 进程 ────────────────────────────────────
@@ -439,17 +403,20 @@ async function main() {
   // 为新建 stub 的域名刷新统计数据（不跑全量，只为新域名创建）
   for (const domain of created) {
     try {
-      execSync(`node "${path.join(ROOT, 'scripts', 'update-site-stats.mjs')}" --domain "${domain}"`, {
+      execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'update-site-stats.mjs'), '--domain', domain], {
         timeout: 10000, stdio: 'ignore',
       });
     } catch {}
   }
 
-  // ③ 关闭残留的浏览器 tab
-  await closeBrowserTabs();
+  // ③ 关闭 sleuth Chrome 实例
+  closeSleuthChrome();
 
   // ④ 清理残留的 agent-browser 进程
   cleanupAgentBrowser();
 }
 
-main().catch(() => process.exit(0));
+main().catch((err) => {
+  console.error('on-stop error:', err.message || err);
+  process.exit(0);
+});

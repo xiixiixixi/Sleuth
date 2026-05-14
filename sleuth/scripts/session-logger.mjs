@@ -40,6 +40,7 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { validateSessionId } from './lib/validate.mjs';
 
 // ── 常量定义 ──────────────────────────────────────────────────────
 
@@ -117,19 +118,6 @@ function generateSessionId(query) {
 }
 
 /**
- * 校验 session ID，防止路径遍历攻击。
- * 只允许：字母、数字、连字符、下划线。
- *
- * @param {string} sessionId - 待校验的 session ID
- * @throws {Error} ID 不合法时抛出错误
- */
-function validateSessionId(sessionId) {
-  if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
-    throw new Error(`Invalid session ID: ${sessionId}`);
-  }
-}
-
-/**
  * 构造 session 文件的完整路径。
  * 内部调用 validateSessionId 做安全校验。
  *
@@ -182,8 +170,7 @@ function withLock(lockPath, fn) {
       try { return fn(); } finally { rmSync(lockPath, { recursive: true }); }
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
-      const end = Date.now() + 50;
-      while (Date.now() < end) {} // busy wait ~50ms
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     }
   }
   throw new Error(`Could not acquire lock: ${lockPath}`);

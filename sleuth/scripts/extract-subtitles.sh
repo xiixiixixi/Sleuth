@@ -2,7 +2,7 @@
 # extract-subtitles.sh — 播客/视频字幕穷举提取
 #
 # 功能：穷举所有可能的字幕获取策略，从视频/播客 URL 中提取字幕。
-#       比 download_subtitles.sh 更全面，增加了页面 transcript 检测。
+#       穷举所有策略：yt-dlp 多语种字幕 + 页面 transcript 检测。
 #
 # 用法：
 #   bash extract-subtitles.sh <URL> [输出目录]

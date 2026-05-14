@@ -23,16 +23,8 @@ import os
 import re
 import sys
 
-
-def load_config():
-    """读取 sleuth 配置文件。文件不存在或损坏时返回安全默认值。"""
-    try:
-        with open(os.path.expanduser("~/.sleuth/config.json"), "r") as f:
-            return json.load(f)
-    except Exception:
-        # 默认值：开启拦截和搜索路由
-        return {"blockWebTools": True, "routeSearchIntent": True}
-
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sleuth_config import load_config
 
 # 加载配置
 config = load_config()
@@ -83,12 +75,14 @@ system_message = None
 if any(re.search(p, text, re.IGNORECASE) for p in SEARCH_PATTERNS):
     # 注入系统消息，告诉 Agent：
     #   1. 检测到搜索意图
-    #   2. 不要使用原生 Web 工具（WebSearch/WebFetch/Fetch）和 MCP web 工具
-    #   3. 改用 /sleuth skill（会通过浏览器完成搜索）
+    #   2. 不要使用原生 Web 工具、MCP web 工具、或 Bash curl/wget
+    #   3. 必须立即调用 sleuth skill
     system_message = (
-        "Web search intent detected. "
-        "Do not use WebSearch, WebFetch, Fetch, or MCP web tools. "
-        "Use `/sleuth` skill."
+        "[SLEUTH ROUTE] Web search intent detected in user message. "
+        "You MUST use the sleuth skill for this task. "
+        "Invoke it now by calling the Skill tool with skill='sleuth'. "
+        "Do NOT use WebSearch, WebFetch, Fetch, curl, wget, or any MCP web tools — they are all blocked for web access. "
+        "sleuth uses agent-browser connected to your logged-in Chrome for all web operations."
     )
 
 # ── 第五步：输出 hook 响应 ────────────────────────────────────────

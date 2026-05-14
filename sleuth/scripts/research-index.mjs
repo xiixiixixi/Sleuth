@@ -33,6 +33,7 @@ import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
 import { listSessionFiles, registerSessionArtifacts, searchRegistry, REGISTRY_FILE } from './lib/registry.mjs';
+import { validateSessionId } from './lib/validate.mjs';
 
 // ── 常量定义 ──────────────────────────────────────────────────────
 
@@ -63,16 +64,6 @@ function loadEntities() {
 function saveEntities(entities) {
   ensureKnowledgeDir();
   writeFileSync(ENTITIES_FILE, JSON.stringify(entities, null, 2), 'utf-8');
-}
-
-/**
- * 校验 session ID，防止路径遍历。
- * 只允许字母、数字、连字符、下划线。
- */
-function validateSessionId(sid) {
-  if (!/^[a-zA-Z0-9_-]+$/.test(sid)) {
-    throw new Error(`Invalid session ID: ${sid}`);
-  }
 }
 
 function loadSessionById(sid) {

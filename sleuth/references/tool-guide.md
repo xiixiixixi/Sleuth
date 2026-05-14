@@ -6,6 +6,8 @@
 
 **所有命令必须连接用户日常/登录态 Chrome，并带 `--auto-connect --session`**：主 Agent 用 `${SID}-main`，子 Agent 用 `${BROWSER_SESSION}`。不带 `--auto-connect` 会启动独立的 Chrome for Testing，丢失登录态。不带 `--session` 会和用户已有 tab 混在一起。
 
+**禁止降级**：遇到浏览器操作失败时，不能降级到 `curl`、`WebSearch`、`WebFetch` 或其他非浏览器工具绕过登录态页面。必须通过 `check-deps` 修复环境，或换搜索引擎/关键词。
+
 ---
 
 ## 连接 Chrome（强制）
@@ -16,9 +18,8 @@
 # 通过 check-deps 自动检测、关闭旧 Chrome、带 CDP 参数重启（推荐）
 node "${CLAUDE_SKILL_DIR}/../../scripts/check-deps.mjs"
 
-# macOS 手动启动 Chrome（不推荐，必须先退出旧进程；不要用 open -a 传参）
-osascript -e 'tell application "Google Chrome" to quit'
-pkill -9 -x "Google Chrome" 2>/dev/null || true
+# macOS 手动启动 Chrome（不推荐，check-deps 会自动处理）
+# 使用独立目录，不关闭用户正在使用的 Chrome
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --remote-debugging-port=9222 \
   --user-data-dir="$HOME/.sleuth/chrome-debug" &
@@ -28,6 +29,24 @@ agent-browser --auto-connect --session ${SID}-main open https://example.com
 
 # ❌ 错误：会启动独立的 Chrome for Testing
 agent-browser open https://example.com
+```
+
+## 障碍处理
+
+| 障碍 | 处理 |
+|------|------|
+| 登录弹窗 | 先 `eval "document.body.innerText"` 穿透遮罩；拿不到内容再请用户登录 |
+| 付费墙 | 提取墙前可见片段，搜索免费转载版本，不尝试绕过 |
+| CAPTCHA | 暂停，告知用户，5 分钟无响应换渠道 |
+| 限流（429/空响应） | 暂停该域名，换渠道或等 30 秒，重试仍限流则放弃 |
+| agent-browser 失败 | 1. `check-deps` 修复 → 2. 重试原命令 → 3. 换搜索引擎/关键词 |
+| 页面超时 | 加 timeout；连续失败换方式 |
+| snapshot 空但标题正常 | `eval` 检查 `body.innerText.length` |
+
+遇到障碍时记录到 session-logger：
+```bash
+node "${CLAUDE_SKILL_DIR}/../../scripts/session-logger.mjs" --action log --sid $SID \
+  --operation '{"type":"captcha|login_wall|paywall|dead_link|anti_bot","url":"<URL>","domain":"<域名>"}'
 ```
 
 ## 导航

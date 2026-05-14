@@ -51,7 +51,7 @@ sleuth/                                    插件根目录
 │   │   ├── output.mjs                     共享输出工具：路径解析、目录创建、类型映射
 │   │   └── registry.mjs                   跨 session 交付物 registry 与召回评分
 │   ├── check-deps.mjs                     环境检查：agent-browser + Chrome CDP + 可选依赖
-│   ├── on-stop.mjs                        Stop hook：关闭 orphan session、关闭残留 tab、站点经验
+│   ├── on-stop.mjs                        Stop hook：关闭 orphan session、关闭 sleuth Chrome、站点经验
 │   ├── session-logger.mjs                 会话生命周期：start / log / finish
 │   ├── deliver.mjs                        文件交付：save / list / init / merge
 │   ├── research-index.mjs                 历史召回：index / query / recall / backfill
@@ -59,17 +59,16 @@ sleuth/                                    插件根目录
 │   ├── update-site-stats.mjs              域名可信度自动评分（Bayesian）
 │   ├── match-site.mjs                     站点经验匹配：查询域名 → 输出经验内容
 │   ├── find-url.mjs                       Chrome 书签 / 历史搜索（SQLite）
-│   ├── download_subtitles.sh              YouTube 字幕下载（yt-dlp）
 │   ├── extract-subtitles.sh               通用字幕提取（视频 / 播客）
 │   └── srt_to_transcript.py               SRT/VTT 字幕清洗为纯文本
 │
 ├── references/
-│   ├── tool-guide.md                      agent-browser 命令速查
-│   ├── subagent-guide.md                  子 Agent 叶子执行者手册
-│   ├── cache-guide.md                     缓存判定与时效性规则
+│   ├── tool-guide.md                      agent-browser 命令速查 + 障碍处理
+│   ├── search-guide.md                    统一搜索方法论（主 Agent 和探针共用）
+│   ├── subagent-guide.md                  探针执行手册（约束 + 输出协议）
+│   ├── search-expansion.md                搜索拓宽盲区（六维度）
+│   ├── review-checklist.md                审查清单
 │   ├── content-extraction.md              内容提取（视频/音频/PDF/图片）
-│   ├── obstacle-handling.md               障碍处理（登录/CAPTCHA/限流/故障）
-│   ├── site-experience.md                 站点经验文件格式与统计
 │   └── site-patterns/.gitkeep             占位（实际经验存 ~/.sleuth/site-patterns/）
 │
 ├── README.md                              本文件
@@ -103,7 +102,7 @@ sleuth/                                    插件根目录
 │    lib/output.mjs        路径解析 & 类型映射                   │
 │    lib/registry.mjs      跨日期 artifact registry              │
 │    check-deps.mjs        环境检查 + Chrome 自动重启            │
-│    on-stop.mjs           Stop hook（session/tab 清理）        │
+│    on-stop.mjs           Stop hook（session 清理 + 关闭 sleuth Chrome）        │
 │    session-logger.mjs    会话生命周期管理                      │
 │    deliver.mjs           文件交付到 ~/.sleuth/output/           │
 │    research-index.mjs    历史召回与知识索引                    │
@@ -113,12 +112,12 @@ sleuth/                                    插件根目录
 │    find-url.mjs          Chrome 书签/历史搜索                  │
 │                                                              │
 │  references/          参考文档（Agent 运行时按需读取）         │
-│    tool-guide.md          agent-browser 命令速查              │
-│    subagent-guide.md      子 Agent 执行手册                   │
-│    cache-guide.md         缓存判定规则                        │
+│    tool-guide.md          agent-browser 命令速查 + 障碍处理   │
+│    search-guide.md        统一搜索方法论                      │
+│    subagent-guide.md      探针执行手册                        │
+│    search-expansion.md    搜索拓宽盲区（六维度）              │
+│    review-checklist.md    审查清单                            │
 │    content-extraction.md  内容提取场景                        │
-│    obstacle-handling.md   障碍处理指南                        │
-│    site-experience.md     站点经验格式                        │
 │                                                              │
 │  .claude-plugin/      Claude Code 插件注册                    │
 └──────────────────────────────────────────────────────────────┘

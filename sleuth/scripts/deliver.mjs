@@ -207,9 +207,16 @@ async function cmdSave(source, type, name, sid, url) {
   try {
     // /dev/stdin 不支持 copyFileSync，改用流式读取
     if (source === '/dev/stdin') {
+      const MAX_STDIN_BYTES = 100 * 1024 * 1024; // 100MB
       const chunks = [];
+      let totalBytes = 0;
       process.stdin.setEncoding('utf-8');
       for await (const chunk of process.stdin) {
+        totalBytes += Buffer.byteLength(chunk, 'utf-8');
+        if (totalBytes > MAX_STDIN_BYTES) {
+          console.error(`Error: stdin input exceeds ${MAX_STDIN_BYTES / 1024 / 1024}MB limit`);
+          process.exit(1);
+        }
         chunks.push(chunk);
       }
       writeFileSync(targetPath, chunks.join(''), 'utf-8');

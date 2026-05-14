@@ -281,72 +281,62 @@ async function restartChromeWithCDP(port = 9222) {
     return false;
   }
 
-  // 如果 Chrome 正在运行，必须先关闭。
-  // 关键原因：Chrome 已运行时，macOS open -a 或再次启动 Chrome 传入的
-  // --remote-debugging-port 参数会被现有进程忽略，agent-browser 仍然无法连接。
-  const running = isChromeRunning();
-  if (running) {
-    console.log('chrome: 正在关闭已运行的 Chrome（必须重启才能注入 --remote-debugging-port）...');
-    try {
-      if (os.platform() === 'darwin') {
-        // macOS: 用 AppleScript 优雅退出（会保存标签页等）
-        execSync('osascript -e \'tell application "Google Chrome" to quit\'', { timeout: 10000 });
-      } else if (os.platform() === 'win32') {
-        // Windows: 用 taskkill 优雅关闭
-        execSync('taskkill /IM chrome.exe /T', { timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
-      } else {
-        // Linux: 发信号关闭
-        execSync('pkill -x "Google Chrome" 2>/dev/null || pkill -x "chrome" 2>/dev/null || pkill -x "chromium" 2>/dev/null', { timeout: 10000 });
-      }
-    } catch { /* 强制关闭的兜底 */ }
-    // 等待 Chrome 进程完全退出（最多 7.5 秒）
-    for (let i = 0; i < 15; i++) {
-      if (!isChromeRunning()) break;
-      await sleep(500);
-    }
-    if (isChromeRunning()) {
-      console.log('chrome: 优雅关闭失败，正在终止 Chrome 进程...');
-      try {
-        if (os.platform() === 'win32') {
-          execSync('taskkill /F /IM chrome.exe /T', { timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
-        } else {
-          execSync('pkill -9 -x "Google Chrome" 2>/dev/null || pkill -9 -x "chrome" 2>/dev/null || pkill -9 -x "chromium" 2>/dev/null', { timeout: 10000 });
-        }
-      } catch {}
-      for (let i = 0; i < 10; i++) {
-        if (!isChromeRunning()) break;
-        await sleep(300);
-      }
-      if (isChromeRunning()) {
-        console.error('chrome: Chrome 未能终止，请手动退出后重试');
-        return false;
-      }
-    }
-    await sleep(1000); // 额外等待 1 秒确保端口释放
-  }
+  // 不关闭用户正在使用的 Chrome。
+  // 使用独立的 debug profile 目录 + --user-data-dir 启动新的 Chrome 实例，
+  // 通过复制加密密钥和 Cookie 保留登录态。用户 Chrome 保持不动。
 
-  // Chrome 147+ 要求非默认 --user-data-dir 才能开启 CDP
-  // 创建独立的调试 profile 目录
+  // 使用独立的 debug profile 目录启动 Chrome，不关闭用户正在使用的 Chrome。
+  // 关键：复制加密密钥（Local State）和 Cookie，保留登录态。
+  // 不能软链接整个 Default/（锁文件会与用户 Chrome 冲突），
+  // 也不能只用空壳 debug 目录（没有加密密钥，Cookie 解不开）。
   const debugDir = path.join(os.homedir(), '.sleuth', 'chrome-debug');
-  const defaultProfile = getDefaultChromeProfile();
+
+  // 每次启动前清空旧目录，避免多次运行后 Cache 等文件堆积膨胀
+  try {
+    if (fs.existsSync(debugDir)) {
+      fs.rmSync(debugDir, { recursive: true, force: true });
+    }
+  } catch {}
   fs.mkdirSync(debugDir, { recursive: true });
 
-  // 软链接用户真实的 Default profile（保留登录态、Cookie、书签等）
+  const defaultProfile = getDefaultChromeProfile();
+  fs.mkdirSync(debugDir, { recursive: true });
+  fs.mkdirSync(path.join(debugDir, 'Default'), { recursive: true });
+
   if (defaultProfile) {
-    const linkPath = path.join(debugDir, 'Default');
-    const realDefault = path.join(defaultProfile, 'Default');
+    // 复制 Local State（加密密钥，Cookie 解密必须）
     try {
-      if (!fs.existsSync(linkPath) && fs.existsSync(realDefault)) {
-        // Windows: junction 不需要管理员权限；Unix: symlink
-        const type = os.platform() === 'win32' ? 'junction' : undefined;
-        fs.symlinkSync(realDefault, linkPath, type);
+      const localStateSrc = path.join(defaultProfile, 'Local State');
+      const localStateDst = path.join(debugDir, 'Local State');
+      if (fs.existsSync(localStateSrc)) {
+        fs.copyFileSync(localStateSrc, localStateDst);
       }
-    } catch { /* 软链接可能已存在或平台不支持 */ }
+    } catch {}
+
+    // 复制登录态、历史、书签等关键文件（不复制整个 Default/，避免锁冲突）
+    const filesToCopy = [
+      'Cookies',       // 登录态
+      'Login Data',    // 保存的密码
+      'Preferences',   // 设置
+      'Web Data',      // 自动填充
+      'History',       // 浏览历史
+      'Bookmarks',     // 书签
+      'Favicons',      // 网站图标
+    ];
+    for (const file of filesToCopy) {
+      try {
+        const src = path.join(defaultProfile, 'Default', file);
+        const dst = path.join(debugDir, 'Default', file);
+        if (fs.existsSync(src)) {
+          fs.copyFileSync(src, dst);
+        }
+      } catch {} // 文件可能被锁定，跳过
+    }
   }
 
   // 以 CDP 模式启动 Chrome（后台进程，不阻塞）。
-  // 不使用 macOS open -a；如果 Chrome 已运行，open -a 传入的参数会被忽略。
-  console.log(`chrome: 启动 Chrome（CDP 端口 ${port}）...`);
+  // 使用独立的 debug 目录，不干扰用户正在使用的 Chrome。
+  console.log(`chrome: 启动 sleuth Chrome（CDP 端口 ${port}，登录态已从用户 profile 复制）...`);
   const args = [
     `--remote-debugging-port=${port}`,
     '--no-first-run',
@@ -451,11 +441,7 @@ async function main(options = {}) {
   } else {
     // CDP 不可用 → 必须关闭当前 Chrome 后用 --remote-debugging-port 重启。
     // 已运行的 Chrome 不会接收后续启动命令传入的新参数。
-    if (isSleuthChrome()) {
-      console.log('chrome: sleuth Chrome CDP 不可用，正在重启...');
-    } else {
-      console.log('chrome: 用户 Chrome 未开启 CDP，正在关闭并以调试模式重启...');
-    }
+    console.log('chrome: 用户 Chrome 未开启 CDP，正在关闭并以调试模式重启...');
     const ok = await restartChromeWithCDP(9222);
     if (ok) {
       chromePort = 9222;
@@ -465,21 +451,6 @@ async function main(options = {}) {
       results.chromePort = null;
       console.log('chrome: 重启失败');
     }
-  }
-
-  // ── 检查 2.5：记录初始 tab ID（Stop hook 用于区分用户 tab 和 sleuth tab）──
-  if (chromePort) {
-    try {
-      const sleuthDir = path.join(os.homedir(), '.sleuth');
-      if (!fs.existsSync(sleuthDir)) fs.mkdirSync(sleuthDir, { recursive: true });
-
-      const resp = await fetch(`http://127.0.0.1:${chromePort}/json/list`, { signal: AbortSignal.timeout(3000) });
-      const targets = await resp.json();
-      const pageIds = targets.filter(t => t.type === 'page').map(t => t.id);
-      const markerPath = path.join(sleuthDir, `.initial-tabs-${Date.now()}.json`);
-      // 结构化数据：包含端口号和 tab ID 列表
-      fs.writeFileSync(markerPath, JSON.stringify({ port: chromePort, tabIds: pageIds }), 'utf-8');
-    } catch { /* CDP 不可用则跳过 */ }
   }
 
   // ── 检查 3：输出目录 ──
@@ -511,7 +482,7 @@ async function main(options = {}) {
   console.log();
   const optDeps = {
     sqlite3:    { install: 'macOS/Linux 预装；Windows: winget install sqlite.sqlite', usedBy: 'find-url （Chrome 书签/历史搜索）' },
-    'yt-dlp':   { install: 'pip install yt-dlp', usedBy: 'download_subtitles / extract-subtitles （YouTube 字幕下载）' },
+    'yt-dlp':   { install: 'pip install yt-dlp', usedBy: 'extract-subtitles （视频/播客字幕提取）' },
     python3:    { install: 'macOS/Linux 预装；Windows: winget install python3', usedBy: 'srt_to_transcript （字幕清洗）' },
   };
   results.optionalDeps = {};

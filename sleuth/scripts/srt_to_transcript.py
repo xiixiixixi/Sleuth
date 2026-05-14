@@ -6,7 +6,7 @@ srt_to_transcript.py — SRT/VTT 字幕文件清洗为纯文本
   将 SRT 或 VTT 格式的字幕文件转换为干净的纯文本 transcript。
   去除时间戳、序号、HTML 标签、重复行，输出可直接阅读的段落文本。
 
-  典型用途：配合 download_subtitles.sh / extract-subtitles.sh 使用，
+  典型用途：配合 extract-subtitles.sh 使用，
   将下载的字幕文件转为可阅读的文本供 Agent 分析。
 
 处理流程：
