@@ -74,7 +74,7 @@ SLEUTH_OUTPUT=$(node "${SKILL_DIR}/scripts/check-deps.mjs" --output-dir --sid $S
 | 4 | **Gate** | `deliver list --sid $SID` 确认每探针有交付物。缺文件 = 探针失败，重派或标记缺口 |
 | 5 | **Review** | 派审查 subagent（不可跳过） |
 | 6 | **Patch** | 缺口补查 → 再审查（最多2轮） |
-| 7 | **Deliver** | 合并 + 交付 |
+| 7 | **Deliver** | 合并 + 内联总结 + cwd 输出完整报告 |
 
 搜索方法见 `references/search-guide.md`。
 
@@ -209,19 +209,19 @@ Agent({
 ## 交付
 
 - **快速验证/定向搜索**：内联回复 + 来源 URL
-- **深度调研（默认）**：deliver save 存档 → 内联总结回复（摘要 + 关键结论 + 来源）→ 同时在用户 cwd 输出完整 md 文件
+- **深度调研（默认）**：deliver save 存档 → 内联总结回复（摘要 + 关键结论 + 来源）→ **必须**在用户 cwd 输出完整 md 文件
 - **深度调研（用户指定格式）**：完全按用户要求（格式、路径、文件名），不套默认行为
 
-cwd 输出规则：
-```bash
-# 深度调研完成后，自动在 cwd 生成完整报告
-cat <<'EOF' > "${用户cwd}/${主题}-report.md"
-完整调研内容...
-EOF
-```
+### cwd 输出（深度调研必须执行）
 
-命名：`<主题关键词>-report.md`，中文主题用中文文件名。内容 = deliver merge 后的完整版本（不是摘要）。
+深度调研完成后，用 Write 工具在用户当前工作目录生成完整报告：
 
+文件名：`<主题关键词>-report.md`，中文主题用中文文件名。
+内容 = deliver merge 后的完整版本（不是摘要）。
+
+这是 Deliver 阶段的必要步骤，不是可选项。内联回复是摘要，cwd 文件是完整内容。两者都要输出。
+
+deliver save 命令：
 ```bash
 node "${SKILL_DIR}/scripts/deliver.mjs" --action save \
   --type <doc|screenshot|image|transcript|data|page> \
@@ -239,6 +239,7 @@ node "${SKILL_DIR}/scripts/deliver.mjs" --action save \
 7. **深度调研禁止跳过 Review→Patch**：Search 阶段完成后，必须先 `deliver list` 确认文件齐全，再派审查 subagent。审查未通过则必须 Patch。不允许 Search 后直接 Deliver。
 8. **探针模板不可改写**：派探针时必须使用「搜索探针模板」原样（变量替换后），不得用自己的话重写 prompt、不得省略 SKILL_DIR / subagent-guide.md 读取指令。
 9. **探针运行期间禁止杀 Chrome**：有 background 探针运行时，禁止 `killall Chrome`、`close --all`、`check-deps`（会重启 Chrome）。等所有探针完成或手动取消后再操作。
+10. **深度调研必须输出 cwd 文件**：Deliver 阶段必须用 Write 工具在用户 cwd 生成 `<主题>-report.md`。内联回复只是摘要，不能替代完整文件输出。用户指定了格式的除外。
 
 ## 站点经验
 
