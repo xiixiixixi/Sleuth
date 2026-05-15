@@ -1,44 +1,41 @@
 ---
 name: sleuth:config
-description: 配置 sleuth 插件 — 发现可用工具、选择封禁项、配置权限、卸载
-argument-hint: [setup|show|block-web on|off|list|route-search on|off|permissions|uninstall]
+description: 设置 sleuth 插件运行环境。用于 setup、permissions、uninstall：发现可用工具、配置 Claude Code 权限、清理安装数据。不管理搜索路由开关，不创建运行时配置文件。
+argument-hint: [setup|permissions|uninstall]
 allowed-tools: [Read, Write, Bash, AskUserQuestion]
 ---
 
-# Sleuth 配置向导
-
-管理 sleuth 插件的所有可配置项。配置存储在 `~/.sleuth/config.json`。
+# Sleuth 设置向导
 
 用户输入: `$ARGUMENTS`
 
-## 参数路由
+这个 skill 只处理安装环境：工具发现、权限写入和卸载清理。搜索/研究意图由 hook 默认注入，不再提供开关，也不再写运行时配置文件。
 
-根据 `$ARGUMENTS` 执行对应操作：
+## 参数路由
 
 | 参数 | 操作 |
 |------|------|
-| `setup` 或无参数 | 完整设置向导（发现工具 → 选择封禁 → 配置权限） |
-| `show` | 显示当前配置 |
-| `block-web on` | 开启 Web 工具拦截 |
-| `block-web off` | 关闭 Web 工具拦截 |
-| `block-web list` | 重新选择要封禁的工具 |
-| `route-search on` | 开启搜索意图路由 |
-| `route-search off` | 关闭搜索意图路由 |
-| `permissions` | 配置 settings.local.json 权限 |
-| `uninstall` | 卸载：逆向清理所有配置和数据 |
+| `setup` 或无参数 | 完整设置向导（发现工具 → 配置权限） |
+| `permissions` | 重新配置 `settings.local.json` 权限 |
+| `uninstall` | 卸载：逆向清理权限和可选数据 |
+
+如果用户询问搜索路由开关，说明该开关已废弃：Sleuth 默认路由搜索/研究意图，不再维护运行时配置文件。
 
 ---
 
 ## 插件根目录检测
 
-config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解析到 `skills/config/` 而非插件根目录。
-脚本都在插件根目录的 `scripts/` 下，因此需要先检测插件根目录的绝对路径。
+config 是子 skill（位于 `skills/config/`），其 `${CLAUDE_SKILL_DIR}` 解析到 `skills/config/` 而非插件根目录。脚本位于插件根目录的 `scripts/` 下，因此先检测插件根目录绝对路径。
 
 检测方法（从 `installed_plugins.json` 读取唯一确定路径）：
-1. 用 `Bash` 运行：`cat ~/.claude/plugins/installed_plugins.json | python3 -c "import sys,json; d=json.load(sys.stdin); plugins=d.get('plugins',{}); [print(v[0]['installPath']) for k,v in plugins.items() if 'sleuth' in k and isinstance(v,list)]"`
-2. 将返回的路径保存到变量 `PLUGIN_ROOT`，后续所有涉及脚本路径的操作都使用此变量
 
-**关键**：写入 `settings.local.json` 的 allow 规则必须是**绝对路径字面量**，版本号目录用 `*` 通配符（如 `Bash(node /Users/xxx/.claude/plugins/cache/sleuth/sleuth/*/scripts/*.mjs *)`），这样插件更新后权限不会失效。不能用变量——`settings.local.json` 不支持变量展开。
+1. 用 `Bash` 运行：
+   ```bash
+   cat ~/.claude/plugins/installed_plugins.json | python3 -c "import sys,json; d=json.load(sys.stdin); plugins=d.get('plugins',{}); [print(v[0]['installPath']) for k,v in plugins.items() if 'sleuth' in k and isinstance(v,list)]"
+   ```
+2. 将返回路径保存到变量 `PLUGIN_ROOT`，后续所有涉及脚本路径的操作都使用此变量。
+
+写入 `settings.local.json` 的 allow 规则必须是**绝对路径字面量**，版本号目录用 `*` 通配符（例如 `Bash(node /Users/xxx/.claude/plugins/cache/sleuth/sleuth/*/scripts/*.mjs *)`），这样插件更新后权限不会失效。
 
 ## Profile 路径检测
 
@@ -46,184 +43,94 @@ setup 和 uninstall 需要读写 `settings.local.json`。每个 Claude Code prof
 
 检测流程：
 
-1. 用 `Bash` 检测当前平台，计算默认 Claude Code profile 路径：
+1. 用 `Bash` 计算默认 profile 路径：
    ```bash
    echo $HOME/.claude
    ```
-2. **用 `AskUserQuestion` 让用户确认**（不可跳过）：
-   - 上一步计算的默认路径（标注"默认"）
+2. 用 `AskUserQuestion` 让用户确认：
+   - 默认路径（标注“默认”）
    - `其他`（用户手动输入路径）
-3. 将确认的路径保存到变量 `PROFILE_DIR`，后续操作使用
+3. 将确认结果保存到变量 `PROFILE_DIR`。
 
 ---
 
-## 操作一：完整设置向导（setup）
-
-**开始前必须先完成「Profile 路径检测」**，确定 `PROFILE_DIR` 后再继续。
+## 操作一：setup
 
 ### 阶段 1 — 发现可用工具
 
 1. 搜索 MCP 配置文件（以下位置逐一检查，存在就读取）：
-   - 项目: `.mcp.json`
-   - 全局: `{PROFILE_DIR}/settings.json`
-2. 从配置中提取所有 MCP 服务器名称（`mcpServers` 对象的 key）
-3. 对每个 MCP 服务器，工具名格式为 `mcp__<server>__<tool>`，列出该服务器下的所有 tool
-4. 如果无法枚举具体 tool 名，则使用服务器名作为分组提示
-5. 添加内置 Web 工具: `WebSearch`、`WebFetch`、`Fetch`
-6. 将工具分为两组：
-   - **Web/搜索类**（建议封禁）：工具名或描述包含 search、fetch、web、browse、scrape、crawl、reader、tavily、extract 等关键词的
-   - **其他工具**（不封禁）：图像分析、代码工具、数据库等
+   - 项目：`.mcp.json`
+   - 全局：`{PROFILE_DIR}/settings.json`
+2. 从配置中提取所有 MCP 服务器名称（`mcpServers` 对象的 key）。
+3. 对每个 MCP 服务器，列出该服务器下的所有 tool；如果无法枚举具体 tool 名，则至少保留服务器名分组。
+4. 添加内置工具：`WebSearch`、`WebFetch`、`Fetch`。
+5. 把工具做成能力分组，而不是敌我分组：
+   - **discovery scouts**：search / browse / discover / tavily / exa / serp 等
+   - **readers / extractors**：fetch / reader / crawl / scrape / firecrawl / jina 等
+   - **browser / action tools**：agent-browser、playwright 类
+   - **其他工具**：代码、数据库、图像等
 
-### 阶段 2 — 选择封禁项
+发现结果只用于告诉用户当前环境能提供哪些入口；Sleuth 不根据这里的结果写工具策略，也不改变工具权限。
 
-1. 读取当前 `~/.sleuth/config.json`（如不存在则创建默认配置）
-2. 用 `AskUserQuestion` 展示工具列表，`multiSelect: true`，默认选中 web/搜索类工具 + 已有的封禁项
-3. **合并（union）而非覆盖**：将用户选择与现有 `blockedTools` 合并去重后写入。不同 profile 的封禁需求会累积，不会互相覆盖丢失
+### 阶段 2 — 配置权限
 
-### 阶段 3 — 配置权限
-
-1. 读取 `{PROFILE_DIR}/settings.local.json`（如不存在则创建空结构）
-3. 按"插件根目录检测"流程获取 `PLUGIN_ROOT` 绝对路径
-4. 计算需要添加的 allow 规则。**版本目录用 `*` 通配符**，这样插件更新后权限不会失效：
-   ```
+1. 读取 `{PROFILE_DIR}/settings.local.json`（如不存在则创建空结构）。
+2. 按“插件根目录检测”获取 `PLUGIN_ROOT`。
+3. 计算需要添加的 allow 规则，版本目录用 `*` 通配：
+   ```text
    Bash(agent-browser *)
-   Bash(node {PLUGIN_CACHE_DIR}/sleuth/sleuth/*/scripts/*.mjs *)
+   Bash(node {PLUGIN_ROOT}/scripts/*.mjs *)
    ```
-   其中 `{PLUGIN_CACHE_DIR}` 是插件缓存根目录（如 `/Users/xxx/.claude/plugins/cache`），从 `PLUGIN_ROOT` 提取（取 `sleuth/sleuth/` 的父目录）
-4. 如规则已存在则跳过
-5. 用 `AskUserQuestion` 展示将要写入的规则，请求用户确认
-6. 用户确认后，用 `Write` 工具写入更新后的 `settings.local.json`
-7. 提示：权限变更需要重启 Claude Code 生效
-
-### 保存配置
-
-最终写入 `~/.sleuth/config.json`：
-```json
-{
-  "blockWebTools": true,
-  "routeSearchIntent": true,
-  "blockedTools": ["WebSearch", "WebFetch", ...]
-}
-```
+4. 已存在则跳过。
+5. 用 `AskUserQuestion` 展示即将写入的规则，请求用户确认。
+6. 用户确认后，用 `Write` 写回更新后的 `settings.local.json`。
+7. 提示：权限变更需要重启 Claude Code 生效。
 
 ---
 
-## 操作二：显示配置（show）
+## 操作二：permissions
 
-1. 读取 `~/.sleuth/config.json`，如不存在则显示默认值
-2. 格式化输出：
-
-```
-sleuth 配置:
-
-  拦截 Web 工具:    ✓ 开启
-  搜索意图路由:     ✓ 开启
-
-  封禁工具列表 (<数量>):
-    • WebSearch
-    • WebFetch
-    • <其他用户选择的工具>
-
-  配置文件: ~/.sleuth/config.json
-
-使用 /sleuth:config <选项> 修改配置。
-```
+重跑“阶段 2 — 配置权限”。
 
 ---
 
-## 操作三：block-web on/off
+## 操作三：uninstall
 
-1. 读取 `~/.sleuth/config.json`（如不存在则创建）
-2. 更新 `blockWebTools` 字段
-3. 写回文件
-4. 输出结果
-
----
-
-## 操作四：block-web list
-
-同"阶段 1 + 阶段 2"（只重新选择封禁工具列表，不改权限）。
-
----
-
-## 操作五：route-search on/off
-
-1. 读取 `~/.sleuth/config.json`
-2. 更新 `routeSearchIntent` 字段
-3. 写回文件
-4. 输出结果
-
----
-
-## 操作六：permissions
-
-同"阶段 3"（只配置权限）。
-
----
-
-## 操作七：卸载（uninstall）
-
-逆向清理 sleuth 的所有配置和数据。分两步：
+逆向清理 sleuth 添加的权限和可选数据。
 
 ### 步骤 1 — 清理 settings 文件
 
-1. 按"Profile 路径检测"流程让用户确认 profile 目录，确定 `PROFILE_DIR`
-2. 读取 `{PROFILE_DIR}/settings.local.json`
-3. 按"插件根目录检测"流程获取 `PLUGIN_ROOT`
+1. 按“Profile 路径检测”让用户确认 profile 目录，得到 `PROFILE_DIR`。
+2. 读取 `{PROFILE_DIR}/settings.local.json`。
+3. 按“插件根目录检测”获取 `PLUGIN_ROOT`。
 4. 从 `permissions.allow` 中删除 sleuth 添加的规则：
    - `Bash(agent-browser *)`
-   - `Bash(node {PLUGIN_ROOT}/scripts/*.mjs *)`（用检测到的实际路径）
-5. 从 `permissions.deny` 中删除 sleuth 添加的规则（如有）：
-   - `WebSearch`、`WebFetch`、`Fetch`
-6. 用 `AskUserQuestion` 展示将要删除的规则，请求用户确认
-7. 确认后用 `Write` 写回 `settings.local.json`
+   - `Bash(node {PLUGIN_ROOT}/scripts/*.mjs *)`
+5. 用 `AskUserQuestion` 展示即将删除的规则，请求用户确认。
+6. 确认后用 `Write` 写回 `settings.local.json`。
 
 ### 步骤 2 — 清理数据（可选）
 
 用 `AskUserQuestion` 询问是否删除 `~/.sleuth/` 数据目录：
 
-```
-是否删除 sleuth 数据？（包含会话日志和站点经验）
+```text
+是否删除 sleuth 数据？（包含会话日志、输出 artifact 和站点经验）
 
 选项:
-- 保留数据 — 只清理配置，~/.sleuth/ 保留
+- 保留数据 — 只清理权限，~/.sleuth/ 保留
 - 删除数据 — 完全清除 ~/.sleuth/ 目录
 - 取消 — 不做任何操作
 ```
 
-如果用户选择"删除数据"：
+如果用户选择“删除数据”：
+
 1. `rm -rf ~/.sleuth/`
 2. 输出确认信息
 
 ### 步骤 3 — 卸载插件
 
-提示用户运行以下命令完成插件卸载：
-```
+提示用户运行：
+
+```text
 claude plugin uninstall sleuth
 ```
-
-输出最终确认：
-```
-sleuth 已卸载:
-
-  ✓ 已清理 settings.local.json 权限规则
-  ✓ 已删除 ~/.sleuth/ 数据（或：已保留 ~/.sleuth/ 数据）
-  → 请运行: claude plugin uninstall sleuth
-
-重启 Claude Code 后生效。
-```
-
----
-
-## 默认配置
-
-首次使用（无 config.json）时的默认值：
-
-```json
-{
-  "blockWebTools": true,
-  "routeSearchIntent": true
-}
-```
-
-注意：默认不包含 `blockedTools` 字段 — 此时 hook 仅封禁 Claude Code 内置 Web 工具（WebSearch、WebFetch、Fetch）。MCP 工具需运行 `/sleuth:config setup` 由向导发现并选择。
