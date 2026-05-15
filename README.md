@@ -71,8 +71,9 @@ sleuth/                                    插件根目录
 │   ├── content-extraction.md              内容提取（视频/音频/PDF/图片）
 │   └── site-patterns/.gitkeep             占位（实际经验存 ~/.sleuth/site-patterns/）
 │
-├── README.md                              本文件
 └── LICENSE                                MIT
+
+README.md 位于仓库根目录（即本文件）。
 ```
 
 ---
