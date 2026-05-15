@@ -5,4 +5,7 @@ __pycache__/
 references/site-patterns/**/*.md
 node_modules/
 sleuth-output/
-docs/
+.sisyphus/
+docs/*
+!docs/
+!docs/sleuth-philosophy-and-iteration-report.md
