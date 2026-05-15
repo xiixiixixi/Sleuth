@@ -1,5 +1,7 @@
 # Search Expansion 搜索拓宽
 
+**前置条件**：Scout 阶段已完成。用 Scout 发现的实际实体、来源、矛盾信号填写本清单，禁止凭想象填写。
+
 搜索前先从六个方向想一遍。不是技巧百科，是盲区检查清单。
 
 ## 1. Entity 实体扩展
@@ -58,12 +60,12 @@
 
 > 最容易漏：引用旧信息时不检查是否有更新，尤其公司、价格、版本类。
 
-搜索前用此格式快速记录（只写能改变搜索方向的）：
+搜索前用此格式快速记录（只写能改变搜索方向的，必须基于 Scout 实证）：
 
 Expansion:
-- Entities:
-- Hidden questions:
-- Source types:
-- Perspectives:
-- Contradictions:
-- Freshness:
+- Entities: [Scout 中发现的实际别名/关联实体]
+- Hidden questions: [从搜索结果标题中推断的子问题]
+- Source types: [Scout 中发现有内容的平台 + 未覆盖的平台]
+- Perspectives: [搜索结果中出现的不同立场]
+- Contradictions: [Scout 中发现的矛盾信号]
+- Freshness: [Scout 中观察到的最新/最旧结果日期]

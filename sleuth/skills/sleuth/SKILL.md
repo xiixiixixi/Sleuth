@@ -68,17 +68,34 @@ SLEUTH_OUTPUT=$(node "${SKILL_DIR}/scripts/check-deps.mjs" --output-dir --sid $S
 
 | # | 阶段 | 产出 |
 |---|------|------|
-| 1 | **Frame** | 问题清单 + 成功标准 |
-| 2 | **Expand** | 六方向盲区（`search-expansion.md`） |
-| 3 | **Search** | 主线 + 探针并行 |
-| 4 | **Gate** | `deliver list --sid $SID` 确认每探针有交付物。缺文件 = 探针失败，重派或标记缺口 |
-| 5 | **Review** | 派审查 subagent（不可跳过） |
-| 6 | **Patch** | 缺口补查 → 再审查（最多2轮） |
-| 7 | **Deliver** | 合并 + 内联总结 + cwd 输出完整报告 |
+| 1 | **Scout** | 2-3 次快速搜索 → 信息地形报告（关键实体、主要来源类型、争议点） |
+| 2 | **Frame** | 基于 Scout 发现制定问题清单 + 成功标准 |
+| 3 | **Expand** | 六方向盲区（`search-expansion.md`），基于 Scout 实证填写 |
+| 4 | **Search** | 主线 + 探针并行 |
+| 5 | **Gate** | `deliver list --sid $SID` 确认每探针有交付物。缺文件 = 探针失败，重派或标记缺口 |
+| 6 | **Review** | 派审查 subagent（不可跳过），含规划质量检查 |
+| 7 | **Patch** | 缺口补查 或 Reframe（最多2轮） |
+| 8 | **Deliver** | 合并 + 内联总结 + cwd 输出完整报告 |
 
 搜索方法见 `references/search-guide.md`。
 
-**启动时先输出**：Frame + Expansion + Search Plan（主 Agent vs 探针分工）。
+### Scout 阶段（必须先于 Frame）
+
+用用户原始 query 做 2-3 次快速搜索（不同角度或语言），只读标题和摘要，不深入页面。目的：了解信息地形，为 Frame 提供实证基础。
+
+产出格式（内联，不需要文件）：
+```
+Scout 发现：
+- 关键实体/别名：[从搜索结果中发现的实际名称映射]
+- 主要信息源类型：[哪些平台/渠道有内容，哪些没有]
+- 争议/矛盾信号：[搜索结果中出现的对立观点]
+- 信息密度判断：[丰富/中等/稀缺]
+- 时效信号：[最新结果的日期范围]
+```
+
+Scout 禁止：深读页面、交付文件、派探针。Scout 是"扫一眼"，不是"做调研"。
+
+**启动时先输出**：Scout 发现 + Frame + Expansion + Search Plan（主 Agent vs 探针分工）。
 
 ### Review → Patch 循环
 
@@ -87,13 +104,16 @@ Search 完成 → deliver 齐全
   → 派审查 subagent（读 review-checklist.md）
   → is_enough?
       是 → Deliver
-      否 → 派补查探针（scope 限定缺口）→ 再审查 → 最多2轮
+      否 → needs_reframe?
+            是 → 回到 Frame 重新定义问题（最多1次）→ 重新 Search
+            否 → 派补查探针（scope 限定缺口）→ 再审查 → 最多2轮
 ```
 
 - 审查由 subagent 执行，主 Agent 不自审
 - Patch 只针对具体缺口，不重搜
+- **Reframe**：当审查发现 Frame 方向性错误（关键假设被推翻、发现全新重要维度）→ 允许回到 Frame 重新定义，最多 1 次
 - 每次 Patch 后必须再审查
-- 最多 3 轮总（1 主搜 + 2 Patch）
+- 最多 3 轮总（1 主搜 + 2 Patch），Reframe 不计入
 - 达上限仍有缺口 → 交付但披露未覆盖范围
 
 ### 探针合并

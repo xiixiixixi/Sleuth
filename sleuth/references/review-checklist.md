@@ -19,6 +19,17 @@
 | 3 | 视角覆盖 | 官方、用户、竞品、负面/反证 — 哪些没覆盖？ |
 | 4 | Red Flags | 矛盾信息、品牌冲突、过时数据、来源不可信（critical/warning） |
 | 5 | 时效性 | 价格、版本、团队、政策是否够新？ |
+| 6 | 规划质量 | Frame 的关键假设是否被验证或推翻？是否发现 Frame 未预见的重要维度？ |
+
+## 规划质量判定（第 6 项）
+
+审查 subagent 必须回答：
+
+1. **假设验证**：Frame 中的核心假设（实体身份、问题前提、用户意图推断）是否被搜索结果证实？如果被推翻，标记 `needs_reframe=true`。
+2. **新维度发现**：搜索过程中是否出现了 Frame 完全没预见到的重要维度？如果是且影响核心结论，标记 `needs_reframe=true`。
+3. **Scout 回溯**：Scout 发现的信息地形与实际搜索结果是否一致？差异大则说明 Scout 质量不够。
+
+`needs_reframe=true` 时，输出中必须包含 `reframe_reason` 字段说明为什么原始 Frame 需要重新定义。
 
 ## 输出格式
 
@@ -27,6 +38,9 @@
 - weak_claims: 单一来源或低可信度结论
 - missing_perspectives: 未覆盖视角
 - red_flags: 危险信号（critical / warning）
+- planning_quality: Frame 假设验证状态 + 新维度发现
+- needs_reframe: true / false
+- reframe_reason: （needs_reframe=true 时）重新定义的原因
 - is_enough: true / false
 - patch_tasks: （false 时）具体补查任务，指向明确缺口
 ```
@@ -37,6 +51,7 @@
 red_flags 有 critical 项        → is_enough=false
 关键问题未答                    → is_enough=false
 核心结论无来源 URL              → is_enough=false
+needs_reframe=true              → is_enough=false（触发 Reframe 而非 Patch）
 以上都通过                      → is_enough=true
 ```
 
