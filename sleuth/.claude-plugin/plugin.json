@@ -1,12 +1,12 @@
 {
   "name": "sleuth",
-  "description": "梦里寻 — 联网检索与浏览器操作。教 AI Agent 如何像人一样浏览网页：搜索、阅读、提取、交互，全程在真实浏览器中完成。",
-  "version": "0.3.5",
+  "description": "梦里寻 — 全能联网搜索、网页浏览、深度研究与来源验证。适用于搜索最新信息、打开/验证网站、产品/公司/定价/文档/社交平台调研、动态页面、登录态页面、浏览器自动化和多来源事实核查；教 AI Agent 按证据边界选择 search、reader、本地历史与浏览器工具，并把结论回到可验证来源。",
+  "version": "0.3.7",
   "author": {
     "name": "Wei Xi Li"
   },
   "license": "MIT",
   "homepage": "https://github.com/xiixiixixi/Sleuth",
   "repository": "https://github.com/xiixiixixi/Sleuth",
-  "keywords": ["browser-automation", "agent-browser", "cdp", "chrome", "retrieval", "scraping", "web-research"]
+  "keywords": ["search", "web-search", "web-research", "deep-research", "source-verification", "browser-automation", "agent-browser", "cdp", "chrome", "retrieval", "scraping", "pricing-research", "company-research", "logged-in-browser", "dynamic-pages"]
 }
