@@ -16,7 +16,7 @@
 
 ```bash
 # 通过 check-deps 自动检测、关闭旧 Chrome、带 CDP 参数重启（推荐）
-node "${CLAUDE_SKILL_DIR}/../../scripts/check-deps.mjs"
+node "${SKILL_DIR}/scripts/check-deps.mjs"
 
 # macOS 手动启动 Chrome（不推荐，check-deps 会自动处理）
 # 使用独立目录，不关闭用户正在使用的 Chrome
@@ -45,7 +45,7 @@ agent-browser open https://example.com
 
 遇到障碍时记录到 session-logger：
 ```bash
-node "${CLAUDE_SKILL_DIR}/../../scripts/session-logger.mjs" --action log --sid $SID \
+node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid $SID \
   --operation '{"type":"captcha|login_wall|paywall|dead_link|anti_bot","url":"<URL>","domain":"<域名>"}'
 ```
 

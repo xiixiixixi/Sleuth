@@ -7,6 +7,11 @@ description: 联网检索与浏览器操作。触发场景：搜索信息、查�
 
 sleuth 是唯一联网方式。禁止 WebSearch、WebFetch、Fetch、curl、wget 及任何 MCP web 工具。所有联网通过 agent-browser 连接用户日常 Chrome。浏览器问题通过 `check-deps.mjs` 修复，不降级。
 
+```bash
+# 插件根目录 — 所有脚本和参考文档的基础路径
+SKILL_DIR="$(cd "${CLAUDE_SKILL_DIR}/../.." && pwd)"
+```
+
 ## 路由
 
 收到联网需求后判断响应层级：
@@ -31,22 +36,21 @@ sleuth 是唯一联网方式。禁止 WebSearch、WebFetch、Fetch、curl、wget
 
 ```bash
 # 历史召回
-node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action recall --query "关键词" --limit 5
+node "${SKILL_DIR}/scripts/research-index.mjs" --action recall --query "关键词" --limit 5
 # 有命中先 Read，只搜增量
 
 # 环境检查
-node "${CLAUDE_SKILL_DIR}/../../scripts/check-deps.mjs"
-
+node "${SKILL_DIR}/scripts/check-deps.mjs"
 # 站点经验（确定域名后）
-node "${CLAUDE_SKILL_DIR}/../../scripts/match-site.mjs" "<域名>"
+node "${SKILL_DIR}/scripts/match-site.mjs" "<域名>"
 
 # 本地 URL 检索（用户提到"之前看过"、"书签里"、"内部系统"时）
-node "${CLAUDE_SKILL_DIR}/../../scripts/find-url.mjs" "关键词" --since 7d
+node "${SKILL_DIR}/scripts/find-url.mjs" "关键词" --since 7d
 ```
 
 命名实体无召回命中时先 backfill：
 ```bash
-node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action backfill --days 7
+node "${SKILL_DIR}/scripts/research-index.mjs" --action backfill --days 7
 ```
 
 ## 快速验证 / 定向搜索
@@ -58,8 +62,8 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/research-index.mjs" --action backfill --
 ## 深度调研（Research Loop）
 
 ```bash
-SID=$(node "${CLAUDE_SKILL_DIR}/../../scripts/session-logger.mjs" --action start --query "问题" --type research)
-SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/../../scripts/check-deps.mjs" --output-dir --sid $SID)
+SID=$(node "${SKILL_DIR}/scripts/session-logger.mjs" --action start --query "问题" --type research)
+SLEUTH_OUTPUT=$(node "${SKILL_DIR}/scripts/check-deps.mjs" --output-dir --sid $SID)
 ```
 
 | # | 阶段 | 产出 |
@@ -67,9 +71,10 @@ SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/../../scripts/check-deps.mjs" --output
 | 1 | **Frame** | 问题清单 + 成功标准 |
 | 2 | **Expand** | 六方向盲区（`search-expansion.md`） |
 | 3 | **Search** | 主线 + 探针并行 |
-| 4 | **Review** | 派审查 subagent |
-| 5 | **Patch** | 缺口补查 → 再审查（最多2轮） |
-| 6 | **Deliver** | 合并 + 交付 |
+| 4 | **Gate** | `deliver list --sid $SID` 确认每探针有交付物。缺文件 = 探针失败，重派或标记缺口 |
+| 5 | **Review** | 派审查 subagent（不可跳过） |
+| 6 | **Patch** | 缺口补查 → 再审查（最多2轮） |
+| 7 | **Deliver** | 合并 + 交付 |
 
 搜索方法见 `references/search-guide.md`。
 
@@ -122,12 +127,11 @@ Search 完成 → deliver 齐全
 | 审查者 | 搜索完成后 | 否 |
 | 补查探针 | 审查发现缺口 | 是 |
 
-### 搜索探针模板
+### 搜索探针模板（必须原样使用，禁止改写）
+
+⚠️ 以下模板是探针能正常运行的唯一格式。变量替换后直接使用，不得省略任何字段、不得用自己的话重写 prompt。省略 SKILL_DIR 或 subagent-guide.md 读取指令 = 探针必然失败。
 
 ```
-SKILL_DIR="$(cd "${CLAUDE_SKILL_DIR}/../.." && pwd)"
-SID="<session-id>"
-SLEUTH_OUTPUT="~/.sleuth/output/YYYY-MM-DD/<session-id>"
 BROWSER_SESSION="${SID}-<标识>"
 
 Agent({
@@ -136,24 +140,29 @@ Agent({
   run_in_background: true,
   prompt: `
     你是调研探针。
-    先 Read ${SKILL_DIR}/references/subagent-guide.md，严格遵循。
+
+    第一步（强制）：Read ${SKILL_DIR}/references/subagent-guide.md，通读并严格遵循全部约束。
 
     禁止 Agent 工具。禁止加载 sleuth skill。
 
-    变量：
+    变量（四个缺一不可）：
     - SKILL_DIR=${SKILL_DIR}
     - SID=${SID}
     - SLEUTH_OUTPUT=${SLEUTH_OUTPUT}
     - BROWSER_SESSION=${BROWSER_SESSION}
 
+    环境验证（第二步）：
+    which agent-browser || echo "ERROR: agent-browser not found"
+
     任务：${目标}
     已知：${已知信息}
-    浏览器：所有命令带 --auto-connect --session ${BROWSER_SESSION}
+    浏览器：所有命令带 --auto-connect --session "${BROWSER_SESSION}"
 
-    完成后：
-    1. deliver.mjs --action save --sid ${SID} 保存发现
-    2. session-logger --action log --sid ${SID} 记录 subagent_done
-    3. 返回结构化摘要（findings/sources/leads/gaps/red_flags）
+    完成后（按顺序）：
+    1. node "${SKILL_DIR}/scripts/deliver.mjs" --action save --sid "${SID}" 保存发现
+    2. node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" --operation '{"type":"subagent_done","name":"${BROWSER_SESSION}"}'
+    3. agent-browser --auto-connect --session "${BROWSER_SESSION}" close
+    4. 返回结构化摘要（findings/sources/leads/gaps/red_flags）
   `
 })
 ```
@@ -163,8 +172,6 @@ Agent({
 ### 审查者模板
 
 ```
-SKILL_DIR="$(cd "${CLAUDE_SKILL_DIR}/../.." && pwd)"
-
 Agent({
   description: "审查覆盖度",
   subagent_type: "general-purpose",
@@ -195,7 +202,7 @@ Agent({
 - **指定格式**：调研完成后在用户工作目录生成 md/html
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/../../scripts/deliver.mjs" --action save \
+node "${SKILL_DIR}/scripts/deliver.mjs" --action save \
   --type <doc|screenshot|image|transcript|data|page> \
   --source <源> --name <名> --url <URL> --sid $SID
 ```
@@ -208,13 +215,15 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/deliver.mjs" --action save \
 4. 只有主 Agent 能 finish session。
 5. 交付前必须派审查 subagent，主 Agent 不自审。
 6. 不对敏感页面截图，不提取 cookie/密码，不执行产生记录的操作（除非用户要求）。
+7. **深度调研禁止跳过 Review→Patch**：Search 阶段完成后，必须先 `deliver list` 确认文件齐全，再派审查 subagent。审查未通过则必须 Patch。不允许 Search 后直接 Deliver。
+8. **探针模板不可改写**：派探针时必须使用「搜索探针模板」原样（变量替换后），不得用自己的话重写 prompt、不得省略 SKILL_DIR / subagent-guide.md 读取指令。
 
 ## 站点经验
 
 确定目标域名后通过 `match-site.mjs` 查找先验知识：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/../../scripts/match-site.mjs" "<域名>"
+node "${SKILL_DIR}/scripts/match-site.mjs" "<域名>"
 ```
 
 操作成功后发现新模式，写入 `~/.sleuth/site-patterns/<域名>.md`：
@@ -240,5 +249,5 @@ updated: 2026-04-27
 ## 结束 session
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/../../scripts/session-logger.mjs" --action finish --sid $SID --outcome success|partial|fail
+node "${SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid $SID --outcome success|partial|fail
 ```

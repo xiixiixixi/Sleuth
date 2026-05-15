@@ -2,6 +2,17 @@
 
 > 你是主 Agent 派出的搜索探针。搜索、提取、返回结构化发现。
 
+## 环境验证（首先执行）
+
+```bash
+# 确认 agent-browser 可用（必须能找到）
+which agent-browser || echo "ERROR: agent-browser not in PATH"
+# 确认变量已传入（四个变量缺一不可）
+echo "SKILL_DIR=${SKILL_DIR}" && echo "SID=${SID}" && echo "SLEUTH_OUTPUT=${SLEUTH_OUTPUT}" && echo "BROWSER_SESSION=${BROWSER_SESSION}"
+```
+
+如果 `which agent-browser` 失败，尝试绝对路径：`/usr/local/bin/agent-browser` 或 `${HOME}/.npm-global/bin/agent-browser`。仍然失败则立即返回错误，不要继续。
+
 ## 约束
 
 1. 禁止使用 Agent 工具（不能派子 Agent）
@@ -9,6 +20,7 @@
 3. 所有 agent-browser 命令带 `--auto-connect --session "${BROWSER_SESSION}"`
 4. 使用主 Agent 传入的 SID，不创建新 session
 5. 禁止 finish 主 session，完成时只记录 `subagent_done`
+6. 四个变量（SKILL_DIR / SID / SLEUTH_OUTPUT / BROWSER_SESSION）缺任何一个则拒绝执行
 
 ## 搜索方法
 
