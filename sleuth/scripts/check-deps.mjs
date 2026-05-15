@@ -260,20 +260,23 @@ function sleep(ms) {
 }
 
 /**
- * 自动重启 Chrome 并开启 CDP 远程调试。
- *
- * 流程：
- *   1. 查找 Chrome 二进制文件
- *   2. 如果 Chrome 正在运行 → 先优雅关闭，失败则终止进程
- *   3. 创建 ~/.sleuth/chrome-debug/ 目录
- *   4. 将用户真实 Chrome profile 的 Default 目录软链接到 chrome-debug/Default
- *      （保留登录态、书签、Cookie 等用户数据）
- *   5. 以 --remote-debugging-port=9222 --user-data-dir=<chrome-debug> 启动 Chrome
- *   6. 轮询等待 CDP 端口就绪（最多 10 秒）
- *
- * @param {number} port - CDP 端口号，默认 9222
- * @returns {Promise<boolean>} 是否成功启动
- */
+  * 自动重启 Chrome 并开启 CDP 远程调试。
+  *
+  * 流程：
+  *   1. 查找 Chrome 二进制文件
+  *   2. 如果 Chrome 正在运行 → 先优雅关闭（释放文件锁），失败则终止进程
+  *   3. 创建 ~/.sleuth/chrome-debug/ 目录
+  *   4. 从用户 Chrome profile 复制 Cookies、Local State 等关键文件（此时文件无锁）
+  *   5. 以 --remote-debugging-port=9222 --user-data-dir=<chrome-debug> 启动 Chrome
+  *   6. 轮询等待 CDP 端口就绪（最多 10 秒）
+  *
+  * 为什么必须关闭用户 Chrome：
+  *   Cookies 等文件使用 SQLite WAL 模式，Chrome 运行时文件被锁定。
+  *   不关闭直接 copyFileSync → 拿到空/不完整副本 → 登录态丢失。
+  *
+  * @param {number} port - CDP 端口号，默认 9222
+  * @returns {Promise<boolean>} 是否成功启动
+  */
 async function restartChromeWithCDP(port = 9222) {
   const binary = findChromeBinary();
   if (!binary) {
@@ -281,14 +284,39 @@ async function restartChromeWithCDP(port = 9222) {
     return false;
   }
 
-  // 不关闭用户正在使用的 Chrome。
-  // 使用独立的 debug profile 目录 + --user-data-dir 启动新的 Chrome 实例，
-  // 通过复制加密密钥和 Cookie 保留登录态。用户 Chrome 保持不动。
+  // 必须先关闭用户 Chrome，否则 Cookies 等文件被 SQLite WAL 锁定，
+  // copyFileSync 会拿到不完整副本 → 登录态丢失。
+  // 关闭后复制文件，再以 CDP 模式重启。
+  if (isChromeRunning()) {
+    console.log('chrome: 关闭用户 Chrome 以释放文件锁...');
+    try {
+      if (os.platform() === 'darwin') {
+        execSync('osascript -e \'quit app "Google Chrome"\'', { timeout: 5000, stdio: 'pipe' });
+      } else if (os.platform() === 'win32') {
+        execSync('taskkill /IM chrome.exe', { timeout: 5000, stdio: 'pipe' });
+      } else {
+        execSync('pkill -TERM chrome || pkill -TERM chromium', { timeout: 5000, stdio: 'pipe' });
+      }
+    } catch {}
+    // 等待进程退出 + 文件锁释放
+    for (let i = 0; i < 10; i++) {
+      await sleep(500);
+      if (!isChromeRunning()) break;
+    }
+    // 如果优雅关闭失败，强制终止
+    if (isChromeRunning()) {
+      try {
+        if (os.platform() === 'win32') {
+          execSync('taskkill /F /IM chrome.exe', { timeout: 5000, stdio: 'pipe' });
+        } else {
+          execSync('pkill -9 -x "Google Chrome" || pkill -9 chrome || pkill -9 chromium', { timeout: 5000, stdio: 'pipe' });
+        }
+      } catch {}
+      await sleep(1000);
+    }
+  }
 
-  // 使用独立的 debug profile 目录启动 Chrome，不关闭用户正在使用的 Chrome。
-  // 关键：复制加密密钥（Local State）和 Cookie，保留登录态。
-  // 不能软链接整个 Default/（锁文件会与用户 Chrome 冲突），
-  // 也不能只用空壳 debug 目录（没有加密密钥，Cookie 解不开）。
+  // Chrome 已关闭，文件锁已释放。现在复制 profile 文件。
   const debugDir = path.join(os.homedir(), '.sleuth', 'chrome-debug');
 
   // 每次启动前清空旧目录，避免多次运行后 Cache 等文件堆积膨胀
@@ -330,12 +358,26 @@ async function restartChromeWithCDP(port = 9222) {
         if (fs.existsSync(src)) {
           fs.copyFileSync(src, dst);
         }
-      } catch {} // 文件可能被锁定，跳过
+      } catch (e) {
+          // 极少情况：文件不可读（权限问题等），记录警告
+          console.warn(`chrome: 复制 ${file} 失败: ${e.message}`);
+        }
     }
   }
 
+  // 验证 Cookies 文件复制成功（非空）
+  const cookiesDst = path.join(debugDir, 'Default', 'Cookies');
+  if (fs.existsSync(cookiesDst)) {
+    const size = fs.statSync(cookiesDst).size;
+    if (size < 1024) {
+      console.warn(`chrome: ⚠️ Cookies 文件异常小 (${size} bytes)，登录态可能丢失。请确认用户 Chrome 已完全退出后重试。`);
+    }
+  } else {
+    console.warn('chrome: ⚠️ Cookies 文件未找到，登录态将缺失。');
+  }
+
   // 以 CDP 模式启动 Chrome（后台进程，不阻塞）。
-  // 使用独立的 debug 目录，不干扰用户正在使用的 Chrome。
+  // 使用独立的 debug 目录 + 从用户 profile 复制的文件，保留登录态。
   console.log(`chrome: 启动 sleuth Chrome（CDP 端口 ${port}，登录态已从用户 profile 复制）...`);
   const args = [
     `--remote-debugging-port=${port}`,
@@ -437,7 +479,8 @@ async function main(options = {}) {
   let chromePort = await detectChromePort();
   if (chromePort) {
     results.chromePort = chromePort;
-    console.log(`chrome: ok (port ${chromePort})`);
+    // CDP 已可用 — 可能是之前 check-deps 启动的 sleuth Chrome，或用户手动配置的
+    console.log(`chrome: ok (port ${chromePort}，复用已有 CDP 连接，登录态保持)`);
   } else {
     // CDP 不可用 → 必须关闭当前 Chrome 后用 --remote-debugging-port 重启。
     // 已运行的 Chrome 不会接收后续启动命令传入的新参数。

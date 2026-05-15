@@ -100,29 +100,34 @@ Scout 禁止：深读页面、交付文件、派探针。Scout 是"扫一眼"，
 ### Review → Patch 循环
 
 ```
-Search 完成 → deliver 齐全
-  → 派审查 subagent（读 review-checklist.md）
+Search 完成
+  → Gate: deliver list 确认每探针有文件（缺 = 重派或标记缺口）
+  → 派审查 subagent（读各探针交付文件 + review-checklist.md）
   → is_enough?
-      是 → Deliver
+      是 → Merge → Deliver
       否 → needs_reframe?
             是 → 回到 Frame 重新定义问题（最多1次）→ 重新 Search
             否 → 派补查探针（scope 限定缺口）→ 再审查 → 最多2轮
+  → 最终通过 → Merge → Deliver
 ```
 
 - 审查由 subagent 执行，主 Agent 不自审
+- **审查读个别交付文件，不需要先 merge**。审查 subagent 通过 `deliver list` 获取文件列表后逐个 Read
 - Patch 只针对具体缺口，不重搜
 - **Reframe**：当审查发现 Frame 方向性错误（关键假设被推翻、发现全新重要维度）→ 允许回到 Frame 重新定义，最多 1 次
 - 每次 Patch 后必须再审查
 - 最多 3 轮总（1 主搜 + 2 Patch），Reframe 不计入
 - 达上限仍有缺口 → 交付但披露未覆盖范围
 
-### 探针合并
+### Merge 与 Deliver（审查通过后执行）
 
-探针完成后、审查前：
-1. `deliver list --sid $SID` — 确认每个探针都有文件
-2. `deliver merge --sid $SID` — 合并
-3. Read 合并文件做编辑
-4. 派审查 subagent
+审查通过后、交付前：
+1. `deliver merge --sid $SID` — 合并所有探针交付文件
+2. Read 合并文件，编辑为最终报告
+3. **Write** 到用户 cwd：`<主题>-report.md`（硬规则 #10，不可跳过）
+4. 内联回复摘要（关键结论 + 来源 URL）
+
+⚠️ Merge 只在审查最终通过后执行一次。禁止在审查前 merge — 审查 subagent 直接读各探针的个别交付文件。
 
 ### 状态维护
 
@@ -141,18 +146,19 @@ Search 完成 → deliver 齐全
 
 ## 探针调度
 
-`--session` 提供 tab 级隔离：每个 session 管理独立的 tab 集合，共享同一个 Chrome 进程。并行探针各用独立 session，互不干扰。
+`--session` 提供 Browser Context 级隔离：每个 session 拥有独立的 cookies、storage、tabs，共享同一个 Chrome 进程但互不影响。并行探针各用独立 session，数据完全隔离。
 
 | 角色 | 何时 | 浏览器 |
 |------|------|--------|
 | 搜索探针 | 角度独立可并行 | 是（独立 session） |
-| 审查者 | 搜索完成后 | 否 |
+| 审查者 | 搜索完成后 | 否（只读文件） |
 | 补查探针 | 审查发现缺口 | 是（独立 session） |
 
 **注意**：
 - 探针运行期间禁止 `killall Chrome` / `close --all` / `check-deps`（见硬规则 #9）
 - SLEUTH_OUTPUT 由探针自行通过 `check-deps --output-dir` 获取，主 Agent 不传此变量
 - 探针失败时通过 Gate 阶段发现（`deliver list` 缺文件），重派或标记缺口
+- 所有探针共用同一个 SID，交付文件统一存到同一个 session 目录下。禁止探针创建独立 SID
 
 ### 搜索探针模板（必须原样使用，禁止改写）
 
@@ -222,6 +228,8 @@ Agent({
 
 命令带 `--auto-connect --session <名>`。主 Agent 用 `${SID}-main`。参考 `references/tool-guide.md`。
 
+**登录态验证**：`check-deps` 后第一次 open 页面时，确认页面是登录态（检查页面内容有用户信息/非登录页）。如果不是登录态，停止操作，告知用户"sleuth Chrome 登录态缺失，请关闭所有 Chrome 后重新运行 check-deps"。不要在无登录态的情况下继续抓取需要登录的页面。
+
 ## 内容提取
 
 文本优先（`eval "document.body.innerText"`）。特殊场景见 `references/content-extraction.md`。
@@ -229,19 +237,26 @@ Agent({
 ## 交付
 
 - **快速验证/定向搜索**：内联回复 + 来源 URL
-- **深度调研（默认）**：deliver save 存档 → 内联总结回复（摘要 + 关键结论 + 来源）→ **必须**在用户 cwd 输出完整 md 文件
+- **深度调研（默认）**：Merge → Write 完整报告到 cwd → 内联回复摘要
 - **深度调研（用户指定格式）**：完全按用户要求（格式、路径、文件名），不套默认行为
 
-### cwd 输出（深度调研必须执行）
+### cwd 输出（深度调研最后一步，不可跳过）
 
-深度调研完成后，用 Write 工具在用户当前工作目录生成完整报告：
+深度调研的 Deliver 阶段执行顺序：
+
+```
+1. deliver merge --sid $SID              → 合并所有探针交付文件为一份
+2. Read 合并文件，编辑为最终报告
+3. Write "<主题>-report.md" 到用户 cwd   → 这是用户拿到的最终文件（完整版）
+4. 内联回复摘要（关键结论 + 来源 URL）   → 方便用户快速了解结果
+```
 
 文件名：`<主题关键词>-report.md`，中文主题用中文文件名。
-内容 = deliver merge 后的完整版本（不是摘要）。
+内容 = merge 后经过编辑的完整报告（不是摘要，不是个别探针的碎片文件）。
 
-这是 Deliver 阶段的必要步骤，不是可选项。内联回复是摘要，cwd 文件是完整内容。两者都要输出。
+⚠️ 用户只看到 cwd 里的一份文件。`~/.sleuth/output/` 下的探针碎片文件是内部中间产物，用户不应该需要去那里找报告。
 
-deliver save 命令：
+deliver save 命令（探针交付用）：
 ```bash
 node "${SKILL_DIR}/scripts/deliver.mjs" --action save \
   --type <doc|screenshot|image|transcript|data|page> \
