@@ -6,6 +6,4 @@ references/site-patterns/**/*.md
 node_modules/
 sleuth-output/
 .sisyphus/
-docs/*
-!docs/
-!docs/sleuth-philosophy-and-iteration-report.md
+docs/

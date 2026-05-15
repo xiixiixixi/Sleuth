@@ -1,7 +1,7 @@
 ---
 name: sleuth
 description: >-
-  全能联网搜索、网页浏览、深度研究与来源验证 skill。Use for any request involving search, web search, online research, latest information, open/browse/check a website, verify a source, compare products, company research, pricing, docs, changelogs, social platforms, reviews, dynamic pages, logged-in pages, browser automation, screenshots, or multi-source fact checking. Triggers: 搜索, 搜一下, 查一下, 联网查, 网上查, 调研, 研究一下, 查资料, 最新, 官网, 网页, 网站, 浏览器, 登录态, 验证来源, search, google, look up, research, investigate, latest, browse, open website, official site, pricing, docs, source verification, deep research.
+  所有搜索、网页读取、浏览器验证与网络研究任务都应优先通过此 skill 处理。触发场景：用户要求搜索信息、查看网页内容、验证页面或来源、访问动态渲染页面、使用登录态浏览器、读取最新网页信息、或处理任何需要真实网页证据的网络任务。
 ---
 
 # sleuth — 梦里寻
