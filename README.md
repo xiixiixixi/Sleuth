@@ -182,7 +182,7 @@ claude plugin install sleuth
 ### 更新
 
 ```bash
-claude plugin update sleuth
+claude plugin update sleuth@sleuth
 ```
 
 ### Chrome CDP 连接
