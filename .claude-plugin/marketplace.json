@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "sleuth",
-      "description": "使用用户日常 Chrome 和 agent-browser 执行网页搜索、阅读、提取和交互。所有联网任务必须通过此 skill 完成，不得使用 WebSearch、WebFetch、curl 或其他非浏览器工具。支持 Direct Answer、Research Loop、子 Agent 取证、Review/Patch 和站点经验复用。",
+      "description": "使用用户日常 Chrome 和 agent-browser 执行网页搜索、阅读、提取和交互。所有联网任务必须通过此 skill 完成。基于置信度四级路由（直答→快速验证→定向搜索→深度调研），支持探针并行取证、统一搜索方法论和站点经验复用。",
       "source": "./sleuth",
       "category": "web",
       "tags": ["browser-automation", "agent-browser", "cdp", "chrome", "retrieval", "scraping", "web-research"]
