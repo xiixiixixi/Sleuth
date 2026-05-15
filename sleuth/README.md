@@ -167,12 +167,21 @@ sleuth/                                    插件根目录
 ### 快速安装
 
 ```bash
-# 1. 安装插件
+# 1. 添加 marketplace（首次安装，只需执行一次）
+claude plugin marketplace add https://github.com/xiixiixixi/Sleuth.git
+
+# 2. 安装插件
 claude plugin install sleuth
 
-# 2. 运行配置向导（发现工具、选择封禁、配置权限）
+# 3. 运行配置向导（发现工具、选择封禁、配置权限）
 # 在 Claude Code 中执行:
 /sleuth:config setup
+```
+
+### 更新
+
+```bash
+claude plugin update sleuth
 ```
 
 ### Chrome CDP 连接
