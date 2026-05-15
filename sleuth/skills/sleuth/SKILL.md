@@ -121,11 +121,18 @@ Search 完成 → deliver 齐全
 
 ## 探针调度
 
+`--session` 提供 tab 级隔离：每个 session 管理独立的 tab 集合，共享同一个 Chrome 进程。并行探针各用独立 session，互不干扰。
+
 | 角色 | 何时 | 浏览器 |
 |------|------|--------|
-| 搜索探针 | 角度独立可并行 | 是 |
+| 搜索探针 | 角度独立可并行 | 是（独立 session） |
 | 审查者 | 搜索完成后 | 否 |
-| 补查探针 | 审查发现缺口 | 是 |
+| 补查探针 | 审查发现缺口 | 是（独立 session） |
+
+**注意**：
+- 探针运行期间禁止 `killall Chrome` / `close --all` / `check-deps`（见硬规则 #9）
+- SLEUTH_OUTPUT 由探针自行通过 `check-deps --output-dir` 获取，主 Agent 不传此变量
+- 探针失败时通过 Gate 阶段发现（`deliver list` 缺文件），重派或标记缺口
 
 ### 搜索探针模板（必须原样使用，禁止改写）
 
@@ -145,14 +152,18 @@ Agent({
 
     禁止 Agent 工具。禁止加载 sleuth skill。
 
-    变量（四个缺一不可）：
+    变量（三个由主 Agent 传入）：
     - SKILL_DIR=${SKILL_DIR}
     - SID=${SID}
-    - SLEUTH_OUTPUT=${SLEUTH_OUTPUT}
     - BROWSER_SESSION=${BROWSER_SESSION}
 
-    环境验证（第二步）：
-    which agent-browser || echo "ERROR: agent-browser not found"
+    环境验证（第二步，按顺序执行，任何一步失败则立即返回错误）：
+    1. which agent-browser || echo "ERROR: agent-browser not found"
+    2. SLEUTH_OUTPUT=$(node "${SKILL_DIR}/scripts/check-deps.mjs" --output-dir --sid ${SID})
+    3. echo "SLEUTH_OUTPUT=${SLEUTH_OUTPUT}"
+    4. [ -d "${SLEUTH_OUTPUT}" ] || mkdir -p "${SLEUTH_OUTPUT}"
+
+    ⚠️ SLEUTH_OUTPUT 必须通过上面第 2 步获取，禁止自行拼路径。
 
     任务：${目标}
     已知：${已知信息}
@@ -227,6 +238,7 @@ node "${SKILL_DIR}/scripts/deliver.mjs" --action save \
 6. 不对敏感页面截图，不提取 cookie/密码，不执行产生记录的操作（除非用户要求）。
 7. **深度调研禁止跳过 Review→Patch**：Search 阶段完成后，必须先 `deliver list` 确认文件齐全，再派审查 subagent。审查未通过则必须 Patch。不允许 Search 后直接 Deliver。
 8. **探针模板不可改写**：派探针时必须使用「搜索探针模板」原样（变量替换后），不得用自己的话重写 prompt、不得省略 SKILL_DIR / subagent-guide.md 读取指令。
+9. **探针运行期间禁止杀 Chrome**：有 background 探针运行时，禁止 `killall Chrome`、`close --all`、`check-deps`（会重启 Chrome）。等所有探针完成或手动取消后再操作。
 
 ## 站点经验
 
