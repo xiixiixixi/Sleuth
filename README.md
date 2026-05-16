@@ -1,6 +1,6 @@
 # Sleuth — 梦里寻
 
-Claude Code 插件，把网页访问从“会点页面”提升到“会做判断”。
+Agent skill，把网页访问从"会点页面"提升到"会做判断"。
 
 **agent-browser 负责浏览器执行，sleuth 负责研究判断；WebSearch / WebFetch 等工具可以参与，但每种工具都有自己的证据边界。**
 
@@ -34,48 +34,37 @@ Sleuth 的目标不是把所有联网任务都强行改成浏览器任务，而�
 ## 目录结构
 
 ```
-sleuth/                                    插件根目录
-├── .claude-plugin/
-│   └── plugin.json                        插件元数据（名称、版本、作者、标签）
-│
-├── hooks/
-│   ├── hooks.json                         注册 UserPromptSubmit / Stop hooks
-│   └── route-search-intent.py             搜索/研究/网页验证意图路由到 /sleuth
-│
-├── skills/
-│   ├── sleuth/
-│   │   └── SKILL.md                       主 skill：研究判断、工具角色、交付约定
-│   └── config/
-│       └── SKILL.md                       设置 skill：权限配置与卸载清理
+sleuth/
+├── SKILL.md                       主 skill：研究判断、工具角色、交付约定
 │
 ├── scripts/
 │   ├── lib/
-│   │   ├── output.mjs                     共享输出工具：路径解析、目录创建、类型映射
-│   │   └── registry.mjs                   跨 session 交付物 registry 与召回评分
-│   ├── check-deps.mjs                     环境检查：agent-browser + Chrome CDP + 可选依赖
-│   ├── on-stop.mjs                        Stop hook：清理 session、关闭 sleuth Chrome、沉淀站点经验
-│   ├── session-logger.mjs                 会话生命周期：start / log / finish
-│   ├── deliver.mjs                        文件交付：save / list / init / merge
-│   ├── research-index.mjs                 历史召回：index / query / recall / backfill
-│   ├── cleanup-output.mjs                 过期输出清理（默认 7 天）
-│   ├── update-site-stats.mjs              域名可信度自动评分（Bayesian）
-│   ├── match-site.mjs                     站点经验匹配：查询域名 → 输出经验内容
-│   ├── find-url.mjs                       Chrome 书签 / 历史搜索（SQLite）
-│   ├── extract-subtitles.sh               通用字幕提取（视频 / 播客）
-│   └── srt_to_transcript.py               SRT/VTT 字幕清洗为纯文本
+│   │   ├── output.mjs             共享输出工具：路径解析、目录创建、类型映射
+│   │   ├── registry.mjs           跨 session 交付物 registry 与召回评分
+│   │   └── validate.mjs           参数校验
+│   ├── check-deps.mjs             环境检查：agent-browser + Chrome CDP + 可选依赖
+│   ├── on-stop.mjs                session 清理、关闭 sleuth Chrome、沉淀站点经验
+│   ├── session-logger.mjs         会话生命周期：start / log / finish
+│   ├── deliver.mjs                文件交付：save / list / init / merge
+│   ├── research-index.mjs         历史召回：index / query / recall / backfill
+│   ├── cleanup-output.mjs         过期输出清理（默认 7 天）
+│   ├── update-site-stats.mjs      域名可信度自动评分（Bayesian）
+│   ├── match-site.mjs             站点经验匹配：查询域名 → 输出经验内容
+│   ├── find-url.mjs               Chrome 书签 / 历史搜索（SQLite）
+│   ├── extract-subtitles.sh       通用字幕提取（视频 / 播客）
+│   └── srt_to_transcript.py       SRT/VTT 字幕清洗为纯文本
 │
 ├── references/
-│   ├── tool-guide.md                      agent-browser 命令速查 + 观察/交互策略
-│   ├── search-guide.md                    主 Agent 与子 Agent 共用的搜索判断
-│   ├── subagent-guide.md                  子 Agent 目标/证据/输出合同
-│   ├── search-expansion.md                搜索拓宽盲区（六个常见漏项）
-│   ├── review-checklist.md                独立审查参考清单
-│   ├── content-extraction.md              内容提取（视频/音频/PDF/图片）
-│   └── site-patterns/.gitkeep             占位（实际经验存 ~/.sleuth/site-patterns/）
+│   ├── tool-guide.md              agent-browser 命令速查 + 观察/交互策略
+│   ├── search-guide.md            主 Agent 与子 Agent 共用的搜索判断
+│   ├── subagent-guide.md          子 Agent 目标/证据/输出合同
+│   ├── search-expansion.md        搜索拓宽盲区（六个常见漏项）
+│   ├── review-checklist.md        独立审查参考清单
+│   ├── content-extraction.md      内容提取（视频/音频/PDF/图片）
+│   └── site-patterns/.gitkeep     占位（实际经验存 ~/.sleuth/site-patterns/）
 │
-└── LICENSE                                MIT
-
-README.md 位于仓库根目录（即本文件）。
+├── README.md
+└── LICENSE
 ```
 
 ---
@@ -84,29 +73,20 @@ README.md 位于仓库根目录（即本文件）。
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                      sleuth (Skill)                         │
+│                      sleuth (Skill)                           │
 │                                                              │
-│  skills/sleuth/SKILL.md  研究判断层                          │
-│                        · 目标/完成标准                        │
-│                        · 工具角色与证据边界                  │
-│                        · 主 Agent / 子 Agent 共用搜索逻辑     │
-│                        · 浏览器执行姿势                      │
-│                        · 深度研究交付约定                    │
+│  SKILL.md            研究判断层                              │
+│                      · 目标/完成标准                          │
+│                      · 工具角色与证据边界                    │
+│                      · 主 Agent / 子 Agent 共用搜索逻辑       │
+│                      · 浏览器执行姿势                        │
+│                      · 深度研究交付约定                      │
 │                                                              │
-│  skills/config/SKILL.md  设置向导                            │
-│                        · 工具发现                            │
-│                        · 权限配置                            │
-│                        · 卸载清理                            │
-│                                                              │
-│  hooks/               可选自动化入口                        │
-│    route-search-intent.py UserPromptSubmit: 搜索/研究意图路由│
-│    on-stop.mjs           Stop: session 清理与经验沉淀         │
-│                                                              │
-│  references/          运行时参考文档                         │
-│    search-guide.md        共享搜索判断                       │
-│    subagent-guide.md      子 Agent 合同                      │
-│    review-checklist.md    独立审查标准                       │
-│    tool-guide.md          agent-browser 观察/提取/交互手册   │
+│  references/         运行时参考文档                           │
+│    search-guide.md       共享搜索判断                        │
+│    subagent-guide.md     子 Agent 合同                       │
+│    review-checklist.md   独立审查标准                        │
+│    tool-guide.md         agent-browser 观察/提取/交互手册    │
 └──────────────────────────────────────────────────────────────┘
          │
          │ Agent 通过 Bash / 工具调用
@@ -149,25 +129,37 @@ README.md 位于仓库根目录（即本文件）。
 | **yt-dlp** | YouTube 字幕下载（可选） | `pip install yt-dlp` |
 | **Python 3** | 字幕清洗（可选） | macOS/Linux 预装 |
 
-### 快速安装
+### 安装 Skill
 
 ```bash
-# 1. 添加 marketplace（首次安装，只需执行一次）
-claude plugin marketplace add https://github.com/xiixiixixi/Sleuth.git
+# 一键安装（全局，推荐）
+npx skills add xiixiixixi/Sleuth -g
 
-# 2. 安装插件
-claude plugin install sleuth
+# 安装到当前项目
+npx skills add xiixiixixi/Sleuth
 
-# 3. 运行设置向导（发现工具、配置权限）
-# 在 Claude Code 中执行:
-/sleuth:config setup
+# 手动 clone
+git clone https://github.com/xiixiixixi/Sleuth.git ~/.agents/skills/sleuth
 ```
 
-### 更新
+### 权限配置
 
-```bash
-claude plugin update sleuth@sleuth
+使用 sleuth 需要以下 allow 规则（添加到 `settings.local.json`）：
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(agent-browser *)",
+      "Bash(node <skill-path>/scripts/*.mjs *)"
+    ]
+  }
+}
 ```
+
+将 `<skill-path>` 替换为实际的 skill 安装路径。`npx skills` 安装后路径通常为：
+- 全局：`~/.claude/skills/sleuth/`
+- 项目：`./.claude/skills/sleuth/`
 
 ### Chrome CDP 连接
 
@@ -188,21 +180,6 @@ Chrome 必须在进程启动时带上 `--remote-debugging-port=9222`。如果 Ch
   --user-data-dir=$HOME/.sleuth/chrome-debug \
   --no-first-run &
 ```
-
-### 设置向导
-
-`/sleuth:config setup` 会做两件事：
-
-1. **发现可用工具**：扫描 MCP 配置和内置工具
-2. **配置权限**：向 `settings.local.json` 添加必要的 allow 规则
-
-其他配置命令：
-
-| 命令 | 作用 |
-|------|------|
-| `/sleuth:config setup` | 发现工具并配置权限 |
-| `/sleuth:config permissions` | 重新配置权限规则 |
-| `/sleuth:config uninstall` | 卸载：逆向清理权限和可选数据 |
 
 ---
 
@@ -252,7 +229,7 @@ Sleuth 不要求每个任务都跑复杂流程。先用最轻的路径拿到足�
 
 - 对昂贵或易丢失的发现及时 `deliver save`。
 - `recall` 只返回历史 artifact 路径；历史内容是线索，不会自动复制到新 session，也不能替代当前验证。
-- 独立角度才并行子 Agent；不要为了“看起来完整”而拆探针。
+- 独立角度才并行子 Agent；不要为了"看起来完整"而拆探针。
 - 审查是为了质疑证据是否够，不是为了过仪式。
 - 最终默认在用户当前工作目录交付 **一份** 连贯报告；内部碎片文件只是工作记忆，不是最终产品。
 - `~/.sleuth/output/` 只保存中间 artifact 和可召回材料；`deliver merge` 只合并中间 Markdown，方便模型阅读整理，不是最终报告生成器。
@@ -283,7 +260,7 @@ updated: 2026-04-26
 - 最后访问: 2026-04-28
 ```
 
-操作前可通过 `match-site.mjs` 读取经验，操作后 `update-site-stats.mjs` 更新统计。Stop hook 会为复杂站点创建 stub。
+操作前可通过 `match-site.mjs` 读取经验，操作后 `update-site-stats.mjs` 更新统计。
 
 ---
 
@@ -298,9 +275,9 @@ updated: 2026-04-26
 
 ### 自学习
 
-- **会话日志**：任务中的渠道选择、域名访问、成功/失败自动记录到 `~/.sleuth/sessions/`
+- **会话日志**：任务中的渠道选择、域名访问、成功/失败记录到 `~/.sleuth/sessions/`
 - **域名可信度评分**：基于历史数据计算 Bayesian 可信度分 `(success+1)/(visits+2)`
-- **复杂站点自动记录**：Stop hook 为触发 CAPTCHA / 登录墙 / 付费墙的站点自动创建经验 stub
+- **站点经验沉淀**：对触发 CAPTCHA / 登录墙 / 付费墙的站点记录经验
 
 ---
 

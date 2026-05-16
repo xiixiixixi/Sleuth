@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * on-stop.mjs — Claude Code Stop hook 脚本
+ * on-stop.mjs — session 清理脚本
  *
- * 触发时机：Claude Code 主对话结束时自动执行（由 hooks/hooks.json 注册）。
- * 也可手动运行：node scripts/on-stop.mjs
+ * 触发时机：研究完成后手动执行。
+ * 用法：node scripts/on-stop.mjs [--sid <session-id>]
  *
  * 三项自动清理任务：
  *
  *   ① 关闭未完成的 session
  *      扫描 ~/.sleuth/sessions/ 下所有 session 文件，
  *      将 finished: null 的 session 标记为 outcome: "partial" 并写入当前时间戳。
- *      场景：Agent 忘记执行 finish 命令，Stop hook 兜底处理。
+ *      场景：Agent 忘记执行 finish 命令，on-stop 兜底处理。
  *
  *   ② 为复杂站点创建经验 stub
  *      从刚关闭的 session 中提取域名，判断是否满足以下任一条件：

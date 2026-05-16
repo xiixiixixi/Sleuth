@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 
 // 项目根目录（从当前文件向上回溯一级）
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-// 站点经验文件存放目录（与项目目录分离，跨插件更新持久化）
+// 站点经验文件存放目录（与 skill 目录分离，跨更新持久化）
 const PATTERNS_DIR = path.join(os.homedir(), '.sleuth', 'site-patterns');
 
 // 从命令行参数获取查询文本

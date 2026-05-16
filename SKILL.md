@@ -8,11 +8,11 @@ description: >-
 
 sleuth 是搜索、浏览和研究判断层，不垄断网络入口，也不拦截工具。你可以使用 WebSearch、WebFetch、agent-browser、本地历史、书签和站点经验，但必须知道每类工具能证明什么、不能证明什么。
 
-如果这个 skill 是由路由 hook 注入触发的，先执行本文件的判断步骤，再决定工具；不要因为已经有 WebSearch、Fetch、浏览器或 MCP 工具可用就跳过 sleuth。
+当 skill description 匹配触发了本 skill，先执行本文件的判断步骤，再决定工具；不要因为已经有 WebSearch、Fetch、浏览器或 MCP 工具可用就跳过 sleuth。
 
 ```bash
-# 插件根目录 — 所有脚本和参考文档的基础路径
-SKILL_DIR="$(cd "${CLAUDE_SKILL_DIR}/../.." && pwd)"
+# skill 根目录 — 所有脚本和参考文档的基础路径
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 ```
 
 ## 先想清楚目标，不先背流程
@@ -214,7 +214,7 @@ browser_session: ${SID}-pricing
 - **用户指定格式 / 路径 / 文件名**：完全按用户要求输出。
 
 深度研究默认只给用户一份最终文件，不要生成多个“final / merged / summary”版本让用户分不清。
-最终报告文件默认放在用户启动任务的项目目录，不放进插件目录或 `~/.sleuth/output/`。`~/.sleuth/output/` 只存中间 artifact、截图、页面、数据和 session 可召回材料。
+最终报告文件默认放在用户启动任务的项目目录，不放进 skill 目录或 `~/.sleuth/output/`。`~/.sleuth/output/` 只存中间 artifact、截图、页面、数据和 session 可召回材料。
 
 常见收尾动作：
 
@@ -282,6 +282,21 @@ updated: 2026-04-27
 
 ## 结束 session
 
+研究完成后主动执行以下清理（无自动 hook，需手动触发）：
+
 ```bash
+# 1. 结束 session 日志
 node "${SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "$SID" --outcome success|partial|fail
+
+# 2. 更新站点经验统计（如果本轮访问了新站点）
+node "${SKILL_DIR}/scripts/update-site-stats.mjs" --sid "$SID"
+
+# 3. 清理过期输出（可选，默认保留 7 天）
+node "${SKILL_DIR}/scripts/cleanup-output.mjs"
+```
+
+如果浏览器是 sleuth 启动的，研究结束后关闭它：
+
+```bash
+node "${SKILL_DIR}/scripts/on-stop.mjs" --sid "$SID"
 ```
