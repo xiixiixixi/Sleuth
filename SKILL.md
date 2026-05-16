@@ -1,21 +1,121 @@
 ---
 name: sleuth
 description: >-
-  所有搜索、网页读取、浏览器验证与网络研究任务都应优先通过此 skill 处理。触发场景：用户要求搜索信息、查看网页内容、验证页面或来源、访问动态渲染页面、使用登录态浏览器、读取最新网页信息、或处理任何需要真实网页证据的网络任务。
+  Channel intelligence and browser-grounded evidence collection.
+  Use for public or authenticated web channels, dynamic pages, platform search,
+  source verification, local browser context, and research tasks requiring
+  current in-browser evidence.
 ---
 
-# sleuth — 梦里寻
-
-sleuth 是搜索、浏览和研究判断层，不垄断网络入口，也不拦截工具。你可以使用 WebSearch、WebFetch、agent-browser、本地历史、书签和站点经验，但必须知道每类工具能证明什么、不能证明什么。
-
-当 skill description 匹配触发了本 skill，先执行本文件的判断步骤，再决定工具；不要因为已经有 WebSearch、Fetch、浏览器或 MCP 工具可用就跳过 sleuth。
+# sleuth — 执行合同
 
 ```bash
-# skill 根目录 — 所有脚本和参考文档的基础路径
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 ```
 
-## 先想清楚目标，不先背流程
+## 基本事实
+
+**浏览器是最高保真的观察层**——当页面状态、登录态、交互、动态渲染重要时，浏览器提供其他工具无法企及的完整视角。
+
+其他工具各有适用边界：
+
+- **WebSearch** — 搜索引擎的索引是过去式的快照，排序受 SEO 污染，snippet 是截断的碎片。适合发现来源地图，不适合最终事实证明。
+- **WebFetch / Reader** — 拿到的是服务端首次响应的 HTML。登录墙后面的内容它看不到，JS 渲染的内容它拿不到。适合快速读取公开静态正文。
+- **站点原生搜索** — 当渠道自身的索引更权威时（论坛内搜索、平台搜索、电商站内搜），优先使用站点原生搜索而非通用搜索引擎。
+
+**浏览器没有这些限制。** 它看到登录态内容、执行 JS、处理动态加载、可以交互、可以等待、可以验证。代价是更重，但当上述条件任一存在时，浏览器是正确的选择。
+
+## 浏览器模式选择
+
+- **Managed browser（默认）**：Sleuth 维护的独立 Chrome 实例（`~/.sleuth/cdp-profile/`），持久登录态，永不触碰用户日常 Chrome。
+- **Real-browser bridge（Phase 4）**：使用用户日常 Chrome，需显式 opt-in `--real-browser`。默认只读模式，可通过 `--domain` 限制操作范围。需用户以 `--remote-debugging-port` 启动 Chrome 或设置 `SLEUTH_REAL_CDP_PORT` 环境变量。
+
+## Auth 验证规则
+
+**CDP 连接成功 ≠ 站点登录成功。** 连上 managed browser 后，仍须验证目标站点是否处于登录态。判断方法：
+- 访问目标站点的已知登录后页面
+- 检查 DOM 中登录态标志（如用户名元素、account menu）
+- 如未登录 → 提示用户运行 `node scripts/sleuth-browser.mjs open-login` 手动登录
+
+不要把以下任何一项等同于"已登录"：CDP 已连接、profile 目录存在、cookie 文件存在、browser session 存在。只有页面级验证才算数。
+
+## 站点搜索规则
+
+当目标渠道自身的索引更权威时，优先使用站点原生搜索而非通用搜索引擎。
+
+**使用站点搜索**：
+- 内容在平台/应用/社区/论坛/文档站/商城/仪表板内
+- 搜索结果因登录态、地区、账号、权限不同而不同
+- 站点有筛选器或排序信号本身就是证据的一部分
+- 用户问的是"在某平台上"的内容
+- 通用搜索只给出摘要、镜像、SEO 页或二手转载
+
+**使用通用搜索**：
+- 任务是跨开放网络的来源发现
+- 权威来源未知
+- 站点无可用搜索
+- 需要外部佐证
+- 目标是公开静态文档且搜索引擎是最快索引
+
+## ⚠️ FIRST ACTION（每次联网任务必须）
+
+收到任何联网/搜索/网页任务后，**第一步**运行路由判断：
+
+```bash
+node "${SKILL_DIR}/scripts/route-task.mjs" --query "<用户问题>" [--domain "<目标域名>"]
+```
+
+读取返回的 `mode`，按输出中的指引执行。**不要自行判断用 WebSearch 还是浏览器。**
+
+> 如果 `route-task.mjs` 尚未就绪，按以下规则手动判断 mode：
+> - 目标是公开静态页面（文档站、Wikipedia、GitHub README）→ 可以先 fetch
+> - 其余一切 → 浏览器
+
+**启动 CDP 浏览器：**
+
+```bash
+node "${SKILL_DIR}/scripts/check-deps.mjs" --ensure-cdp
+# 输出 SLEUTH_CDP_PORT=<port>，下游命令使用此端口
+```
+
+## ⚠️ ESCALATE NOW（捷径失败后的强制升级）
+
+当你选择了捷径（WebSearch / WebFetch）但结果不充分时：
+
+- 返回内容 < 200 字 → **必须**切换到浏览器
+- 内容明显是壳/导航/登录提示 → **必须**切换到浏览器
+- 搜索结果全是摘要/二手转载 → **必须**用浏览器访问原始来源
+- 遇到 CAPTCHA / 付费墙 / 登录弹窗 → 记录 gap，**必须**尝试 CDP 登录态
+- 不要假装成功。拿不到就说拿不到。
+
+---
+
+## 辅助脚本（按需使用，非必须前置）
+
+```bash
+# 历史召回：先看以前有没有做过类似研究
+node "${SKILL_DIR}/scripts/research-index.mjs" --action recall --query "关键词" --limit 5
+
+# 命名实体无召回命中时，可回填最近资料
+node "${SKILL_DIR}/scripts/research-index.mjs" --action backfill --days 7
+
+# 用户提到"之前看过 / 书签里 / 内部系统"时
+node "${SKILL_DIR}/scripts/find-url.mjs" "关键词" --since 7d
+
+# 目标域名已明确时，读取站点经验
+node "${SKILL_DIR}/scripts/match-site.mjs" "<域名>"
+```
+
+## 工具角色与证据边界
+
+| 工具 / 入口 | 适合做什么 | 证据边界 |
+|-------------|------------|----------|
+| **WebSearch / Search APIs** | 发现候选页面、别名、关键词地图、来源拓扑 | 不完整，受排序和 snippet 偏置影响，不能直接充当最终证明 |
+| **WebFetch / Jina / Firecrawl / curl-like readers** | 快速读取正文、扫静态页面、降 token | 不保证布局、交互、登录态、动态内容和页面真实状态 |
+| **agent-browser (CDP)** | 验证一手页面、处理动态渲染、登录、交互、DOM/eval、tab/network/state | **登录墙/动态站点的唯一可靠路径** |
+| **本地历史 / 书签 / site-patterns** | 找用户曾访问、组织内部、搜索引擎不易发现的入口 | 是入口记忆，不自动等于事实证据 |
+
+## 研究目标（每次任务前明确）
 
 收到联网任务后，先用一句话写清：
 
@@ -25,43 +125,6 @@ SKILL_DIR="${CLAUDE_SKILL_DIR}"
 - 哪些内容只是候选线索，不该直接写成事实。
 
 主 Agent 和子 Agent 共用同一套搜索判断：`references/search-guide.md`。
-
-## 工具角色与证据边界
-
-| 工具 / 入口 | 适合做什么 | 证据边界 |
-|-------------|------------|----------|
-| **WebSearch / Search APIs** | 发现候选页面、别名、关键词地图、来源拓扑 | 不完整，受排序和 snippet 偏置影响，不能直接充当最终证明 |
-| **WebFetch / Jina / Firecrawl / curl-like readers** | 快速读取正文、扫静态页面、降 token | 不保证布局、交互、登录态、动态内容和页面真实状态 |
-| **agent-browser** | 验证一手页面、处理动态渲染、登录、交互、DOM/eval、tab/network/state | 适合高价值验证，不适合把所有网页都重成本浏览一遍 |
-| **本地历史 / 书签 / site-patterns** | 找用户曾访问、组织内部、搜索引擎不易发现的入口 | 是入口记忆，不自动等于事实证据 |
-
-判断原则很简单：
-
-- 需要找入口、找别名、找来源地图时，先侦察。
-- 需要快速扫正文时，用 reader。
-- 需要确认真实页面状态、动态内容、登录态、交互路径时，回到浏览器。
-- 关键结论一律回到原始来源，不让摘要替你下结论。
-
-## 按需起手，不做无意义前置
-
-不是每次都把所有脚本跑一遍。只在它们能减少重复劳动时才用。
-
-```bash
-# 历史召回：先看以前有没有做过类似研究
-node "${SKILL_DIR}/scripts/research-index.mjs" --action recall --query "关键词" --limit 5
-
-# 命名实体无召回命中时，可回填最近资料
-node "${SKILL_DIR}/scripts/research-index.mjs" --action backfill --days 7
-
-# 用户提到“之前看过 / 书签里 / 内部系统”时
-node "${SKILL_DIR}/scripts/find-url.mjs" "关键词" --since 7d
-
-# 需要浏览器时再做环境检查
-node "${SKILL_DIR}/scripts/check-deps.mjs"
-
-# 目标域名已明确时，读取站点经验
-node "${SKILL_DIR}/scripts/match-site.mjs" "<域名>"
-```
 
 ### recall 命中后怎么借用
 
@@ -179,7 +242,7 @@ browser_session: ${SID}-pricing
 
 浏览器相关细节看 `references/tool-guide.md`。核心姿势如下：
 
-- 所有 agent-browser 命令带 `--auto-connect --session <name>`。
+- 所有 agent-browser 命令带 `--cdp $SLEUTH_CDP_PORT --session <name>`。
 - 主 Agent 通常用 `${SID}-main`，子 Agent 用各自独立 session；独立任务不要挤在同一个浏览器 session 里排队。
 - **观察 / 提取优先用 DOM 和 eval**。
 - **交互优先用 snapshot / @ref**。

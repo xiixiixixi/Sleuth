@@ -41,7 +41,7 @@ echo "SLEUTH_OUTPUT=${SLEUTH_OUTPUT}"
 
 1. 不再派子 Agent。
 2. 不加载 sleuth 主 skill。
-3. 所有 agent-browser 命令带 `--auto-connect --session "${BROWSER_SESSION}"`。
+3. 所有 agent-browser 命令带 `--cdp $SLEUTH_CDP_PORT --session "${BROWSER_SESSION}"`。
 4. 使用主 Agent 提供的 `SID`，不创建新的研究 session。
 5. 不 finish 主 session；完成时只记录 `subagent_done`。
 6. 搜索和验证逻辑统一看 `references/search-guide.md`。
@@ -125,7 +125,7 @@ CONTENT
    ```
 3. 关闭 session：
    ```bash
-   agent-browser --auto-connect --session "${BROWSER_SESSION}" close
+   agent-browser --cdp $SLEUTH_CDP_PORT --session "${BROWSER_SESSION}" close
    ```
 4. 返回结构化摘要
 

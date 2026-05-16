@@ -37,13 +37,18 @@ Sleuth 的目标不是把所有联网任务都强行改成浏览器任务，而�
 sleuth/
 ├── SKILL.md                       主 skill：研究判断、工具角色、交付约定
 │
+├── docs/
+│   └── browser-auth-and-channel-intelligence-plan.md  设计文档
+│
 ├── scripts/
 │   ├── lib/
+│   │   ├── check-deps-core.mjs    环境检查核心逻辑（纯导出，不自动执行）
 │   │   ├── output.mjs             共享输出工具：路径解析、目录创建、类型映射
 │   │   ├── registry.mjs           跨 session 交付物 registry 与召回评分
 │   │   └── validate.mjs           参数校验
-│   ├── check-deps.mjs             环境检查：agent-browser + Chrome CDP + 可选依赖
-│   ├── on-stop.mjs                session 清理、关闭 sleuth Chrome、沉淀站点经验
+│   ├── check-deps.mjs             CLI 入口（薄 shim，解析参数调 core）
+│   ├── sleuth-browser.mjs         Managed browser 生命周期 CLI（status/ensure/open-login/stop）
+│   ├── on-stop.mjs                session 清理、站点经验沉淀
 │   ├── session-logger.mjs         会话生命周期：start / log / finish
 │   ├── deliver.mjs                文件交付：save / list / init / merge
 │   ├── research-index.mjs         历史召回：index / query / recall / backfill
@@ -96,10 +101,11 @@ sleuth/
 │  open · eval · snapshot · click · fill · wait               │
 │  tab · session · network · auth · state                     │
 └──────────────────────────────────────────────────────────────┘
-         │ CDP WebSocket (127.0.0.1:9222)
+         │ CDP WebSocket (127.0.0.1:$SLEUTH_CDP_PORT)
          v
 ┌──────────────────────────────────────────────────────────────┐
-│  用户日常 Chrome（有登录态、书签、历史、Cookie）              │
+│  Sleuth Managed Browser（~/.sleuth/cdp-profile/）             │
+│  独立 Chrome 实例，持久登录态，永不触碰用户日常 Chrome       │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -111,7 +117,8 @@ sleuth/
 | `~/.sleuth/output/registry.jsonl` | 跨日期 artifact registry，用于 recall 历史交付物 |
 | `~/.sleuth/sessions/*.json` | 会话日志（操作记录、域名访问、成功/失败） |
 | `~/.sleuth/knowledge/entities.json` | 从交付文件提取的实体/事实索引 |
-| `~/.sleuth/chrome-debug/` | Chrome CDP 调试 profile（Default 软链接到用户真实 profile） |
+| `~/.sleuth/cdp-profile/` | Managed browser profile（CDP 独立实例，持久登录态） |
+| `~/.sleuth/cdp-state.json` | Managed browser 运行状态（pid、port、启动时间） |
 | `~/.sleuth/site-patterns/*.md` | 站点经验文件（YAML frontmatter + 经验正文 + 自动统计） |
 
 ---
@@ -124,7 +131,7 @@ sleuth/
 |------|------|------|
 | **Node.js >= 18** | 运行所有辅助脚本 | 需预先安装 |
 | **agent-browser** | CDP 浏览器操作 CLI | `npm i -g agent-browser && agent-browser install` |
-| **Chrome** | 用户日常浏览器，带登录态 | 已安装（`check-deps` 会自动检测并开启 CDP） |
+| **Chrome** | Managed browser 基础 | 已安装（`check-deps` 会自动启动独立实例） |
 | **sqlite3** | Chrome 历史搜索（可选） | macOS/Linux 预装；Windows: `winget install sqlite.sqlite` |
 | **yt-dlp** | YouTube 字幕下载（可选） | `pip install yt-dlp` |
 | **Python 3** | 字幕清洗（可选） | macOS/Linux 预装 |
@@ -163,22 +170,33 @@ git clone https://github.com/xiixiixixi/Sleuth.git ~/.agents/skills/sleuth
 
 ### Chrome CDP 连接
 
-Chrome 147+ 要求非默认 `--user-data-dir` 才能开启远程调试。`check-deps.mjs` 会自动处理：
+Sleuth 使用独立的 managed browser（`~/.sleuth/cdp-profile/`），永不触碰用户日常 Chrome。
 
-1. 检测 CDP 端口（`DevToolsActivePort` 文件 + 常用端口探测）
-2. 如不可用，自动：关闭/终止已运行的 Chrome → 创建 `~/.sleuth/chrome-debug/`（软链接 Default profile）→ 以 `--remote-debugging-port=9222` 重启
-3. 连接后仍必须验证目标站点是否真的处于登录态；Chrome/CDP 可复用 profile，但不保证每个站点自动登录成功
+`check-deps.mjs` 处理 CDP 连接：
 
-Chrome 必须在进程启动时带上 `--remote-debugging-port=9222`。如果 Chrome 已经在运行，再用 `open -a` 或其他方式追加启动参数会被现有进程忽略，因此必须先退出/终止旧进程，再用正确参数重启。
-如果中途杀掉浏览器，重新打开后也要重新验证登录态；不要用 session 名或 profile 路径推断登录仍然有效。
+1. 协议级验证已有 CDP 端点（`/json/version` 返回有效 JSON 且含 `webSocketDebuggerUrl`）
+2. 如无有效端点，自动启动 managed browser（动态选端口，优先 9222）
+3. 输出 `SLEUTH_CDP_PORT=<port>` 供下游 agent-browser 使用
+4. 连接后仍须验证目标站点是否处于登录态（CDP 连接 ≠ 站点登录成功）
+
+首次使用需手动登录：
+
+```bash
+# 打开 managed browser 窗口，手动登录目标站点
+node scripts/sleuth-browser.mjs open-login
+```
+
+登录态持久保存在 `~/.sleuth/cdp-profile/`，跨 session 复用直到站点过期。
 
 如需手动启动：
 
 ```bash
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --remote-debugging-port=9222 \
-  --user-data-dir=$HOME/.sleuth/chrome-debug \
-  --no-first-run &
+  --remote-debugging-address=127.0.0.1 \
+  --user-data-dir=$HOME/.sleuth/cdp-profile \
+  --no-first-run \
+  --no-default-browser-check &
 ```
 
 ---

@@ -1,558 +1,93 @@
 #!/usr/bin/env node
 /**
- * check-deps.mjs — sleuth 环境检查与自动修复
+ * check-deps.mjs — sleuth 环境检查 CLI 入口
  *
- * 在开始调研前运行，确保所有依赖就绪。发现问题时自动尝试修复。
+ * 薄 CLI shim：解析命令行参数，无条件调用 main()。
+ * 所有逻辑在 lib/check-deps-core.mjs 中。
  *
- * 检查项：
- *   1. agent-browser 是否安装且可用
- *   2. Chrome CDP 远程调试是否可用（如不可用，自动重启 Chrome 开启 CDP）
- *   3. 输出目录自动创建到 ~/.sleuth/output/
- *   4. 过期输出自动清理（调用 cleanup-output.mjs，保留 7 天）
- *   5. 站点经验文件列表展示
- *   6. 可选依赖检查（sqlite3、yt-dlp、python3）
+ * 用法（文档规定标志）：
+ *   node check-deps.mjs                     # 完整检查 + 确保 CDP
+ *   node check-deps.mjs --output-dir        # 仅输出目录路径
+ *   node check-deps.mjs --check-only        # 非破坏性诊断（不启动浏览器）
+ *   node check-deps.mjs --ensure-cdp        # 查找或启动 managed browser
+ *   node check-deps.mjs --login-url <url>   # 启动后打开指定 URL（登录引导）
+ *   node check-deps.mjs --auth-required     # 如登录未验证则提示
+ *   node check-deps.mjs --json              # 输出机器可读 JSON
+ *   node check-deps.mjs --sid <id>          # 指定 session ID
  *
- * Chrome CDP 自动重启逻辑：
- *   Chrome 147+ 要求非默认 --user-data-dir 才能开启远程调试。
- *   本脚本会：
- *     1. 检测 CDP 端口（DevToolsActivePort 文件 + 常用端口探测）
- *     2. 如不可用，必须先关闭已运行的 Chrome（已运行时新启动参数会被忽略）→ 创建 ~/.sleuth/chrome-debug/ →
- *        以 --remote-debugging-port=9222 重启（Default profile 软链接保留登录态）
- *
- * 用法：
- *   node check-deps.mjs                 # 完整环境检查
- *   node check-deps.mjs --output-dir    # 仅输出目录路径
- *   node check-deps.mjs --sid <id>      # 指定 session ID
- *
- * 也可被其他脚本 import 后编程调用：
- *   import { main, checkAgentBrowser, detectChromePort } from './check-deps.mjs';
+ * 编程调用：
+ *   import { main, ensureCDP, detectCDPPort } from './lib/check-deps-core.mjs';
  */
 
-import { execSync, spawn } from 'node:child_process';
-import fs from 'node:fs';
-import net from 'node:net';
-import os from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { main } from './lib/check-deps-core.mjs';
 
-import { resolveOutputDir, ensureOutputDir } from './lib/output.mjs';
+// ── 解析命令行参数 ──────────────────────────────────────────────────
 
-// 项目根目录
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-// 站点经验文件目录
-const SITE_PATTERNS_DIR = path.join(os.homedir(), '.sleuth', 'site-patterns');
+const KNOWN_FLAGS = ['--output-dir', '--check-only', '--ensure-cdp', '--login-url', '--auth-required', '--real-browser', '--domain', '--cdp-port', '--json', '--sid', '--help'];
 
-// ── TCP 端口探测 ──────────────────────────────────────────────────
+// --help 或未知 flag → 打印用法并退出
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  console.log(`用法: node check-deps.mjs [选项]
 
-/**
- * 检测指定 TCP 端口是否有服务在监听。
- * 通过尝试建立 TCP 连接来判断，超时则认为端口不可用。
- *
- * @param {number} port - 端口号
- * @param {string} host - 主机地址，默认 127.0.0.1
- * @param {number} timeoutMs - 超时毫秒数，默认 2000
- * @returns {Promise<boolean>} 端口是否在监听
- */
-function checkPort(port, host = '127.0.0.1', timeoutMs = 2000) {
-  return new Promise((resolve) => {
-    const socket = net.createConnection(port, host);
-    const timer = setTimeout(() => { socket.destroy(); resolve(false); }, timeoutMs);
-    socket.once('connect', () => { clearTimeout(timer); socket.destroy(); resolve(true); });
-    socket.once('error', () => { clearTimeout(timer); resolve(false); });
-  });
+选项:
+  --check-only        非破坏性诊断（不启动浏览器、不写文件）
+  --ensure-cdp        查找或启动 managed browser
+  --login-url <url>   启动后打开指定 URL（登录引导）
+  --auth-required [url] 验证登录态（可传 URL 或配合 --login-url 使用）
+  --real-browser      使用用户现有 Chrome（需以 --remote-debugging-port 启动）
+  --domain <domain>   限制 real-browser 操作范围到指定域名
+  --cdp-port <port>   显式指定 real-browser 使用的 CDP 端口
+  --output-dir        仅输出目录路径
+  --json              输出机器可读 JSON
+  --sid <id>          指定 session ID
+  --help, -h          显示此帮助`);
+  process.exit(0);
 }
 
-// ── Chrome 调试端口检测 ────────────────────────────────────────────
-
-/**
- * 返回各平台上 Chrome DevToolsActivePort 文件的可能路径。
- * Chrome 开启 CDP 后会写入此文件，第一行是端口号。
- *
- * @returns {string[]} 文件路径列表（按优先级排列）
- */
-function activePortFiles() {
-  const home = os.homedir();
-  const localAppData = process.env.LOCALAPPDATA || '';
-  switch (os.platform()) {
-    case 'darwin':
-      return [
-        // sleuth 自己创建的 CDP profile（最高优先级）
-        path.join(home, '.sleuth', 'chrome-debug', 'DevToolsActivePort'),
-        // 标准 Chrome 安装位置
-        path.join(home, 'Library/Application Support/Google/Chrome/DevToolsActivePort'),
-        path.join(home, 'Library/Application Support/Google/Chrome Canary/DevToolsActivePort'),
-        path.join(home, 'Library/Application Support/Chromium/DevToolsActivePort'),
-      ];
-    case 'linux':
-      return [
-        path.join(home, '.config/google-chrome/DevToolsActivePort'),
-        path.join(home, '.config/chromium/DevToolsActivePort'),
-      ];
-    case 'win32':
-      return [
-        path.join(localAppData, 'Google/Chrome/User Data/DevToolsActivePort'),
-        path.join(localAppData, 'Chromium/User Data/DevToolsActivePort'),
-      ];
-    default:
-      return [];
+const VALUE_FLAGS = ['--login-url', '--sid', '--auth-required', '--domain', '--cdp-port'];  // 这些 flag 后面跟值
+const unknownFlags = [];
+const argv = process.argv.slice(2);
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a.startsWith('--')) {
+    const name = a.split('=')[0];
+    if (!KNOWN_FLAGS.includes(name)) { unknownFlags.push(a); }
+    else if (VALUE_FLAGS.includes(name) && !a.includes('=')) { i++; }  // 跳过值
+  } else if (a.startsWith('-') && a !== '-h') {
+    unknownFlags.push(a);
   }
+  // 非 flag 参数（已被 VALUE_FLAGS 跳过）不检查
+}
+if (unknownFlags.length > 0) {
+  console.error(`未知选项: ${unknownFlags.join(', ')}\n运行 --help 查看可用选项`);
+  process.exit(1);
 }
 
-/**
- * 自动检测 Chrome CDP 调试端口。
- *
- * 检测策略（按优先级）：
- *   1. 读取 DevToolsActivePort 文件（各平台标准位置）
- *   2. 回退探测常用端口（9222、9229、9333）
- *
- * @returns {Promise<number|null>} 端口号，或 null 表示不可用
- */
-async function detectChromePort() {
-  // 策略 1：读取 DevToolsActivePort 文件
-  const portFileChecks = activePortFiles().map(async (filePath) => {
-    try {
-      const lines = fs.readFileSync(filePath, 'utf8').trim().split(/\r?\n/).filter(Boolean);
-      const port = parseInt(lines[0], 10);
-      // 验证端口号合法且端口确实在监听
-      if (port > 0 && port < 65536 && await checkPort(port)) {
-        return port;
-      }
-    } catch (_) {}
-    return null;
-  });
-
-  for (const result of await Promise.all(portFileChecks)) {
-    if (result !== null) return result;
-  }
-
-  // 策略 2：探测常用端口
-  const fallbackPorts = [9222, 9229, 9333];
-  const fallbackChecks = await Promise.all(
-    fallbackPorts.map(async (port) => {
-      const ok = await checkPort(port);
-      return ok ? port : null;
-    })
-  );
-
-  for (const port of fallbackChecks) {
-    if (port !== null) return port;
-  }
-
-  return null;
+function getArg(name) {
+  const idx = process.argv.indexOf(name);
+  if (idx === -1) return undefined;
+  const next = process.argv[idx + 1];
+  // 如果下一个参数是另一个 flag 或不存在，返回 true（布尔标志）
+  if (!next || next.startsWith('--')) return true;
+  return next;
 }
 
-// ── agent-browser 检查 ─────────────────────────────────────────────
+const options = {
+  outputDirOnly: process.argv.includes('--output-dir'),
+  checkOnly: process.argv.includes('--check-only'),
+  ensureCdp: process.argv.includes('--ensure-cdp'),
+  loginUrl: typeof getArg('--login-url') === 'string' ? getArg('--login-url') : undefined,
+  authRequired: getArg('--auth-required') || false,
+  realBrowser: process.argv.includes('--real-browser'),
+  domain: typeof getArg('--domain') === 'string' ? getArg('--domain') : undefined,
+  cdpPort: typeof getArg('--cdp-port') === 'string' ? getArg('--cdp-port') : undefined,
+  json: process.argv.includes('--json'),
+  sid: typeof getArg('--sid') === 'string' ? getArg('--sid') : undefined,
+};
 
-/**
- * 判断当前运行的 Chrome 是否由 sleuth 启动。
- * sleuth 启动的 Chrome 使用 --user-data-dir 指向 ~/.sleuth/chrome-debug/。
- *
- * @returns {boolean} true = sleuth 启动的 Chrome
- */
-function isSleuthChrome() {
-  try {
-    if (os.platform() === 'win32') {
-      // Windows: 用 wmic 获取命令行参数
-      const out = execSync('wmic process where "name=\'chrome.exe\'" get commandline /format:list', {
-        encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      return out.includes('remote-debugging') && out.includes('chrome-debug');
-    }
-    // macOS/Linux: ps aux 逐行检查
-    const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
-    return ps.split('\n').some(line =>
-      /chrome/i.test(line) && /remote-debugging/.test(line) && /chrome-debug/.test(line)
-    );
-  } catch {
-    return false;
-  }
-}
+// ── 执行 ──────────────────────────────────────────────────────────
 
-// ── agent-browser 检查 ─────────────────────────────────────────────
-
-/**
- * 检测 agent-browser 是否已安装。
- * 通过执行 `agent-browser --version` 验证。
- *
- * @returns {{status: string, version: string|null}} 状态和版本号
- */
-function checkAgentBrowser() {
-  try {
-    const version = execSync('agent-browser --version', {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 10000,
-    }).trim();
-    const match = version.match(/(\d+\.\d+\.\d+)/);
-    const ver = match ? `v${match[1]}` : version;
-    return { status: 'ok', version: ver };
-  } catch {
-    return { status: 'not-found', version: null };
-  }
-}
-
-// ── Chrome CDP 自动重启 ────────────────────────────────────────────
-
-/**
- * 查找 Chrome 二进制文件的路径（跨平台）。
- *
- * @returns {string|null} Chrome 可执行文件路径，或 null
- */
-function findChromeBinary() {
-  const candidates = {
-    darwin: [
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    ],
-    linux: [
-      '/usr/bin/google-chrome-stable',
-      '/usr/bin/google-chrome',
-      '/usr/bin/chromium',
-    ],
-    win32: [
-      `${process.env.LOCALAPPDATA || ''}\\Google\\Chrome\\Application\\chrome.exe`,
-      `${process.env.PROGRAMFILES || ''}\\Google\\Chrome\\Application\\chrome.exe`,
-    ],
-  };
-  for (const p of candidates[os.platform()] || []) {
-    if (fs.existsSync(p)) return p;
-  }
-  return null;
-}
-
-/**
- * 获取默认 Chrome profile 目录路径（跨平台）。
- * 用于创建 CDP 调试 profile 时的软链接源。
- */
-function getDefaultChromeProfile() {
-  const home = os.homedir();
-  switch (os.platform()) {
-    case 'darwin': return path.join(home, 'Library', 'Application Support', 'Google', 'Chrome');
-    case 'linux': return path.join(home, '.config', 'google-chrome');
-    case 'win32': return path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data');
-    default: return null;
-  }
-}
-
-/** 检测 Chrome 进程是否正在运行 */
-function isChromeRunning() {
-  try {
-    if (os.platform() === 'win32') {
-      // Windows: tasklist 输出含 chrome.exe 才算运行（过滤掉标题行和"No tasks"提示）
-      const out = execSync('tasklist /FI "IMAGENAME eq chrome.exe" /NH', {
-        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000,
-      });
-      return /chrome\.exe/i.test(out);
-    }
-    // macOS/Linux
-    const out = execSync('pgrep -x "Google Chrome" || pgrep -x "chrome" || pgrep -x "chromium"', {
-      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000,
-    });
-    return out.trim().length > 0;
-  } catch {
-    return false;
-  }
-}
-
-/** Promise 版的 sleep */
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
-  * 自动重启 Chrome 并开启 CDP 远程调试。
-  *
-  * 流程：
-  *   1. 查找 Chrome 二进制文件
-  *   2. 如果 Chrome 正在运行 → 先优雅关闭（释放文件锁），失败则终止进程
-  *   3. 创建 ~/.sleuth/chrome-debug/ 目录
-  *   4. 从用户 Chrome profile 复制 Cookies、Local State 等关键文件（此时文件无锁）
-  *   5. 以 --remote-debugging-port=9222 --user-data-dir=<chrome-debug> 启动 Chrome
-  *   6. 轮询等待 CDP 端口就绪（最多 10 秒）
-  *
-  * 为什么必须关闭用户 Chrome：
-  *   Cookies 等文件使用 SQLite WAL 模式，Chrome 运行时文件被锁定。
-  *   不关闭直接 copyFileSync → 拿到空/不完整副本 → 登录态丢失。
-  *
-  * @param {number} port - CDP 端口号，默认 9222
-  * @returns {Promise<boolean>} 是否成功启动
-  */
-async function restartChromeWithCDP(port = 9222) {
-  const binary = findChromeBinary();
-  if (!binary) {
-    console.error('chrome: 未找到 Chrome 二进制文件');
-    return false;
-  }
-
-  // 必须先关闭用户 Chrome，否则 Cookies 等文件被 SQLite WAL 锁定，
-  // copyFileSync 会拿到不完整副本 → 登录态丢失。
-  // 关闭后复制文件，再以 CDP 模式重启。
-  if (isChromeRunning()) {
-    console.log('chrome: 关闭用户 Chrome 以释放文件锁...');
-    try {
-      if (os.platform() === 'darwin') {
-        execSync('osascript -e \'quit app "Google Chrome"\'', { timeout: 5000, stdio: 'pipe' });
-      } else if (os.platform() === 'win32') {
-        execSync('taskkill /IM chrome.exe', { timeout: 5000, stdio: 'pipe' });
-      } else {
-        execSync('pkill -TERM chrome || pkill -TERM chromium', { timeout: 5000, stdio: 'pipe' });
-      }
-    } catch {}
-    // 等待进程退出 + 文件锁释放
-    for (let i = 0; i < 10; i++) {
-      await sleep(500);
-      if (!isChromeRunning()) break;
-    }
-    // 如果优雅关闭失败，强制终止
-    if (isChromeRunning()) {
-      try {
-        if (os.platform() === 'win32') {
-          execSync('taskkill /F /IM chrome.exe', { timeout: 5000, stdio: 'pipe' });
-        } else {
-          execSync('pkill -9 -x "Google Chrome" || pkill -9 chrome || pkill -9 chromium', { timeout: 5000, stdio: 'pipe' });
-        }
-      } catch {}
-      await sleep(1000);
-    }
-  }
-
-  // Chrome 已关闭，文件锁已释放。现在复制 profile 文件。
-  const debugDir = path.join(os.homedir(), '.sleuth', 'chrome-debug');
-
-  // 每次启动前清空旧目录，避免多次运行后 Cache 等文件堆积膨胀
-  try {
-    if (fs.existsSync(debugDir)) {
-      fs.rmSync(debugDir, { recursive: true, force: true });
-    }
-  } catch {}
-  fs.mkdirSync(debugDir, { recursive: true });
-
-  const defaultProfile = getDefaultChromeProfile();
-  fs.mkdirSync(debugDir, { recursive: true });
-  fs.mkdirSync(path.join(debugDir, 'Default'), { recursive: true });
-
-  if (defaultProfile) {
-    // 复制 Local State（加密密钥，Cookie 解密必须）
-    try {
-      const localStateSrc = path.join(defaultProfile, 'Local State');
-      const localStateDst = path.join(debugDir, 'Local State');
-      if (fs.existsSync(localStateSrc)) {
-        fs.copyFileSync(localStateSrc, localStateDst);
-      }
-    } catch {}
-
-    // 复制登录态、历史、书签等关键文件（不复制整个 Default/，避免锁冲突）
-    const filesToCopy = [
-      'Cookies',       // 登录态
-      'Login Data',    // 保存的密码
-      'Preferences',   // 设置
-      'Web Data',      // 自动填充
-      'History',       // 浏览历史
-      'Bookmarks',     // 书签
-      'Favicons',      // 网站图标
-    ];
-    for (const file of filesToCopy) {
-      try {
-        const src = path.join(defaultProfile, 'Default', file);
-        const dst = path.join(debugDir, 'Default', file);
-        if (fs.existsSync(src)) {
-          fs.copyFileSync(src, dst);
-        }
-      } catch (e) {
-          // 极少情况：文件不可读（权限问题等），记录警告
-          console.warn(`chrome: 复制 ${file} 失败: ${e.message}`);
-        }
-    }
-  }
-
-  // 验证 Cookies 文件复制成功（非空）
-  const cookiesDst = path.join(debugDir, 'Default', 'Cookies');
-  if (fs.existsSync(cookiesDst)) {
-    const size = fs.statSync(cookiesDst).size;
-    if (size < 1024) {
-      console.warn(`chrome: ⚠️ Cookies 文件异常小 (${size} bytes)，登录态可能丢失。请确认用户 Chrome 已完全退出后重试。`);
-    }
-  } else {
-    console.warn('chrome: ⚠️ Cookies 文件未找到，登录态将缺失。');
-  }
-
-  // 以 CDP 模式启动 Chrome（后台进程，不阻塞）。
-  // 使用独立的 debug 目录 + 从用户 profile 复制的文件，保留登录态。
-  console.log(`chrome: 启动 sleuth Chrome（CDP 端口 ${port}，登录态已从用户 profile 复制）...`);
-  const args = [
-    `--remote-debugging-port=${port}`,
-    '--no-first-run',
-    `--user-data-dir=${debugDir}`,
-  ];
-  const child = spawn(binary, args, { detached: true, stdio: 'ignore' });
-  child.unref(); // 不等待子进程退出
-
-  // 轮询等待 CDP 端口就绪（最多 10 秒）
-  for (let i = 0; i < 20; i++) {
-    await sleep(500);
-    if (await checkPort(port)) {
-      try {
-        // 验证 CDP 协议可用（请求 /json/version）
-        const resp = await fetch(`http://127.0.0.1:${port}/json/version`);
-        if (resp.ok) return true;
-      } catch {}
-    }
-  }
-
-  console.error('chrome: CDP 端口启动超时');
-  return false;
-}
-
-// ── 可选依赖检查 ──────────────────────────────────────────────────
-
-/**
- * 检测单个可选依赖是否安装。
- * 使用 which（Linux/macOS）或 where（Windows）命令。
- *
- * @param {string} name - 命令名（如 sqlite3、yt-dlp）
- * @returns {{status: string}} ok 或 not-found
- */
-function checkOptionalDep(name) {
-  try {
-    const cmd = os.platform() === 'win32' ? `where "${name}"` : `which "${name}"`;
-    execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-    return { status: 'ok' };
-  } catch {
-    return { status: 'not-found' };
-  }
-}
-
-// ── site-patterns 列表 ─────────────────────────────────────────────
-
-/**
- * 列出 ~/.sleuth/site-patterns/ 下所有 .md 文件名。
- * 展示已有的站点经验覆盖了哪些域名。
- *
- * @returns {string[]} 文件名列表（如 ["github.com.md", "stackoverflow.com.md"]）
- */
-function listSitePatterns() {
-  const patterns = [];
-  if (fs.existsSync(SITE_PATTERNS_DIR)) {
-    try {
-      const entries = fs.readdirSync(SITE_PATTERNS_DIR);
-      for (const entry of entries) {
-        if (entry.endsWith('.md') && fs.statSync(path.join(SITE_PATTERNS_DIR, entry)).isFile()) {
-          patterns.push(entry);
-        }
-      }
-    } catch (_) {}
-  }
-  return patterns;
-}
-
-// ── 主流程 ────────────────────────────────────────────────────────
-
-/**
- * 主函数。执行完整的环境检查流程。
- *
- * @param {object} [options] - 可选配置
- * @param {boolean} [options.outputDirOnly] - 仅输出目录路径，不做检查
- * @param {string} [options.sid] - session ID（用于目录定位）
- * @returns {Promise<object>} 检查结果对象
- */
-async function main(options = {}) {
-  const results = {};
-
-  // 特殊模式：仅输出目录路径（供其他脚本快速获取路径）
-  if (options.outputDirOnly) {
-    const outDir = resolveOutputDir(options.sid);
-    ensureOutputDir(outDir);
-    console.log(outDir);
-    return results;
-  }
-
-  // ── 检查 1：agent-browser ──
-  const ab = checkAgentBrowser();
-  results.agentBrowser = ab;
-  if (ab.status === 'ok') {
-    console.log(`agent-browser: ok (${ab.version})`);
-  } else {
-    console.log('agent-browser: not found — npm i -g agent-browser && agent-browser install');
-  }
-
-  // ── 检查 2：Chrome CDP ──
-  let chromePort = await detectChromePort();
-  if (chromePort) {
-    results.chromePort = chromePort;
-    // CDP 已可用 — 可能是之前 check-deps 启动的 sleuth Chrome，或用户手动配置的
-    console.log(`chrome: ok (port ${chromePort}，复用已有 CDP 连接，登录态保持)`);
-  } else {
-    // CDP 不可用 → 必须关闭当前 Chrome 后用 --remote-debugging-port 重启。
-    // 已运行的 Chrome 不会接收后续启动命令传入的新参数。
-    console.log('chrome: 用户 Chrome 未开启 CDP，正在关闭并以调试模式重启...');
-    const ok = await restartChromeWithCDP(9222);
-    if (ok) {
-      chromePort = 9222;
-      results.chromePort = chromePort;
-      console.log(`chrome: ok (port ${chromePort})`);
-    } else {
-      results.chromePort = null;
-      console.log('chrome: 重启失败');
-    }
-  }
-
-  // ── 检查 3：输出目录 ──
-  const outDir = resolveOutputDir();
-  fs.mkdirSync(outDir, { recursive: true });
-  results.outputDir = outDir;
-  console.log(`output-dir: ${outDir}`);
-
-  // ── 检查 3.5：清理过期输出（静默，非阻塞）──
-  try {
-    const { main: cleanupMain } = await import('./cleanup-output.mjs');
-    cleanupMain({ days: 7, dryRun: false });
-  } catch (err) {
-    console.warn(`cleanup: ${err.code === 'ERR_MODULE_NOT_FOUND' ? 'script missing' : err.message}`);
-  }
-
-  console.log();
-
-  // ── 检查 4：站点经验文件 ──
-  const patterns = listSitePatterns();
-  results.sitePatterns = patterns;
-  if (patterns.length > 0) {
-    console.log(`site-patterns: ${patterns.join(', ')}`);
-  } else {
-    console.log('site-patterns: (none)');
-  }
-
-  // ── 检查 5：可选依赖 ──
-  console.log();
-  const optDeps = {
-    sqlite3:    { install: 'macOS/Linux 预装；Windows: winget install sqlite.sqlite', usedBy: 'find-url （Chrome 书签/历史搜索）' },
-    'yt-dlp':   { install: 'pip install yt-dlp', usedBy: 'extract-subtitles （视频/播客字幕提取）' },
-    python3:    { install: 'macOS/Linux 预装；Windows: winget install python3', usedBy: 'srt_to_transcript （字幕清洗）' },
-  };
-  results.optionalDeps = {};
-  for (const [dep, info] of Object.entries(optDeps)) {
-    const r = checkOptionalDep(dep);
-    results.optionalDeps[dep] = r.status;
-    if (r.status === 'ok') {
-      console.log(`${dep}: ok`);
-    } else {
-      console.log(`${dep}: not found — ${info.install}（${info.usedBy}）`);
-    }
-  }
-
-  return results;
-}
-
-// 如果直接运行（非 import），执行主函数
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-if (isMain) {
-  const outputDirOnly = process.argv.includes('--output-dir');
-  const sidIdx = process.argv.indexOf('--sid');
-  const sid = sidIdx !== -1 ? process.argv[sidIdx + 1] : undefined;
-  main({ outputDirOnly, sid }).catch((err) => {
-    console.error('check-deps error:', err.message);
-    process.exit(1);
-  });
-}
-
-// 导出供其他脚本使用
-export { main, checkAgentBrowser, detectChromePort, listSitePatterns, checkPort, resolveOutputDir, ensureOutputDir };
+main(options).catch((err) => {
+  console.error('check-deps error:', err.message);
+  process.exit(1);
+});

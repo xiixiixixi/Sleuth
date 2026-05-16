@@ -5,9 +5,9 @@ sleuth 覆盖所有内容类型。文本提取优先（效率最高，token 成�
 ## 文本提取
 
 ```bash
-agent-browser --auto-connect --session ${SID}-main get text @ref                        # 定向提取
-agent-browser --auto-connect --session ${SID}-main eval "document.body.innerText"       # 全页文本（首选）
-agent-browser --auto-connect --session ${SID}-main eval --stdin <<'EOF'                 # 复杂提取
+agent-browser --cdp $SLEUTH_CDP_PORT --session ${SID}-main get text @ref                        # 定向提取
+agent-browser --cdp $SLEUTH_CDP_PORT --session ${SID}-main eval "document.body.innerText"       # 全页文本（首选）
+agent-browser --cdp $SLEUTH_CDP_PORT --session ${SID}-main eval --stdin <<'EOF'                 # 复杂提取
 const rows = document.querySelectorAll("table tbody tr");
 Array.from(rows).map(r => ({ name: r.cells[0].innerText, price: r.cells[1].innerText }));
 EOF
@@ -37,7 +37,7 @@ EOF
 ## PDF
 
 ```bash
-agent-browser --auto-connect --session ${SID}-main eval "Array.from(document.querySelectorAll('a[href$=\".pdf\"]')).map(a => a.href)"
+agent-browser --cdp $SLEUTH_CDP_PORT --session ${SID}-main eval "Array.from(document.querySelectorAll('a[href$=\".pdf\"]')).map(a => a.href)"
 ```
 
 下载后用 Read 工具读取。arXiv 论文直接 `arxiv.org/pdf/论文ID`。

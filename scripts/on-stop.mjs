@@ -20,9 +20,9 @@
  *      然后调用 update-site-stats.mjs 为这些域名刷新统计。
  *      排除搜索引擎域名（google.com、bing.com 等）。
  *
- *   ③ 关闭 sleuth Chrome 实例
- *      杀掉使用 chrome-debug 目录的 Chrome 进程。
- *      场景：子 Agent 创建了 tab 但忘记关闭。
+ *   ③ 清理旧版 Chrome 残留（持久浏览器不关闭）
+ *      只清理旧版 chrome-debug 目录的进程；~/.sleuth/cdp-profile/ 的 managed browser 保留运行。
+ *      场景：迁移过渡期清理旧实例。
  *
  *   ④ 清理残留 agent-browser 进程
  *      关闭所有 agent-browser session，杀掉守护进程和 Chrome for Testing 子进程。
@@ -254,19 +254,18 @@ function createSitePatternStubs(domains) {
   return created;
 }
 
-// ── ③ 关闭 sleuth Chrome 实例 ──────────────────────────────────────────
+// ── ③ sleuth 专用浏览器（持久运行，不关闭）─────────────────────────────
 
 /**
- * 关闭 sleuth 启动的独立 Chrome 实例。
+ * sleuth 专用浏览器设计为持久运行，保留登录态。
+ * on-stop 不再杀掉它。如需手动停止，使用：
+ *   node scripts/sleuth-browser.mjs stop
  *
- * sleuth Chrome 使用独立 user-data-dir（~/.sleuth/chrome-debug/），
- * 与用户日常 Chrome 完全隔离。关闭时直接杀掉该实例即可，
- * 不需要逐个关闭 tab。
+ * 保留兼容清理：杀掉旧版 chrome-debug 目录的残留进程（迁移过渡期）。
  */
 function closeSleuthChrome() {
   try {
     if (os.platform() === 'win32') {
-      // Windows: 找到使用 chrome-debug 目录的 Chrome 进程并关闭
       const out = execSync(
         'wmic process where "commandline like \'%chrome-debug%\'" get processid /format:list',
         { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] },
@@ -276,11 +275,13 @@ function closeSleuthChrome() {
         try { process.kill(pid); } catch {}
       }
     } else {
-      // macOS/Linux: 找到使用 chrome-debug 目录的 Chrome 进程并关闭
+      // 只清理旧版 chrome-debug 进程，不碰 managed browser（~/.sleuth/cdp-profile）
       const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
       for (const line of ps.split('\n')) {
         if (line.includes('grep')) continue;
         if (line.includes('chrome-debug') && /chrome/i.test(line)) {
+          // 跳过 managed browser（使用 cdp-profile）
+          if (line.includes('cdp-profile')) continue;
           const m = line.match(/^\S+\s+(\d+)/);
           if (m) {
             try { process.kill(parseInt(m[1])); } catch {}
@@ -297,11 +298,12 @@ function closeSleuthChrome() {
  * 清理残留的 agent-browser 守护进程和 Chrome for Testing 进程。
  *
  * agent-browser 每个会话启动一个守护进程（agent-browser-darwin-arm64），
- * 如果命令未带 --auto-connect 或 CDP 不可用，还会启动独立的 Chrome for Testing。
+ * 如果命令未带 --cdp 或 CDP 不可用，还会启动独立的 Chrome for Testing。
  * 这些进程在 session 结束后不会自动退出，需要显式清理。
  *
  * 清理步骤：
- *   1. agent-browser --auto-connect --session sleuth-cleanup close --all 关闭所有 session
+ *   1. agent-browser --auto-connect --session sleuth-cleanup close --all
+ *      （--auto-connect 是 agent-browser 自身的连接发现机制，非 sleuth 的已废弃同名标志）
  *   2. 杀掉残留的 agent-browser 守护进程（匹配 agent-browser/bin/agent-browser）
  *   3. 杀掉残留的 Chrome for Testing 进程（匹配 --user-data-dir 含 agent-browser-chrome）
  */
