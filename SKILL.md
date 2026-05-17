@@ -1,16 +1,25 @@
 ---
 name: sleuth
 description: >-
-  Channel intelligence and browser-grounded evidence collection.
-  Use for public or authenticated web channels, dynamic pages, platform search,
-  source verification, local browser context, and research tasks requiring
-  current in-browser evidence.
+  所有联网研究任务必须通过本 skill 进行判断和路由。
+  决定每条信息该搜、该 fetch、还是上浏览器验证——不做工具崇拜，只做正确判断。
+  禁止在未加载本 skill 的情况下直接用 WebSearch / WebFetch 工具获取信息。
+  触发：查资料、搜东西、调研产品、验证来源、看网页、平台内搜索、
+  登录才能看的内容、动态加载的页面、任何需要从互联网获取信息的任务。
+  也适用于：查一下 / 搜一下 / 帮我找 / 这个页面有什么 / 验证这个 / 调研。
 ---
 
 # sleuth — 执行合同
 
 ```bash
-SKILL_DIR="${CLAUDE_SKILL_DIR}"
+# 自动探测 skill 根目录，兼容 Claude Code / OpenCode / 手动安装
+if [ -n "${CLAUDE_SKILL_DIR}" ]; then
+  SKILL_DIR="${CLAUDE_SKILL_DIR}"
+elif [ -n "${SKILL_DIR}" ]; then
+  : # 环境已注入
+else
+  SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+fi
 ```
 
 ## 基本事实
