@@ -57,19 +57,19 @@ SKILL_DIR="${CLAUDE_SKILL_DIR}"
 - 需要外部佐证
 - 目标是公开静态文档且搜索引擎是最快索引
 
-## ⚠️ FIRST ACTION（每次联网任务必须）
+## 🔀 任务路由（推荐）
 
-收到任何联网/搜索/网页任务后，**第一步**运行路由判断：
+当目标域名已明确时，可运行路由判断帮助选择搜索策略：
 
 ```bash
-node "${SKILL_DIR}/scripts/route-task.mjs" --query "<用户问题>" [--domain "<目标域名>"]
+node "${SKILL_DIR}/scripts/route-task.mjs" --query "<用户问题>" --domain "<目标域名>"
 ```
 
-读取返回的 `mode`，按输出中的指引执行。**不要自行判断用 WebSearch 还是浏览器。**
+读取返回的 `mode` 作为参考，但不必强制跟随。你仍然需要根据实际情况判断。
 
-> 如果 `route-task.mjs` 尚未就绪，按以下规则手动判断 mode：
-> - 目标是公开静态页面（文档站、Wikipedia、GitHub README）→ 可以先 fetch
-> - 其余一切 → 浏览器
+**手动判断规则**（route-task 不可用或不需要时使用）：
+- 目标是公开静态页面（文档站、Wikipedia、GitHub README）→ 可以先 fetch
+- 其余一切 → 浏览器
 
 **启动 CDP 浏览器：**
 

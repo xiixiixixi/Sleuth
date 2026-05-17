@@ -42,6 +42,8 @@ const SITE_PATTERNS_DIR = path.join(os.homedir(), '.sleuth', 'site-patterns');
 const CDP_PROFILE_DIR = path.join(os.homedir(), '.sleuth', 'cdp-profile');
 // 状态文件（记录 pid、port、启动时间）
 const STATE_FILE = path.join(os.homedir(), '.sleuth', 'cdp-state.json');
+// real-browser 独立状态文件（与 managed browser 状态隔离）
+const REAL_BROWSER_STATE_FILE = path.join(os.homedir(), '.sleuth', 'real-browser-state.json');
 
 // 优先探测端口列表（文档规定）
 const PREFERRED_PORTS = [9222, 9223, 9333];
@@ -230,10 +232,69 @@ function writeState(state) {
 }
 
 /**
+ * 读取 real-browser 状态（独立于 managed browser 状态）。
+ */
+function readRealBrowserState() {
+  try {
+    if (!fs.existsSync(REAL_BROWSER_STATE_FILE)) return null;
+    return JSON.parse(fs.readFileSync(REAL_BROWSER_STATE_FILE, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 写入 real-browser 状态。
+ * 文档规定：real-browser 不写 cdp-state.json，使用独立文件。
+ */
+function writeRealBrowserState(state) {
+  fs.mkdirSync(path.dirname(REAL_BROWSER_STATE_FILE), { recursive: true });
+  fs.writeFileSync(REAL_BROWSER_STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+}
+
+/**
  * 检查 PID 是否存活。
  */
 function isProcessAlive(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+/**
+ * 扫描本机 Chrome 进程，查找使用 cdp-profile 的 managed browser。
+ * 同时提取 CDP 端口号（--remote-debugging-port）。
+ *
+ * @returns {{ pid: number, port: number | null } | null}
+ */
+function findManagedBrowserProcess() {
+  try {
+    if (os.platform() === 'win32') {
+      const ps = execSync(
+        'wmic process where "commandline like \'%cdp-profile%\'" get processid,commandline /format:list',
+        { encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+      const pidMatch = ps.match(/ProcessId=(\d+)/);
+      if (!pidMatch) return null;
+      const pid = parseInt(pidMatch[1]);
+      const portMatch = ps.match(/--remote-debugging-port=(\d+)/);
+      return { pid, port: portMatch ? parseInt(portMatch[1]) : null };
+    }
+
+    const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
+    for (const line of ps.split('\n')) {
+      if (line.includes('grep')) continue;
+      if (line.includes('cdp-profile') && /chrome/i.test(line)) {
+        const pidMatch = line.match(/^\S+\s+(\d+)/);
+        const portMatch = line.match(/--remote-debugging-port=(\d+)/);
+        if (pidMatch) {
+          return {
+            pid: parseInt(pidMatch[1]),
+            port: portMatch ? parseInt(portMatch[1]) : null,
+          };
+        }
+      }
+    }
+  } catch {}
+  return null;
 }
 
 /**
@@ -301,19 +362,9 @@ async function launchManagedBrowser(options = {}) {
     await sleep(500);
     const check = await validateCDPEndpoint(port);
     if (check.valid) {
-      // 找到 Chrome 真实 PID（通过 ps 匹配 cdp-profile）
-      let realPid = launchPid;
-      try {
-        if (os.platform() !== 'win32') {
-          const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
-          for (const line of ps.split('\n')) {
-            if (line.includes('cdp-profile') && /chrome/i.test(line) && !line.includes('grep')) {
-              const m = line.match(/^\S+\s+(\d+)/);
-              if (m) { realPid = parseInt(m[1]); break; }
-            }
-          }
-        }
-      } catch {}
+      // 找到 Chrome 真实 PID（通过 findManagedBrowserProcess）
+      const proc = findManagedBrowserProcess();
+      const realPid = proc ? proc.pid : launchPid;
 
       writeState({ pid: realPid, port, startedAt: new Date().toISOString() });
       result.ready = true;
@@ -356,20 +407,26 @@ async function ensureCDP(options = {}) {
     auth_state: 'unknown',
   };
 
-  // 先检测已有 CDP 端点
-  const existing = await detectCDPPort();
-  if (existing.port) {
-    // 只复用 managed browser；外部 CDP 不自动使用（需 --real-browser opt-in）
-    const state = readState();
-    if (state && state.port === existing.port && state.pid && isProcessAlive(state.pid)) {
-      status.browser_mode = 'managed';
-      status.cdp_port = existing.port;
-      return status;
-    }
-    // 外部 CDP 存在但不属于 managed → 不复用，继续启动 managed
+  // 策略 1：detectManagedCDPPort（仅扫描 managed browser 信号，不碰用户 Chrome）
+  const managed = await detectManagedCDPPort();
+  if (managed.port) {
+    status.browser_mode = 'managed';
+    status.cdp_port = managed.port;
+    return status;
   }
 
-  // 启动 managed browser（不传 loginUrl 给 Chrome 参数，避免 double-open）
+  // 策略 2：进程 arg 扫描（state 文件过期但 managed browser 仍在运行）
+  const proc = findManagedBrowserProcess();
+  if (proc && proc.port) {
+    const check = await validateCDPEndpoint(proc.port);
+    if (check.valid) {
+      status.browser_mode = 'managed';
+      status.cdp_port = proc.port;
+      return status;
+    }
+  }
+
+  // 策略 3：启动 managed browser
   const launched = await launchManagedBrowser({});
   if (launched.ready) {
     status.browser_mode = 'managed';
@@ -386,14 +443,44 @@ async function getBrowserStatus() {
   const state = readState();
   const result = { ready: false, port: null, pid: null, profile_dir: CDP_PROFILE_DIR };
 
-  if (!state || !state.pid) return result;
-  if (!isProcessAlive(state.pid)) return result;
+  // 策略 1：state 文件优先（最快路径）
+  if (state && state.pid && isProcessAlive(state.pid)) {
+    const check = await validateCDPEndpoint(state.port);
+    if (check.valid) {
+      result.ready = true;
+      result.port = state.port;
+      result.pid = state.pid;
+      return result;
+    }
+  }
 
-  const check = await validateCDPEndpoint(state.port);
-  if (check.valid) {
-    result.ready = true;
-    result.port = state.port;
-    result.pid = state.pid;
+  // 策略 2：DevToolsActivePort（state 文件过时时回退）
+  const activePortFile = path.join(CDP_PROFILE_DIR, 'DevToolsActivePort');
+  try {
+    if (fs.existsSync(activePortFile)) {
+      const lines = fs.readFileSync(activePortFile, 'utf8').trim().split(/\r?\n/);
+      const activePort = parseInt(lines[0], 10);
+      if (activePort > 0 && activePort < 65536) {
+        const check = await validateCDPEndpoint(activePort);
+        if (check.valid) {
+          result.ready = true;
+          result.port = activePort;
+          return result;
+        }
+      }
+    }
+  } catch {}
+
+  // 策略 3：进程 arg 扫描（state 文件和 DevToolsActivePort 都不可用时）
+  const proc = findManagedBrowserProcess();
+  if (proc && proc.port) {
+    const check = await validateCDPEndpoint(proc.port);
+    if (check.valid) {
+      result.ready = true;
+      result.port = proc.port;
+      result.pid = proc.pid;
+      return result;
+    }
   }
 
   return result;
@@ -630,18 +717,20 @@ async function handleRealBrowser(options) {
   process.env.SLEUTH_READ_ONLY = 'true';
   process.env.SLEUTH_BROWSER_MODE = 'real-browser';
 
-  // 持久化 domains_allowed 到 cdp-state.json，供 checkDomainAllowed 读取
+  // 持久化 domains_allowed 到 real-browser-state.json（文档规定：real-browser 不写 cdp-state.json）
   // 注意：即使 domains_allowed 为空也必须写入，以覆盖旧 state 防止残留放行
   try {
-    let currentState = {};
-    try { currentState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')); } catch {}
-    currentState.domains_allowed = result.domains_allowed || [];
-    currentState.browser_mode = 'real-browser';
-    currentState.port = connectedPort;
-    writeState(currentState);
+    const rbState = {
+      browser_mode: 'real-browser',
+      read_only: true,
+      port: connectedPort,
+      domains_allowed: result.domains_allowed || [],
+      updated_at: new Date().toISOString(),
+    };
+    writeRealBrowserState(rbState);
   } catch (writeErr) {
     // 写入失败是硬失败：旧 state 可能有更宽松的 domains_allowed，继续运行不安全
-    throw new Error(`real-browser 模式：cdp-state.json 持久化失败，拒绝继续（旧 state 可能不安全）: ${writeErr.message}`);
+    throw new Error(`real-browser 模式：real-browser-state.json 持久化失败，拒绝继续（旧 state 可能不安全）: ${writeErr.message}`);
   }
 
   return result;
@@ -698,28 +787,46 @@ async function main(options = {}) {
   // ── 检查 2：Chrome CDP ──
   let cdpStatus;
   if (options.checkOnly) {
-    // 仅诊断，不启动
-    const detected = await detectCDPPort();
-    // 判断 managed vs external
+    // 仅诊断，不启动 — 使用增强检测（多信号：state + DevToolsActivePort + 进程扫描）
     let mode = 'unavailable';
-    if (detected.port) {
-      const state = readState();
-      if (state && state.port === detected.port && state.pid && isProcessAlive(state.pid)) {
-        mode = 'managed';
-      } else {
-        mode = 'external';
+    let detectedPort = null;
+
+    // 先用 managed-only 检测
+    const managed = await detectManagedCDPPort();
+    if (managed.port) {
+      mode = 'managed';
+      detectedPort = managed.port;
+    } else {
+      // 回退：进程 arg 扫描
+      const proc = findManagedBrowserProcess();
+      if (proc && proc.port) {
+        const check = await validateCDPEndpoint(proc.port);
+        if (check.valid) {
+          mode = 'managed';
+          detectedPort = proc.port;
+        }
       }
     }
+
+    // 如果 managed 检测都失败，再扫描通用端口判断是否 external
+    if (!detectedPort) {
+      const external = await detectCDPPort();
+      if (external.port) {
+        mode = 'external';
+        detectedPort = external.port;
+      }
+    }
+
     cdpStatus = {
       browser_mode: mode,
-      cdp_port: detected.port,
+      cdp_port: detectedPort,
       profile_dir: CDP_PROFILE_DIR,
       auth_state: 'unknown',
     };
     results.cdp = cdpStatus;
     if (!options.json) {
-      if (detected.port) {
-        console.log(`chrome-cdp: ok (port ${detected.port}，模式: ${mode}，协议验证通过)`);
+      if (detectedPort) {
+        console.log(`chrome-cdp: ok (port ${detectedPort}，模式: ${mode}，协议验证通过)`);
       } else {
         console.log('chrome-cdp: 未检测到有效 CDP 端点');
         console.log(`  提示：运行 node scripts/check-deps.mjs --ensure-cdp 启动 managed browser`);
@@ -975,9 +1082,14 @@ export {
   stopManagedBrowser,
   // 内部工具（供测试和 sleuth-browser.mjs）
   findChromeBinary,
+  findManagedBrowserProcess,
   readState,
+  writeState,
+  readRealBrowserState,
+  writeRealBrowserState,
   selectFreePort,
   CDP_PROFILE_DIR,
   STATE_FILE,
+  REAL_BROWSER_STATE_FILE,
   PREFERRED_PORTS,
 };

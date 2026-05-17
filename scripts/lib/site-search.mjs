@@ -383,21 +383,30 @@ export function expandQuery(baseQuery, context = {}) {
  * - 有配置 → 仅允许列表中的域名
  */
 export function checkDomainAllowed(url) {
-  // 域名限制在 real-browser 模式下始终生效（不仅依赖 SLEUTH_READ_ONLY）
-  if (process.env.SLEUTH_READ_ONLY !== 'true' && process.env.SLEUTH_BROWSER_MODE !== 'real-browser') {
+  // 域名限制仅在 real-browser 或只读模式下生效
+  const isRealBrowser = process.env.SLEUTH_BROWSER_MODE === 'real-browser';
+  const isReadOnly = process.env.SLEUTH_READ_ONLY === 'true';
+
+  if (!isReadOnly && !isRealBrowser) {
     return { allowed: true };
   }
+
+  // 根据模式选择状态文件：real-browser → real-browser-state.json，managed → cdp-state.json
+  const statePath = isRealBrowser
+    ? join(homedir(), '.sleuth', 'real-browser-state.json')
+    : join(homedir(), '.sleuth', 'cdp-state.json');
+
   try {
-    const statePath = join(homedir(), '.sleuth', 'cdp-state.json');
     if (!existsSync(statePath)) {
-      return { allowed: false, error: '域名限制：cdp-state.json 不存在，real-browser 模式默认拒绝' };
+      const fileLabel = isRealBrowser ? 'real-browser-state.json' : 'cdp-state.json';
+      return { allowed: false, error: `域名限制：${fileLabel} 不存在，默认拒绝` };
     }
     const state = JSON.parse(readFileSync(statePath, 'utf-8'));
-    // real-browser 模式下 domains_allowed 为空 → deny-all（需要显式配置域名）
+    // domains_allowed 为空 → deny-all（需要显式配置域名）
     if (!state.domains_allowed || state.domains_allowed.length === 0) {
-      return { allowed: false, error: '域名限制：domains_allowed 未配置，real-browser 模式默认拒绝所有域名' };
+      return { allowed: false, error: '域名限制：domains_allowed 未配置，默认拒绝所有域名' };
     }
-    // '*' 表示允许所有域名（未指定 --domain 时的显式标记）
+    // '*' 表示允许所有域名
     if (state.domains_allowed.includes('*')) return { allowed: true };
     const hostname = new URL(url).hostname;
     const allowed = state.domains_allowed.some(d => hostname === d || hostname.endsWith('.' + d));
@@ -405,7 +414,7 @@ export function checkDomainAllowed(url) {
     return { allowed: true };
   } catch {
     // 解析失败 → 安全侧：拒绝
-    return { allowed: false, error: '域名限制：状态读取失败，real-browser 模式默认拒绝' };
+    return { allowed: false, error: '域名限制：状态读取失败，默认拒绝' };
   }
 }
 
