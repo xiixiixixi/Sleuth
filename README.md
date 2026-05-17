@@ -63,8 +63,6 @@ sleuth/
 │   ├── tool-guide.md              agent-browser 命令速查 + 观察/交互策略
 │   ├── search-guide.md            主 Agent 与子 Agent 共用的搜索判断
 │   ├── subagent-guide.md          子 Agent 目标/证据/输出合同
-│   ├── search-expansion.md        搜索拓宽盲区（六个常见漏项）
-│   ├── review-checklist.md        独立审查参考清单
 │   ├── content-extraction.md      内容提取（视频/音频/PDF/图片）
 │   └── site-patterns/.gitkeep     占位（实际经验存 ~/.sleuth/site-patterns/）
 │
@@ -90,7 +88,7 @@ sleuth/
 │  references/         运行时参考文档                           │
 │    search-guide.md       共享搜索判断                        │
 │    subagent-guide.md     子 Agent 合同                       │
-│    review-checklist.md   独立审查标准                        │
+│    tool-guide.md         agent-browser 观察/提取/交互手册    │
 │    tool-guide.md         agent-browser 观察/提取/交互手册    │
 └──────────────────────────────────────────────────────────────┘
          │
