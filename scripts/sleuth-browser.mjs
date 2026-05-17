@@ -54,12 +54,7 @@ async function run() {
       console.log('正在打开 sleuth managed browser...');
       console.log(`profile 目录: ${CDP_PROFILE_DIR}`);
       console.log('');
-      console.log('请在弹出的 Chrome 窗口中登录以下站点：');
-      console.log('  - 小红书 (xiaohongshu.com)');
-      console.log('  - 微博 (weibo.com)');
-      console.log('  - 知乎 (zhihu.com)');
-      console.log('  - 即刻 (okjike.com)');
-      console.log('  - 以及其他需要登录态的站点');
+      console.log('请在弹出的 Chrome 窗口中登录你需要使用的站点。');
       console.log('');
       console.log('登录完成后，登录态将持久保存在 managed profile 中。');
       console.log('之后每次使用 sleuth 都会自动复用这些登录态。');

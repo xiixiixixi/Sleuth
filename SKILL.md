@@ -37,7 +37,7 @@ fi
 ## 浏览器模式选择
 
 - **Managed browser（默认）**：Sleuth 维护的独立 Chrome 实例（`~/.sleuth/cdp-profile/`），持久登录态，永不触碰用户日常 Chrome。
-- **Real-browser bridge（Phase 4）**：使用用户日常 Chrome，需显式 opt-in `--real-browser`。默认只读模式，可通过 `--domain` 限制操作范围。需用户以 `--remote-debugging-port` 启动 Chrome 或设置 `SLEUTH_REAL_CDP_PORT` 环境变量。
+- **Real-browser bridge（Phase 4）**：使用用户日常 Chrome，需显式 opt-in `--real-browser`。默认只读模式，可通过 `--domain` 限制操作范围。需用户以 `--remote-debugging-port` 启动 Chrome 或设置 `SLEUTH_CDP_PORT` 环境变量。
 
 ## Auth 验证规则
 

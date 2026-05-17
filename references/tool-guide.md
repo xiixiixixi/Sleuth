@@ -68,7 +68,7 @@ agent-browser --cdp $SLEUTH_CDP_PORT --session ${SID}-main eval "document.queryS
 node scripts/check-deps.mjs --real-browser --domain github.com --json
 
 # 或通过环境变量指定端口
-SLEUTH_REAL_CDP_PORT=9222 node scripts/check-deps.mjs --real-browser
+SLEUTH_CDP_PORT=9222 node scripts/check-deps.mjs --real-browser
 ```
 
 安全约束：
