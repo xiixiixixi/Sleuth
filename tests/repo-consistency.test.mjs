@@ -13,17 +13,10 @@ function exists(file) {
   return fs.existsSync(path.join(root, file));
 }
 
-test('documented top-level runtime references exist', () => {
+test('only the two runtime markdown guides are required', () => {
   const required = [
     'SKILL.md',
-    'README.md',
-    'references/search-guide.md',
-    'references/subagent-guide.md',
-    'references/tool-guide.md',
-    'references/content-extraction.md',
-    'references/tool-boundary.md',
-    'references/decision-kernel.md',
-    'docs/browser-auth-and-channel-intelligence-plan.md',
+    'SUBAGENT.md',
     'scripts/check-deps.mjs',
     'scripts/sleuth-browser.mjs',
     'scripts/on-stop.mjs',
@@ -38,11 +31,20 @@ test('documented top-level runtime references exist', () => {
   }
 });
 
-test('SKILL references core decision guides', () => {
+test('SKILL contains the search philosophy directly', () => {
   const skill = read('SKILL.md');
-  assert.match(skill, /references\/tool-boundary\.md/);
-  assert.match(skill, /references\/decision-kernel\.md/);
-  assert.match(skill, /references\/search-guide\.md/);
+  assert.match(skill, /搜索不是找链接/);
+  assert.match(skill, /工具选择原则/);
+  assert.match(skill, /Session 与输出规则/);
+  assert.match(skill, /SUBAGENT\.md/);
+});
+
+test('SUBAGENT contains the child agent contract directly', () => {
+  const subagent = read('SUBAGENT.md');
+  assert.match(subagent, /Subagent Contract/);
+  assert.match(subagent, /findings/);
+  assert.match(subagent, /sources/);
+  assert.match(subagent, /artifacts/);
 });
 
 test('Node runtime requirement is aligned with native WebSocket usage', () => {
@@ -68,4 +70,17 @@ test('sleuth-browser open-login reuses existing managed browser before launch', 
   assert.match(script, /const existing = await getBrowserStatus\(\)/);
   assert.match(script, /existing\.ready/);
   assert.match(script, /await launchManagedBrowser\(\)/);
+});
+
+test('check-deps supports query and agent-scoped output', () => {
+  const script = read('scripts/check-deps.mjs');
+  assert.match(script, /--query <text>/);
+  assert.match(script, /--agent <name>/);
+});
+
+test('deliver supports agent-scoped final delivery', () => {
+  const script = read('scripts/deliver.mjs');
+  assert.match(script, /--agent <name>/);
+  assert.match(script, /--final/);
+  assert.match(script, /copyFinalToCwd/);
 });
