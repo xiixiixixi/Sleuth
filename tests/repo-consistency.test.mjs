@@ -26,6 +26,7 @@ test('documented top-level runtime references exist', () => {
     'docs/browser-auth-and-channel-intelligence-plan.md',
     'scripts/check-deps.mjs',
     'scripts/sleuth-browser.mjs',
+    'scripts/on-stop.mjs',
     'scripts/session-logger.mjs',
     'scripts/deliver.mjs',
     'scripts/research-index.mjs',
@@ -53,4 +54,18 @@ test('docs and tests are not ignored', () => {
   const gitignore = read('.gitignore');
   assert.equal(/^docs\/$/m.test(gitignore), false);
   assert.equal(/^tests\/$/m.test(gitignore), false);
+});
+
+test('on-stop does not globally clean agent-browser unless explicitly requested', () => {
+  const script = read('scripts/on-stop.mjs');
+  assert.match(script, /const CLEANUP_AGENT_BROWSER = hasFlag\('cleanup-agent-browser'\)/);
+  assert.match(script, /if \(!CLEANUP_AGENT_BROWSER\) return/);
+  assert.doesNotMatch(script, /cleanupAgentBrowser\(\);\s*$/m);
+});
+
+test('sleuth-browser open-login reuses existing managed browser before launch', () => {
+  const script = read('scripts/sleuth-browser.mjs');
+  assert.match(script, /const existing = await getBrowserStatus\(\)/);
+  assert.match(script, /existing\.ready/);
+  assert.match(script, /await launchManagedBrowser\(\)/);
 });
