@@ -1,34 +1,14 @@
 #!/usr/bin/env node
 /**
- * on-stop.mjs — session 清理脚本
+ * on-stop.mjs — session 收尾脚本
  *
- * 触发时机：研究完成后手动执行。
- * 用法：node scripts/on-stop.mjs [--sid <session-id>]
+ * 默认只做保守收尾：
+ *   1. 关闭指定 session，或兜底关闭 orphan session
+ *   2. 为本轮涉及的复杂/高频域名创建可选 site-pattern stub
+ *   3. 为新建 stub 刷新统计
+ *   4. 可选清理旧版 chrome-debug 残留
  *
- * 三项自动清理任务：
- *
- *   ① 关闭未完成的 session
- *      扫描 ~/.sleuth/sessions/ 下所有 session 文件，
- *      将 finished: null 的 session 标记为 outcome: "partial" 并写入当前时间戳。
- *      场景：Agent 忘记执行 finish 命令，on-stop 兜底处理。
- *
- *   ② 为复杂站点创建经验 stub
- *      从刚关闭的 session 中提取域名，判断是否满足以下任一条件：
- *        - 操作中包含 CAPTCHA、登录墙、付费墙、反爬等复杂操作
- *        - 该域名累计出现在 3 个以上不同 session 中（高频访问）
- *      对满足条件且尚无经验文件的域名，创建 stub（含 YAML frontmatter 的空模板）。
- *      然后调用 update-site-stats.mjs 为这些域名刷新统计。
- *      排除搜索引擎域名（google.com、bing.com 等）。
- *
- *   ③ 清理旧版 Chrome 残留（持久浏览器不关闭）
- *      只清理旧版 chrome-debug 目录的进程；~/.sleuth/cdp-profile/ 的 managed browser 保留运行。
- *      场景：迁移过渡期清理旧实例。
- *
- *   ④ 清理残留 agent-browser 进程
- *      关闭所有 agent-browser session，杀掉守护进程和 Chrome for Testing 子进程。
- *      场景：子 Agent 结束后 agent-browser 守护进程和 Chrome for Testing 未自动退出。
- *
- * 输出：静默模式，正常无输出，仅异常时打印警告。
+ * 不再默认全局清理 agent-browser 进程，避免误伤其他 Agent/任务。
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -37,66 +17,79 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-// ── 路径常量 ──────────────────────────────────────────────────────
-
-// 项目根目录（用于定位 update-site-stats.mjs）
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-// session 文件存储目录
 const SESSIONS_DIR = path.join(os.homedir(), '.sleuth', 'sessions');
-// 站点经验文件存储目录
 const PATTERNS_DIR = path.join(os.homedir(), '.sleuth', 'site-patterns');
 const RESEARCH_INDEX = path.join(ROOT, 'scripts', 'research-index.mjs');
 
-// ── 过滤常量 ──────────────────────────────────────────────────────
-
-// 搜索引擎域名 → 不创建经验文件（它们没有"站点经验"可言）
 const SEARCH_ENGINES = new Set([
   'google.com', 'google.com.hk', 'bing.com',
   'baidu.com', 'duckduckgo.com', 'yahoo.com',
 ]);
 
-// 复杂操作类型 → 遇到这些操作的域名值得记录经验
-const COMPLEX_OP_TYPES = new Set([
-  'captcha',      // CAPTCHA 验证码
-  'login_wall',   // 登录墙（需要登录才能看内容）
-  'paywall',      // 付费墙（需要付费订阅）
-  'anti_bot',     // 反爬虫检测
-]);
-
-// 域名合法格式正则（至少两级域名，如 example.com）
+const COMPLEX_OP_TYPES = new Set(['captcha', 'login_wall', 'paywall', 'anti_bot']);
 const DOMAIN_REGEX = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/;
-
-// 域名累计出现次数阈值 → 超过此值的域名也值得记录经验
 const DOMAIN_FREQUENCY_THRESHOLD = 3;
 
-// ── ① 关闭未完成的 session ─────────────────────────────────────────
+const args = process.argv.slice(2);
+function getValue(name) {
+  const idx = args.indexOf(`--${name}`);
+  if (idx === -1 || idx + 1 >= args.length) return null;
+  return args[idx + 1];
+}
+function hasFlag(name) {
+  return args.includes(`--${name}`);
+}
 
-/**
- * 扫描 sessions 目录，将所有 finished: null 的 session 标记为 partial 并关闭。
- *
- * @returns {Array} 被关闭的 session 对象列表（后续用于判断复杂站点）
- */
+const SID = getValue('sid');
+const OUTCOME = getValue('outcome') || 'partial';
+const CLEANUP_LEGACY = hasFlag('cleanup-legacy');
+const CLEANUP_AGENT_BROWSER = hasFlag('cleanup-agent-browser'); // explicit opt-in only
+
+function safeSessionPath(sid) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(sid)) throw new Error(`Invalid session id: ${sid}`);
+  return path.join(SESSIONS_DIR, `${sid}.json`);
+}
+
+function loadSessionFile(filePath) {
+  try { return JSON.parse(readFileSync(filePath, 'utf-8')); }
+  catch { return null; }
+}
+
+function finishSessionFile(filePath, outcome = 'partial') {
+  const session = loadSessionFile(filePath);
+  if (!session) return null;
+  if (session.finished === null || session.finished === undefined) {
+    session.finished = new Date().toISOString();
+    session.outcome = session.outcome || outcome;
+    try { writeFileSync(filePath, JSON.stringify(session, null, 2), 'utf-8'); }
+    catch { return null; }
+  }
+  return session;
+}
+
+function finishTargetSession() {
+  if (!SID) return [];
+  try {
+    const filePath = safeSessionPath(SID);
+    if (!existsSync(filePath)) return [];
+    const session = finishSessionFile(filePath, OUTCOME);
+    return session ? [session] : [];
+  } catch {
+    return [];
+  }
+}
+
 function finishOrphanSessions() {
   if (!existsSync(SESSIONS_DIR)) return [];
-
   const finished = [];
-  const entries = readdirSync(SESSIONS_DIR).filter(e => e.endsWith('.json'));
-
-  for (const entry of entries) {
+  for (const entry of readdirSync(SESSIONS_DIR).filter(e => e.endsWith('.json'))) {
     const filePath = path.join(SESSIONS_DIR, entry);
-    let session;
-    try {
-      session = JSON.parse(readFileSync(filePath, 'utf-8'));
-    } catch { continue; } // 跳过损坏的 JSON 文件
-
-    // 只处理未完成的 session
+    const session = loadSessionFile(filePath);
+    if (!session) continue;
     if (session.finished === null || session.finished === undefined) {
-      session.finished = new Date().toISOString(); // 写入关闭时间
-      session.outcome = session.outcome || 'partial'; // 没有结果 → 标记为"部分完成"
-      try {
-        writeFileSync(filePath, JSON.stringify(session, null, 2), 'utf-8');
-        finished.push(session);
-      } catch { /* 权限不足则跳过 */ }
+      const closed = finishSessionFile(filePath, 'partial');
+      if (closed) finished.push(closed);
     }
   }
   return finished;
@@ -107,7 +100,7 @@ function indexSessions(sessions) {
     const sid = session?.session_id;
     if (!sid) continue;
     try {
-      execFileSync('node', [RESEARCH_INDEX, '--action', 'index', '--sid', sid], {
+      execFileSync(process.execPath, [RESEARCH_INDEX, '--action', 'index', '--sid', sid], {
         timeout: 30000,
         stdio: 'ignore',
       });
@@ -117,305 +110,138 @@ function indexSessions(sessions) {
   }
 }
 
-// ── ② 提取域名并判断复杂站点 ────────────────────────────────────────
-
-/**
- * 从字符串（URL 或路径）中提取域名。
- *
- * 处理逻辑：
- *   1. 尝试匹配 URL 中的域名部分（去掉 http:// 和 www.）
- *   2. 校验域名格式合法
- *   3. 过滤掉文件扩展名误匹配（如 file.json、output.md）
- *
- * @param {string} str - 可能包含 URL 或域名的字符串
- * @returns {string|null} 域名（小写）或 null
- */
 function extractDomain(str) {
   if (!str || typeof str !== 'string') return null;
-  // 从 URL 中提取域名（去掉协议和 www.）
   const match = str.match(/(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?)/);
   const candidate = match ? match[1].toLowerCase() : null;
   if (!candidate) return null;
-  // 校验域名格式
   if (!DOMAIN_REGEX.test(candidate)) return null;
-  // 过滤文件扩展名误匹配（如 "file.json" 不是域名）
-  const FILE_EXTS = new Set([
-    'json', 'md', 'txt', 'csv', 'html', 'xml', 'yaml', 'yml', 'log',
-    'pdf', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'mp4', 'mp3', 'zip',
-    'gz', 'js', 'ts', 'css', 'py', 'rb', 'go',
-  ]);
+  const fileExts = new Set(['json', 'md', 'txt', 'csv', 'html', 'xml', 'yaml', 'yml', 'log', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'mp4', 'mp3', 'zip', 'gz', 'js', 'ts', 'css', 'py', 'rb', 'go']);
   const parts = candidate.split('.');
-  if (parts.length === 2 && FILE_EXTS.has(parts[1])) return null;
+  if (parts.length === 2 && fileExts.has(parts[1])) return null;
   return candidate;
 }
 
-/**
- * 从 session 的操作记录中提取遇到复杂操作的域名。
- *
- * 判断条件：操作的 type 或 content_type 字段属于 COMPLEX_OP_TYPES。
- *
- * @param {object} session - session 数据对象
- * @returns {Set<string>} 复杂操作的域名集合
- */
 function getComplexDomainsFromSession(session) {
   const domains = new Set();
   for (const op of session.operations || []) {
     if (COMPLEX_OP_TYPES.has(op.type) || COMPLEX_OP_TYPES.has(op.content_type)) {
       if (op.domain) domains.add(op.domain);
+      if (op.url) {
+        const d = extractDomain(op.url);
+        if (d) domains.add(d);
+      }
     }
   }
   return domains;
 }
 
-/**
- * 从 session 的操作记录中提取所有出现过的域名。
- * 从 op.domain、op.source、op.file 三个字段提取。
- *
- * @param {object} session - session 数据对象
- * @returns {Set<string>} 域名集合
- */
 function getDomainsFromSession(session) {
   const domains = new Set();
   for (const op of session.operations || []) {
     if (op.domain) domains.add(op.domain);
-    if (op.url) {
-      const d = extractDomain(op.url);
-      if (d) domains.add(d);
-    }
-    if (op.source) {
-      const d = extractDomain(op.source);
-      if (d) domains.add(d);
-    }
-    if (op.file) {
-      const d = extractDomain(op.file);
-      if (d) domains.add(d);
+    for (const field of ['url', 'source', 'file']) {
+      if (op[field]) {
+        const d = extractDomain(op[field]);
+        if (d) domains.add(d);
+      }
     }
   }
   return domains;
 }
 
-/**
- * 统计所有 session 中每个域名的出现次数（跨 session 计数）。
- * 用于判断域名是否属于高频访问（>= DOMAIN_FREQUENCY_THRESHOLD）。
- *
- * @returns {Object} 域名 → 出现次数的映射
- */
 function countDomainFrequency() {
   const freq = {};
   if (!existsSync(SESSIONS_DIR)) return freq;
   for (const entry of readdirSync(SESSIONS_DIR).filter(e => e.endsWith('.json'))) {
-    try {
-      const session = JSON.parse(readFileSync(path.join(SESSIONS_DIR, entry), 'utf-8'));
-      for (const d of getDomainsFromSession(session)) {
-        freq[d] = (freq[d] || 0) + 1;
-      }
-    } catch {}
+    const session = loadSessionFile(path.join(SESSIONS_DIR, entry));
+    if (!session) continue;
+    for (const d of getDomainsFromSession(session)) freq[d] = (freq[d] || 0) + 1;
   }
   return freq;
 }
 
-/**
- * 为给定域名创建站点经验 stub 文件。
- *
- * stub 是一个包含 YAML frontmatter 的空模板，后续由 Agent 或 update-site-stats.mjs 填充。
- * 已存在经验文件的域名会被跳过（不覆盖已有经验）。
- *
- * @param {Set<string>} domains - 需要创建 stub 的域名集合
- * @returns {Array<string>} 实际创建了 stub 的域名列表
- */
 function createSitePatternStubs(domains) {
   if (!existsSync(PATTERNS_DIR)) mkdirSync(PATTERNS_DIR, { recursive: true });
   const created = [];
   for (const domain of domains) {
     const filePath = path.join(PATTERNS_DIR, `${domain}.md`);
-    if (existsSync(filePath)) continue; // 已有经验文件 → 跳过
-
+    if (existsSync(filePath)) continue;
     const today = new Date().toISOString().slice(0, 10);
-    // stub 模板：frontmatter + 空的三个经验章节
     const stub = [
       '---',
       `domain: ${domain}`,
-      `aliases: []`,
+      'aliases: []',
       `updated: ${today}`,
       '---',
       '',
-      '## 平台特征',   // 架构、反爬行为、登录需求等
+      '## 平台特征',
       '',
-      '## 有效模式',   // 已验证的 URL 模式、操作策略
+      '## 有效模式',
       '',
-      '## 已知陷阱',   // 什么会失败以及为什么
+      '## 已知陷阱',
       '',
     ].join('\n');
     try {
       writeFileSync(filePath, stub, 'utf-8');
       created.push(domain);
-    } catch { /* 权限不足则跳过 */ }
+    } catch {}
   }
   return created;
 }
 
-// ── ③ sleuth 专用浏览器（持久运行，不关闭）─────────────────────────────
-
-/**
- * sleuth 专用浏览器设计为持久运行，保留登录态。
- * on-stop 不再杀掉它。如需手动停止，使用：
- *   node scripts/sleuth-browser.mjs stop
- *
- * 保留兼容清理：杀掉旧版 chrome-debug 目录的残留进程（迁移过渡期）。
- */
-function closeSleuthChrome() {
+function cleanupLegacyChromeDebug() {
+  if (!CLEANUP_LEGACY) return;
   try {
-    if (os.platform() === 'win32') {
-      const out = execSync(
-        'wmic process where "commandline like \'%chrome-debug%\'" get processid /format:list',
-        { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-      const pids = [...out.matchAll(/ProcessId=(\d+)/g)].map(m => parseInt(m[1]));
-      for (const pid of pids) {
-        try { process.kill(pid); } catch {}
-      }
-    } else {
-      // 只清理旧版 chrome-debug 进程，不碰 managed browser（~/.sleuth/cdp-profile）
-      const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
-      for (const line of ps.split('\n')) {
-        if (line.includes('grep')) continue;
-        if (line.includes('chrome-debug') && /chrome/i.test(line)) {
-          // 跳过 managed browser（使用 cdp-profile）
-          if (line.includes('cdp-profile')) continue;
-          const m = line.match(/^\S+\s+(\d+)/);
-          if (m) {
-            try { process.kill(parseInt(m[1])); } catch {}
-          }
-        }
+    if (os.platform() === 'win32') return;
+    const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
+    for (const line of ps.split('\n')) {
+      if (line.includes('grep')) continue;
+      if (line.includes('chrome-debug') && /chrome/i.test(line) && !line.includes('cdp-profile')) {
+        const m = line.match(/^\S+\s+(\d+)/);
+        if (m) { try { process.kill(parseInt(m[1])); } catch {} }
       }
     }
   } catch {}
 }
 
-// ── ④ 清理残留 agent-browser 进程 ────────────────────────────────────
-
-/**
- * 清理残留的 agent-browser 守护进程和 Chrome for Testing 进程。
- *
- * agent-browser 每个会话启动一个守护进程（agent-browser-darwin-arm64），
- * 如果命令未带 --cdp 或 CDP 不可用，还会启动独立的 Chrome for Testing。
- * 这些进程在 session 结束后不会自动退出，需要显式清理。
- *
- * 清理步骤：
- *   1. agent-browser --auto-connect --session sleuth-cleanup close --all
- *      （--auto-connect 是 agent-browser 自身的连接发现机制，非 sleuth 的已废弃同名标志）
- *   2. 杀掉残留的 agent-browser 守护进程（匹配 agent-browser/bin/agent-browser）
- *   3. 杀掉残留的 Chrome for Testing 进程（匹配 --user-data-dir 含 agent-browser-chrome）
- */
-function cleanupAgentBrowser() {
-  // 步骤 1：用官方命令关闭所有 session
+function cleanupAgentBrowserExplicit() {
+  if (!CLEANUP_AGENT_BROWSER) return;
   try {
     execSync('agent-browser --auto-connect --session sleuth-cleanup close --all', { timeout: 5000, stdio: 'ignore' });
-  } catch { /* 可能已经没有 session */ }
-
-  try {
-    let daemonPids = [];
-    let chromePids = [];
-
-    if (os.platform() === 'win32') {
-      // Windows: 用 wmic 查询进程
-      const out = execSync(
-        'wmic process where "commandline like \'%agent-browser%\'" get processid,commandline /format:list',
-        { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-      for (const block of out.split(/\n\n+/)) {
-        const pidMatch = block.match(/ProcessId=(\d+)/);
-        if (!pidMatch) continue;
-        const pid = parseInt(pidMatch[1]);
-        if (block.includes('agent-browser-chrome')) chromePids.push(pid);
-        else if (block.includes('agent-browser/bin/agent-browser')) daemonPids.push(pid);
-      }
-    } else {
-      // macOS/Linux: ps aux
-      const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
-      for (const line of ps.split('\n')) {
-        if (line.includes('grep')) continue;
-        if (line.includes('agent-browser/bin/agent-browser')) {
-          const m = line.match(/^\S+\s+(\d+)/);
-          if (m) daemonPids.push(parseInt(m[1]));
-        }
-        if (line.includes('agent-browser-chrome')) {
-          const m = line.match(/^\S+\s+(\d+)/);
-          if (m) chromePids.push(parseInt(m[1]));
-        }
-      }
-    }
-
-    // 杀进程（Windows 不支持信号，用 process.kill(pid) 默认 SIGTERM 会被 Node 映射为 TerminateProcess）
-    for (const pid of chromePids) {
-      try { process.kill(pid); } catch {}
-    }
-    for (const pid of daemonPids) {
-      try { process.kill(pid); } catch {}
-    }
   } catch {}
 }
 
-// ── 主流程 ────────────────────────────────────────────────────────
-
 async function main() {
-  // ① 关闭所有未完成的 session（收集被关闭的列表供下一步使用）
-  const finished = finishOrphanSessions();
+  const finished = SID ? finishTargetSession() : finishOrphanSessions();
   indexSessions(finished);
 
-  // ② 收集需要记录经验的域名
   const candidateDomains = new Set();
   const freq = countDomainFrequency();
 
-  // 处理刚关闭的孤儿 session
   for (const session of finished) {
-    const complexDomains = getComplexDomainsFromSession(session);
-    for (const d of complexDomains) {
-      if (SEARCH_ENGINES.has(d)) continue;
-      candidateDomains.add(d);
+    for (const d of getComplexDomainsFromSession(session)) {
+      if (!SEARCH_ENGINES.has(d)) candidateDomains.add(d);
     }
-    const domains = getDomainsFromSession(session);
-    for (const d of domains) {
-      if (SEARCH_ENGINES.has(d)) continue;
-      if ((freq[d] || 0) >= DOMAIN_FREQUENCY_THRESHOLD) {
+    for (const d of getDomainsFromSession(session)) {
+      if (!SEARCH_ENGINES.has(d) && (freq[d] || 0) >= DOMAIN_FREQUENCY_THRESHOLD) {
         candidateDomains.add(d);
       }
     }
   }
 
-  // 同时扫描所有 session（包括已完成的），只要域名出现 >= 3 次就记录
-  if (existsSync(SESSIONS_DIR)) {
-    for (const entry of readdirSync(SESSIONS_DIR).filter(e => e.endsWith('.json'))) {
-      try {
-        const session = JSON.parse(readFileSync(path.join(SESSIONS_DIR, entry), 'utf-8'));
-        const domains = getDomainsFromSession(session);
-        for (const d of domains) {
-          if (SEARCH_ENGINES.has(d)) continue;
-          if ((freq[d] || 0) >= DOMAIN_FREQUENCY_THRESHOLD) {
-            candidateDomains.add(d);
-          }
-        }
-      } catch {}
-    }
-  }
-
-  // 为符合条件的域名创建 stub 文件
   const created = createSitePatternStubs(candidateDomains);
-
-  // 为新建 stub 的域名刷新统计数据（不跑全量，只为新域名创建）
   for (const domain of created) {
     try {
       execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'update-site-stats.mjs'), '--domain', domain], {
-        timeout: 10000, stdio: 'ignore',
+        timeout: 10000,
+        stdio: 'ignore',
       });
     } catch {}
   }
 
-  // ③ 关闭 sleuth Chrome 实例
-  closeSleuthChrome();
-
-  // ④ 清理残留的 agent-browser 进程
-  cleanupAgentBrowser();
+  cleanupLegacyChromeDebug();
+  cleanupAgentBrowserExplicit();
 }
 
 main().catch((err) => {
