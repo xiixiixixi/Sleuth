@@ -13,6 +13,17 @@ function exists(file) {
   return fs.existsSync(path.join(root, file));
 }
 
+function collectMarkdownFiles(dir, base = dir, result = []) {
+  for (const entry of fs.readdirSync(dir)) {
+    if (['.git', 'node_modules', '.sisyphus'].includes(entry)) continue;
+    const full = path.join(dir, entry);
+    const st = fs.statSync(full);
+    if (st.isDirectory()) collectMarkdownFiles(full, base, result);
+    else if (st.isFile() && entry.endsWith('.md')) result.push(path.relative(base, full));
+  }
+  return result.sort();
+}
+
 test('only the two runtime markdown guides are required', () => {
   const required = [
     'SKILL.md',
@@ -29,6 +40,10 @@ test('only the two runtime markdown guides are required', () => {
   for (const file of required) {
     assert.equal(exists(file), true, `${file} should exist`);
   }
+});
+
+test('runtime markdown surface is limited to SKILL and SUBAGENT', () => {
+  assert.deepEqual(collectMarkdownFiles(root), ['SKILL.md', 'SUBAGENT.md']);
 });
 
 test('SKILL contains the search philosophy directly', () => {
