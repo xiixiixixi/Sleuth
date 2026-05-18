@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-deps.mjs — sleuth 环境检查 CLI 入口
- *
- * 薄 CLI shim：只负责参数解析，核心逻辑在 lib/check-deps-core.mjs。
+ * check-deps.mjs — sleuth 环境检查与 session/output 初始化入口
  */
 
 import { main } from './lib/check-deps-core.mjs';
@@ -10,6 +8,8 @@ import { main } from './lib/check-deps-core.mjs';
 const HELP = `用法: node check-deps.mjs [选项]
 
 选项:
+  --query <text>            创建 session 时使用的用户原始问题
+  --agent <name>            输出目录所属 agent，默认 main
   --check-only              非破坏性诊断（不启动浏览器、不写运行目录）
   --ensure-cdp              查找或启动 managed browser
   --login-url <url>         启动后打开指定 URL（登录引导）
@@ -17,17 +17,17 @@ const HELP = `用法: node check-deps.mjs [选项]
   --real-browser            使用用户现有 Chrome（显式 opt-in）
   --domain <domain>         限制 real-browser 操作范围到指定域名
   --cdp-port <port>         显式指定 real-browser 使用的 CDP 端口
-  --output-dir              仅输出目录路径
+  --output-dir              仅输出 agent-scoped 输出目录路径
   --json                    输出机器可读 JSON
   --sid <id>                指定 session ID
   --help, -h                显示此帮助`;
 
 const KNOWN_FLAGS = new Set([
-  '--output-dir', '--check-only', '--ensure-cdp', '--login-url', '--auth-required',
+  '--query', '--agent', '--output-dir', '--check-only', '--ensure-cdp', '--login-url', '--auth-required',
   '--real-browser', '--domain', '--cdp-port', '--json', '--sid', '--help', '-h',
 ]);
 
-const VALUE_FLAGS = new Set(['--login-url', '--sid', '--auth-required', '--domain', '--cdp-port']);
+const VALUE_FLAGS = new Set(['--query', '--agent', '--login-url', '--sid', '--auth-required', '--domain', '--cdp-port']);
 
 function parseArgv(argv) {
   const values = {};
@@ -84,6 +84,8 @@ if (unknown.length > 0) {
 }
 
 const options = {
+  query: typeof values.query === 'string' ? values.query : undefined,
+  agent: typeof values.agent === 'string' ? values.agent : 'main',
   outputDirOnly: booleans.has('outputDir'),
   checkOnly: booleans.has('checkOnly'),
   ensureCdp: booleans.has('ensureCdp'),
