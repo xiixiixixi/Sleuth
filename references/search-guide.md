@@ -40,7 +40,7 @@
 - WebSearch / Search APIs：发现候选页面和别名
 - WebFetch / readers：快速扫静态正文
 - agent-browser：验证动态页面、登录态、真实交互
-- 本地历史 / 书签 / site-patterns：找用户或组织已有入口
+- 本地历史 / 书签：找用户或组织已有入口
 
 不要预设“所有任务都先搜索”，也不要预设“所有任务都先开浏览器”。哪个入口最可能最快产生有效证据，就先用哪个。
 
@@ -171,7 +171,7 @@ conflicts: []
 - 用搜索引擎找 YouTube 结果
 - 或直接在 YouTube 站内搜
 
-找到视频后，再按 `content-extraction.md` 处理字幕或转录。
+找到视频后，按 `tool-guide.md` 特殊内容类型处理字幕或转录。
 
 ## 遇到障碍时
 

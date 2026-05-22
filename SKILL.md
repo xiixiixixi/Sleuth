@@ -1,215 +1,206 @@
 ---
 name: sleuth
 description: >-
-  联网研究与网页验证 skill。用于查资料、搜东西、调研、验证来源、看网页、站内搜索、登录后内容、动态页面、深度研究。
-  目标不是替代所有工具，而是帮助 Agent 判断该用什么工具、证据是否足够、何时升级到浏览器、何时停止。
+  所有搜索、网页读取、浏览器验证与网络研究任务都应优先通过此 skill 处理。触发场景：用户要求搜索信息、查看网页内容、验证页面或来源、访问动态渲染页面、使用登录态浏览器、读取最新网页信息、或处理任何需要真实网页证据的网络任务。
 ---
 
-# sleuth — 搜索判断与浏览器验证合同
+# sleuth
 
-```bash
-# 自动探测 skill 根目录，兼容 Claude Code / OpenCode / 手动安装
-if [ -n "${CLAUDE_SKILL_DIR}" ]; then
-  SKILL_DIR="${CLAUDE_SKILL_DIR}"
-elif [ -n "${SKILL_DIR}" ]; then
-  :
-else
-  SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-fi
-```
-
-## 核心定位
-
-Sleuth 是研究判断层，不是大而全爬虫。
-
-- 负责：目标定义、工具边界识别、来源拓扑、证据要求、浏览器升级判断、停止条件、交付约定。
-- 不负责：替代所有搜索工具、维护大型站点 selector 库、把浏览器变成默认入口、绕过权限或付费墙。
-- agent-browser 是浏览器执行层；Sleuth 只判断何时应该使用它。
-
-## 必读参考
-
-执行联网任务时，根据任务复杂度读取：
-
-- `references/decision-kernel.md`：搜索决策问题，不是 intent-router。
-- `references/tool-boundary.md`：运行时工具盘点与证据边界。
-- `references/search-guide.md`：目标、来源拓扑、观察、怀疑、换路、证据、停止。
-- `references/tool-guide.md`：agent-browser 使用姿势。
-- `references/subagent-guide.md`：深度研究中的子 Agent 合同。
-- `references/content-extraction.md`：视频、PDF、图片、字幕等特殊内容提取。
-
-## 每次任务前先做的判断
-
-收到联网、调研、验证、查找、页面分析任务时，先在心智上完成三件事：
-
-```text
-1. 用户真正要解决什么问题？什么证据足够停止？
-2. 当前有哪些可用工具？每个工具能发现什么、验证什么、看不到什么？
-3. 哪些结论必须回到原始来源？哪些内容只能算线索？
-```
-
-不要先套关键词，不要先默认开浏览器，不要把搜索摘要当事实。
-
-## 工具边界原则
-
-先识别当前运行环境里的可用工具，再选路径。工具族通常包括：
-
-- 搜索发现类：发现候选来源、别名、关键词地图；不能单独支撑核心结论。
-- 页面读取类：快速读取公开静态正文；不能保证动态内容、登录态和页面真实状态。
-- 浏览器执行类：验证真实页面、登录态、站内搜索、动态渲染、交互和筛选排序；成本高，默认只读。
-- 专用连接器：GitHub、文件、邮件、日历、数据库等；结构化资源优先使用专用工具。
-- 私有入口和用户材料：截图、录屏、导出、访谈、内部文档；是高价值原料，但仍需整理和标注边界。
-
-详细规则见 `references/tool-boundary.md`。
-
-## 浏览器升级条件
-
-浏览器是最高保真验证层，不是默认入口。
-
-以下情况应升级到 agent-browser / CDP：
-
-- 页面内容依赖登录态、JS 渲染、滚动、展开、筛选、排序或交互。
-- 用户问的是某平台内、后台内、社区内、站内搜索结果。
-- WebFetch / reader 返回空壳、导航、登录提示、过短内容或明显失真。
-- 搜索结果只有摘要、镜像、转载，缺原始页面。
-- 页面真实状态、布局、图表、弹窗、按钮、价格表或可见性本身就是证据。
-
-公开、静态、权威页面能可靠读取时，不必使用浏览器。
-
-## 浏览器连接
-
-Sleuth 默认使用 managed browser：独立 Chrome profile，路径为 `~/.sleuth/cdp-profile/`，不触碰用户日常 Chrome。
-
-```bash
-node "${SKILL_DIR}/scripts/check-deps.mjs" --ensure-cdp
-# 输出 SLEUTH_CDP_PORT=<port>
-```
-
-所有 agent-browser 命令都应带：
-
-```bash
-agent-browser --cdp $SLEUTH_CDP_PORT --session <session-name> ...
-```
-
-首次需要登录态时，让用户在 managed browser 中手动登录：
-
-```bash
-node "${SKILL_DIR}/scripts/sleuth-browser.mjs" open-login
-```
-
-## 登录态原则
-
-CDP 连接成功不等于站点登录成功。profile 存在、cookie 存在、session 名存在，也不等于登录成功。
-
-只有页面级验证才算数：
-
-- 打开目标站点登录后页面。
-- 检查 DOM 中账号菜单、头像、profile、dashboard 等标志。
-- 如有 site-specific selector，可作为辅助信号。
-- 自动判断不可靠时，标为 unknown，不伪装成 verified。
-
-## 站点搜索与 site-patterns
-
-站点原生搜索在以下场景有价值：平台内、社区内、论坛内、商城内、仪表板内、登录态差异、筛选排序本身是证据。
-
-但 site-patterns 只是经验缓存，不是核心路线，也不应发展成大型 selector 数据库。
-
-可选使用：
-
-```bash
-node "${SKILL_DIR}/scripts/match-site.mjs" "<domain>"
-node "${SKILL_DIR}/scripts/route-task.mjs" --query "<query>" --domain "<domain>"
-```
-
-`route-task.mjs` 的结果只作参考，不强制跟随。最终仍由 Agent 根据 `decision-kernel.md` 判断。
-
-## 研究目标与证据记录
-
-关键结论必须能落到：
-
-```text
-Claim → Evidence → Source → Time → Confidence → Conflict
-```
-
-至少区分：
-
-- 已验证事实
-- 来源观点
-- 高置信推断
-- 未确认线索
-- 冲突信息
-- 覆盖缺口
-- 行动建议
-
-Tier 3 线索，例如搜索摘要、SEO 文、未署名转载、单条评论，不得单独支撑核心结论。
+sleuth 是搜索、浏览和研究判断层。不垄断网络入口，也不拦截工具——但必须知道每类工具能证明什么、不能证明什么。
 
 ## 响应层级
 
-从轻到重，证据不足再升级：
+从最轻的路径开始，不够再升级。不确定时先走低一级。
 
 | 层级 | 适用场景 | 常见做法 |
-|---|---|---|
-| 直答 | 稳定常识、无需当前事实 | 直接回答 |
-| 快速验证 | 一两个权威来源可确认 | 搜索/reader/专用工具 + 原始来源 |
-| 定向研究 | 需要多步查证但问题集中 | 多来源验证，必要时浏览器 |
-| 深度研究 | 多源冲突、范围大、用户要交付物 | session、子 Agent、证据账本、最终报告 |
+|------|----------|----------|
+| **直答** | 已有知识足够，且无明显时效风险 | 直接回复 |
+| **快速验证** | 一两个高质量来源就能确认 | 侦察 + 验证 |
+| **定向研究** | 需要多步查证，但问题仍集中 | 混合工具，按需升级 |
+| **深度研究** | 多源交叉、冲突、用户需要完整交付物 | session + 子 Agent + 完整报告 |
+
+## 工具选择
+
+**缺什么，补什么。从最轻的开始，不够再升级。**
+
+- **缺入口**（不知道去哪找）→ WebSearch 发现候选来源
+- **缺正文**（知道在哪，但没读内容）→ WebFetch / reader 先拿；拿不到或不满意 → 浏览器
+- **缺证据强度**（需要确认内容真实性）→ reader 结果只是线索；核心结论必须回到原始来源验证；不确定 reader 给的是不是真的 → 浏览器
+- **缺交互 / 登录态 / 动态内容** → 浏览器
+
+| 工具 | 适合做什么 | 证据边界 |
+|------|------------|----------|
+| **WebSearch** | 发现候选、别名、关键词地图 | snippet 有偏置，不能直接当证明 |
+| **WebFetch / reader** | 快速读正文、扫静态页面 | 不保证动态内容、登录态、页面真实状态 |
+| **agent-browser** | 一手验证、动态渲染、登录、交互 | 适合高价值验证，不适合大范围扫网页 |
+| **本地历史 / 书签** | 找用户曾访问、组织内部入口 | 入口记忆，不等于事实证据 |
+
+做搜索时读 `references/search-guide.md`，用浏览器时读 `references/tool-guide.md`。
+
+## 定向研究
+
+定向研究不需要 session 和脚本，直接用工具完成。
+
+- 至少给用户一个可追溯来源 URL。
+- reader 结果是线索不是证据——页面需要动态交互、登录态或真实状态验证时，不要假装 reader 够用，直接切浏览器。
 
 ## 深度研究
 
-开始时建立 session：
+### 建立 session
 
 ```bash
-SID=$(node "${SKILL_DIR}/scripts/session-logger.mjs" --action start --query "问题" --type research)
-SLEUTH_OUTPUT=$(node "${SKILL_DIR}/scripts/check-deps.mjs" --output-dir --sid "$SID")
+SID=$(node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action start --query "问题" --type research)
+SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --output-dir --sid "$SID")
 ```
 
-深度研究原则：
+常见做法：
 
-- 先写目标、enough 条件、关键子问题。
-- 独立角度才派子 Agent，避免重复搜索。
-- 给子 Agent 合同：goal / enough_when / must_verify / known_clues / browser_session / output_shape。
-- 昂贵或难复现发现及时 `deliver save`。
-- 证据稳定就写报告；关键结论脆弱时再补查或独立审查。
+- 重要发现、难复现发现、跨轮次会丢的发现及时 `deliver save`。
+- 只有当角度真正独立时，才并行派子 Agent。
+- 证据稳定时直接写报告；关键结论仍脆弱、冲突或覆盖不足时，做独立审查或补查。
 
-子 Agent 先读 `references/subagent-guide.md`。
+### 按需起手
 
-## 交付约定
-
-- 快速验证 / 定向研究：内联回复 + 可追溯来源。
-- 深度研究：默认交付一份最终报告，同时内联简要结论。
-- 用户指定格式、路径、文件名时，按用户要求。
-
-中间材料可保存：
+不是每次都跑所有脚本。只在能减少重复劳动时才用。
 
 ```bash
-node "${SKILL_DIR}/scripts/deliver.mjs" --action save \
+# 看以前有没有做过类似研究
+node "${CLAUDE_SKILL_DIR}/scripts/research-index.mjs" --action recall --query "关键词" --limit 5
+
+# 命名实体无召回命中时，可回填最近资料
+node "${CLAUDE_SKILL_DIR}/scripts/research-index.mjs" --action backfill --days 7
+
+# 用户提到"之前看过 / 书签里 / 内部系统"时
+node "${CLAUDE_SKILL_DIR}/scripts/find-url.mjs" "关键词" --since 7d
+```
+
+recall 命中后：
+
+1. 读最相关的 1-3 个文件，标为"历史线索"，不当当前事实。
+2. 会过期或影响决策的事实重新验证原始来源。
+3. 有价值时用 `deliver save` 保存本轮摘录，不复制整份旧 session。
+
+### 子 Agent
+
+适合并行的情况：不同来源类型彼此独立；同一主题下彼此不干扰的站点；任务大到主 Agent 上下文混乱。
+
+不适合并行：重复搜索同一角度；主 Agent 还没弄清目标和来源拓扑；新探针只会复读已知结论。
+
+创建研究子 Agent：
+
+```text
+你是独立研究子 Agent。
+
+开始前先读：${CLAUDE_SKILL_DIR}/references/subagent-guide.md
+
+SID: ${SID}
+SLEUTH_OUTPUT: ${SLEUTH_OUTPUT}
+browser_session: ${SID}-pricing
+
+goal: 验证该产品当前公开定价与计费单位。
+enough_when: 找到官方 pricing / help / docs 中能直接支持价格结论的页面，或明确写出公开价格不存在。
+must_verify:
+- 价格数字
+- 计费单位
+- 是否需要 sales contact
+known_clues:
+- 域名: example.com
+- 可能入口: pricing / docs / help center
+- 已知疑点: 搜索结果里有旧价格
+
+返回：findings、sources、gaps、red_flags、trust_notes。
+```
+
+### 独立审查
+
+不是每个任务都需要。适合：结论影响决策且来源多冲突多；报告范围大主 Agent 有沉没成本；关键数字容易过时或被营销话术污染。轻量验证主 Agent 自检即可。
+
+决定做审查时，派审查子 Agent：
+
+```text
+你是独立审查子 Agent。
+
+开始前先读：${CLAUDE_SKILL_DIR}/references/subagent-guide.md
+
+SID: ${SID}
+SLEUTH_OUTPUT: ${SLEUTH_OUTPUT}
+
+goal: 审查已有研究结论是否足够可信，是否有未暴露的关键缺口。
+enough_when: 完成对所有核心结论的质疑，给出 is_enough 判断。
+审查对象: ${SLEUTH_OUTPUT} 下的交付文件
+
+审查重点：
+- 目标覆盖：用户的问题答了没有
+- 来源强度：核心结论是否过度依赖单一来源、低级来源或营销页
+- 一手验证：价格、版本、融资等关键事实是否回到了原始来源
+- 冲突处理：冲突是明确写出了，还是被强行抹平
+- 时效性：旧数据有没有冒充新结论
+- 视角覆盖：是否只有官方视角
+
+返回：
+  is_enough: true / false
+  coverage: 已答问题 / 未答问题
+  weak_claims: 证据脆弱或单一来源的结论
+  missing_perspectives: 缺失的来源类型或立场
+  red_flags: critical / warning 级风险
+  conflicts: 未解释清楚的冲突
+  next_actions: 需要补的动作（只列关键的）
+```
+
+审查返回 `is_enough=false` 时，主 Agent 根据 next_actions 委派新的研究子 Agent 补查（用正常研究合同）。缺口不可得时在最终报告里披露。
+
+### 浏览器
+
+所有命令带 `--cdp 9222 --session <name>`，主 Agent 用 `${SID}-main`，子 Agent 用各自独立 session。
+
+并行原则：不同域名/子问题可以并行开独立 session；同一账号后台或会产生状态变更的流程不并行。
+
+登录态原则：首次进入需登录态的任务时先确认页面确实已登录；未登录时停止依赖登录态的抓取，把"登录态未验证"写入缺口；浏览器被杀后重新打开也必须重新验证。
+
+### 关闭 session
+
+**所有子 Agent 完成后、合成报告前，先关闭 session。** 避免写报告时遗忘。
+
+```bash
+# 关闭所有浏览器 session
+agent-browser --cdp 9222 --session "${SID}-main" close
+# 如有子 Agent 未正确关闭
+agent-browser session list
+agent-browser close --all    # 安全操作，不影响用户手动打开的 Chrome
+
+# 结束 session 日志
+node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "$SID" --outcome success|partial|fail
+```
+
+### 交付
+
+**流程：关闭 session → 读取所有子 Agent 输出 → 合成最终报告 → 交付。**
+
+1. 读取 `${SLEUTH_OUTPUT}` 下所有子 Agent 的 deliver save 文件。
+2. 合成为一份最终报告，不生成多个"final / merged / summary"版本。
+3. 报告建议区分：已验证事实、高置信推断、未确认线索、冲突信息、覆盖缺口。
+
+**输出按优先级：**
+
+1. **用户指定了输出要求** → 严格按照用户要求输出，不做自作主张的调整。
+2. **简单问题** → 内联回复 + 可追溯来源 URL。
+3. **复杂问题** → 最终 Markdown 报告存入 `~/.sleuth/output/`，同时复制一份到用户 cwd，并内联总结性回复。
+
+```bash
+# 重要、难复现的发现及时保存（子 Agent 和主 Agent 均可用）
+node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action save \
   --type <doc|screenshot|image|transcript|data|page> \
-  --source <source> --name <name> --url <URL> --sid "$SID"
-```
+  --source <源> --name <名> --url <URL> --sid "$SID"
 
-`deliver merge` 只合并中间 Markdown，方便阅读整理；不是最终报告生成器。
+# 多个中间交付物需要整理时才 merge（不是最终报告生成器）
+node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action merge --sid "$SID"
+```
 
 ## 运行边界
 
-- 不提取 cookie、密码、token 或敏感凭据。
-- 不绕过付费墙、CAPTCHA 或权限控制。
+- 不提取 cookie、密码或其他敏感凭据。
 - 不对敏感页面截图。
+- 不绕过付费墙。
 - 不执行会产生记录的状态变更操作，除非用户明确要求。
-- 不把搜索摘要、二手搬运、SEO 软文包装成一手事实。
-- 同一路径失败且没有新信息时，不盲目重试；换工具或换来源。
-- 工具无法访问的封闭渠道，要求用户提供截图、导出、录屏、链接或登录态。
-
-## 收尾
-
-研究完成后：
-
-```bash
-node "${SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "$SID" --outcome success|partial|fail
-node "${SKILL_DIR}/scripts/update-site-stats.mjs" --sid "$SID"   # 可选
-node "${SKILL_DIR}/scripts/cleanup-output.mjs"                   # 可选
-```
-
-如果浏览器由 Sleuth 启动且需要关闭：
-
-```bash
-node "${SKILL_DIR}/scripts/on-stop.mjs" --sid "$SID"
-```
+- 不把搜索摘要、二手搬运或 SEO 软文包装成一手事实。
+- 不在同一条失败路径上盲目重试；没有新信息就换路。

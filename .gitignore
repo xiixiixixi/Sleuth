@@ -2,6 +2,9 @@
 *.log
 __pycache__/
 *.pyc
-references/site-patterns/**/*.md
 node_modules/
+sleuth-output/
 .sisyphus/
+docs/
+.claude/
+*.tgz

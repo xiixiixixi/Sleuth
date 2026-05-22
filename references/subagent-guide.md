@@ -22,11 +22,11 @@
 which agent-browser || echo "ERROR: agent-browser not in PATH"
 
 # 获取输出目录（必须通过 check-deps 获取，不自行拼路径）
-SLEUTH_OUTPUT=$(node "${SKILL_DIR}/scripts/check-deps.mjs" --output-dir --sid "${SID}")
+SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --output-dir --sid "${SID}")
 echo "SLEUTH_OUTPUT=${SLEUTH_OUTPUT}"
 
 # 验证关键变量
-echo "SKILL_DIR=${SKILL_DIR}"
+echo "SKILL_DIR=${CLAUDE_SKILL_DIR}"
 echo "SID=${SID}"
 echo "BROWSER_SESSION=${BROWSER_SESSION}"
 echo "SLEUTH_OUTPUT=${SLEUTH_OUTPUT}"
@@ -41,25 +41,26 @@ echo "SLEUTH_OUTPUT=${SLEUTH_OUTPUT}"
 
 1. 不再派子 Agent。
 2. 不加载 sleuth 主 skill。
-3. 所有 agent-browser 命令带 `--cdp $SLEUTH_CDP_PORT --session "${BROWSER_SESSION}"`。
+3. 所有 agent-browser 命令带 `--cdp 9222 --session "${BROWSER_SESSION}"`。
 4. 使用主 Agent 提供的 `SID`，不创建新的研究 session。
 5. 不 finish 主 session；完成时只记录 `subagent_done`。
-6. 搜索和验证逻辑统一看 `references/search-guide.md`。
-7. 不共享其他子 Agent 的 browser session；并行研究必须用自己的 `BROWSER_SESSION`。
+6. 使用主 Agent 提供的 `SID`，不创建新的研究 session。
+7. 搜索策略需要时读 `references/search-guide.md`，用浏览器时读 `references/tool-guide.md`。
+8. 不共享其他子 Agent 的 browser session；并行研究必须用自己的 `BROWSER_SESSION`。
 
-## 你可以如何开局
+## 工具选择
 
-你可以自由选择入口，但要对自己的选择负责：
+缺什么，补什么。从最轻的开始，不够再升级。
 
-- 先用 WebSearch / Search API 建立候选来源地图
-- 先用 WebFetch / reader 快速扫静态正文
-- 直接进入官网、docs、pricing、security、marketplace、历史记录
-- 直接用 agent-browser 读取动态页面、交互页、登录页
+- **缺入口**（不知道去哪找）→ WebSearch 发现候选来源
+- **缺正文**（知道在哪，但没读内容）→ WebFetch / reader 先拿一把；拿不到或不满意 → 升级浏览器
+- **缺证据强度**（需要确认内容是真实的）→ reader 结果只是线索，核心结论必须回到原始来源验证；不确定 reader 给的是不是真的 → 浏览器
+- **缺交互 / 登录态 / 动态内容** → 只能浏览器
 
 不要因为主 Agent 给了几个线索，就把它们误当成唯一正确路径。
 如果你的任务依赖登录态，先验证目标页面是否真的已登录；未登录时返回缺口，不要把公开页面结果伪装成登录态验证。
 
-## 必须报告“为什么相信”与“还怀疑什么”
+## 必须报告"为什么相信"与"还怀疑什么"
 
 你返回的不只是 finding，还要告诉主 Agent：
 
@@ -76,7 +77,7 @@ echo "SLEUTH_OUTPUT=${SLEUTH_OUTPUT}"
 遇到障碍时可以记录：
 
 ```bash
-node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" \
+node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" \
   --operation '{"type":"captcha|login_wall|paywall|dead_link|anti_bot","url":"<URL>","domain":"<域名>"}'
 ```
 
@@ -86,25 +87,24 @@ node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" \
 - `deliver save` 时 `--url` 必须填实际页面 URL，方便主 Agent 做跨探针去重
 - 如果两个页面只是同一信息的不同转载，优先保留更原始、更完整的那一个
 
-## 搜索与浏览器参考
+## 按需参考文档
 
-- 搜索判断：`Read "${SKILL_DIR}/references/search-guide.md"`
-- 浏览器姿势：`tool-guide.md`
-- 特殊内容提取：`content-extraction.md`
+- 做搜索时：`Read "${CLAUDE_SKILL_DIR}/references/search-guide.md"`
+- 用浏览器时：`Read "${CLAUDE_SKILL_DIR}/references/tool-guide.md"`
 
 ## 记录重要页面
 
 每访问重要页面，可记录：
 
 ```bash
-node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" \
+node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" \
   --operation '{"type":"visit","url":"<URL>","domain":"<域名>","extraction_success":true}'
 ```
 
 ## 保存发现
 
 ```bash
-cat <<'CONTENT' | node "${SKILL_DIR}/scripts/deliver.mjs" --action save --source /dev/stdin --type doc --name "report-name" --url "来源URL" --sid "${SID}"
+cat <<'CONTENT' | node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action save --source /dev/stdin --type doc --name "report-name" --url "来源URL" --sid "${SID}"
 调研内容...
 CONTENT
 ```
@@ -120,12 +120,12 @@ CONTENT
 1. 如有需要，`deliver save` 保存发现
 2. 记录完成：
    ```bash
-   node "${SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" \
+   node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" \
      --operation '{"type":"subagent_done","name":"'"${BROWSER_SESSION}"'"}'
    ```
 3. 关闭 session：
    ```bash
-   agent-browser --cdp $SLEUTH_CDP_PORT --session "${BROWSER_SESSION}" close
+   agent-browser --cdp 9222 --session "${BROWSER_SESSION}" close
    ```
 4. 返回结构化摘要
 
@@ -159,4 +159,4 @@ leads:
 - 我是不是忽略了更直接的一手入口？
 - 我是不是只找到了支持主线的证据？
 - 这个数字或说法会不会已经过时？
-- 如果主 Agent 质问“你为什么相信它”，我能回答吗？
+- 如果主 Agent 质问"你为什么相信它"，我能回答吗？
