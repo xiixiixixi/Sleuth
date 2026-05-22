@@ -1,124 +1,94 @@
 # Sleuth
 
-Agent skill for web research with judgment — knows when to search, when to read, and when to verify against original sources.
+让 AI Agent 在做网络研究时知道该信任什么、怀疑什么、什么时候该亲自去看。
 
-## What it does
+## 解决什么问题
 
-Most agents treat web tools as interchangeable. They don't distinguish between a search snippet, a reader dump, and a live browser session. Sleuth gives agents a decision framework:
+AI Agent 能搜索、能读网页、能操控浏览器，但大多数时候它分不清：
 
-| Situation | Action |
-|-----------|--------|
-| Need to find where to look | WebSearch to discover candidates |
-| Need to read content at a known URL | WebFetch / reader first; escalate to browser if insufficient |
-| Need to confirm authenticity | Reader results are clues, not evidence — verify against original sources |
-| Need interaction / login / dynamic content | Browser only |
+- 搜索摘要和原始来源有什么区别
+- reader 抓回来的内容是不是页面真实状态
+- 什么时候该用浏览器亲自验证，什么时候搜索就够了
 
-Agents escalate from lightest tool to heaviest, not the other way around.
+Sleuth 不是又一个搜索工具或浏览器自动化框架。它是一套判断层——帮 Agent 在不同工具之间做出正确的选择，并对拿到的证据保持合理的怀疑。
 
-## Architecture
+## 怎么工作
+
+Sleuth 根据任务复杂度分四个层级：
+
+| 层级 | 什么时候用 | 做什么 |
+|------|-----------|--------|
+| 直答 | Agent 已有知识足够 | 直接回答 |
+| 快速验证 | 一两个来源就能确认 | 搜索 + 验证 |
+| 定向研究 | 需要多步查证但问题集中 | 混合使用工具，按需升级 |
+| 深度研究 | 多源冲突、需要完整报告 | 启动研究 session、派子 Agent 并行调查 |
+
+核心原则：**从最轻的工具开始，证据不够再升级。**
+
+- 找不到入口 → 先搜索
+- 知道在哪但没读内容 → 先用 reader
+- reader 结果不确定是不是真的 → 用浏览器验证原始页面
+- 需要登录态、动态交互 → 只能用浏览器
+
+所有研究结论区分可信度：已验证事实 > 高置信推断 > 未确认线索 > 冲突信息 > 覆盖缺口。
+
+## 安装
+
+### 前置依赖
+
+| 依赖 | 用途 |
+|------|------|
+| **Node.js >= 18** | 运行辅助脚本 |
+| **agent-browser** | 浏览器操作 CLI，`npm i -g agent-browser && agent-browser install` |
+| **Chrome** | 使用你日常的 Chrome，带登录态 |
+
+可选：**sqlite3**（Chrome 历史搜索）、**yt-dlp**（YouTube 字幕）。
+
+### 安装 skill
+
+```bash
+# 安装到当前项目（支持 Claude Code、Codex、Gemini CLI 等 50+ Agent）
+npx skills add xiixiixixi/Sleuth
+
+# 全局安装
+npx skills add xiixiixixi/Sleuth -g
+
+# 只安装到指定 Agent
+npx skills add xiixiixixi/Sleuth -a claude-code
+```
+
+安装后 sleuth 会自动注册。Agent 收到搜索、浏览、验证类任务时会自动加载。
+
+更新：
+
+```bash
+npx skills update sleuth
+```
+
+### Chrome 连接
+
+首次使用时 sleuth 会自动检测并连接 Chrome。它会复制你的 Chrome profile 到独立目录，开启远程调试端口——登录态完整保留，不影响你日常使用。
+
+## 安全
+
+- 不提取 cookie、密码或任何敏感凭据
+- 不绕过付费墙
+- 不对敏感页面截图
+- 不执行会产生记录的操作（如提交表单），除非你明确要求
+- 所有浏览器操作在你的本地 Chrome 中进行，你始终可见
+
+## 目录结构
 
 ```
-sleuth (skill)
-  SKILL.md              Flow control: response levels, tool selection, subagent contracts, delivery
-  references/
-    search-guide.md     Search strategy (loaded on demand)
-    tool-guide.md       Browser commands (loaded on demand)
-    subagent-guide.md   Subagent contract (loaded on demand)
-  scripts/              Session logging, delivery management, history search, etc.
-       │
-       │ Bash
-       v
-  agent-browser (CDP CLI)
-       │ CDP WebSocket (127.0.0.1:9222)
-       v
-  User's Chrome (login state, bookmarks, history)
-```
-
-### Runtime data
-
-| Path | Purpose |
-|------|---------|
-| `~/.sleuth/output/YYYY-MM-DD/<session-id>/` | Session deliverables |
-| `~/.sleuth/sessions/*.json` | Session logs |
-| `~/.sleuth/knowledge/entities.json` | Entity/fact index extracted from deliverables |
-| `~/.sleuth/chrome-debug/` | Chrome CDP debug profile (copy of user profile) |
-
-## Directory structure
-
-```
-├── SKILL.md                    Main skill: flow control, subagent contracts, delivery
+├── SKILL.md                    主 skill 文件
 ├── references/
-│   ├── tool-guide.md           Browser command reference + special scenarios
-│   ├── search-guide.md         Search strategy and tactics
-│   └── subagent-guide.md       Subagent execution contract
-├── scripts/
-│   ├── lib/
-│   │   ├── output.mjs
-│   │   ├── registry.mjs
-│   │   └── validate.mjs
-│   ├── check-deps.mjs          Environment check + Chrome CDP setup
-│   ├── session-logger.mjs      Session logging
-│   ├── deliver.mjs             Deliverable management
-│   ├── research-index.mjs      History and entity index
-│   ├── cleanup-output.mjs      Expired output cleanup
-│   ├── find-url.mjs            Chrome bookmark & history search
-│   ├── extract-subtitles.sh    YouTube subtitle download
-│   └── srt_to_transcript.py    Subtitle cleanup
+│   ├── tool-guide.md           浏览器命令参考
+│   ├── search-guide.md         搜索策略
+│   └── subagent-guide.md       子 Agent 合同
+├── scripts/                    辅助脚本
 ├── LICENSE
 └── README.md
 ```
-
-## Installation
-
-### Prerequisites
-
-| Dependency | Purpose | Install |
-|------------|---------|---------|
-| **Node.js >= 18** | Run all scripts | Required |
-| **agent-browser** | CDP browser CLI | `npm i -g agent-browser && agent-browser install` |
-| **Chrome** | User browser with login state | Required (`check-deps` auto-detects) |
-| **sqlite3** | Chrome history search (optional) | macOS/Linux pre-installed |
-| **yt-dlp** | YouTube subtitles (optional) | `pip install yt-dlp` |
-
-### Install
-
-```bash
-npx @anthropic-ai/sleuth install          # project-level
-npx @anthropic-ai/sleuth install --global # global
-```
-
-## Chrome CDP connection
-
-Chrome 147+ requires a non-default `--user-data-dir` for remote debugging. `check-deps.mjs` handles this automatically:
-
-1. Detect if CDP port is available
-2. If not: close user Chrome → copy profile to `~/.sleuth/chrome-debug/` → restart with `--remote-debugging-port=9222`
-3. On macOS, cookie encryption keys are stored in Keychain (path-independent), so login state is preserved after copy
-
-Manual start:
-
-```bash
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --remote-debugging-port=9222 \
-  --user-data-dir=$HOME/.sleuth/chrome-debug \
-  --no-first-run &
-```
-
-## Safety
-
-- No extraction of cookies, passwords, or sensitive credentials
-- No screenshots of sensitive pages
-- No paywall bypass
-- No state-changing operations unless explicitly requested
-- All browser actions run in local Chrome, visible to the user
-
-## Platform support
-
-| Platform | Status |
-|----------|--------|
-| macOS | Fully supported |
-| Linux | Fully supported |
-| Windows | Fully supported |
 
 ## License
 
