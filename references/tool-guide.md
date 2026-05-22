@@ -187,4 +187,13 @@ network requests            # 查看所有请求
 
 **PDF：** eval 找链接 `document.querySelectorAll('a[href$=".pdf"]')`，下载后用 Read 工具读取。arXiv 论文直接访问 `arxiv.org/pdf/<论文ID>`。
 
+**图片与视觉内容：** 页面中的图表、截图、产品图、信息图等，纯文本提取会丢失关键信息。
+
+1. 发现页面有视觉内容时，先用 `eval` 提取图片 URL：
+   ```bash
+   eval "Array.from(document.querySelectorAll('img')).map(i => ({src: i.src, alt: i.alt}))"
+   ```
+2. 用 vision 工具（analyze_image / analyze_data_visualization）分析关键图片。
+3. 结论写进报告，附原始图片 URL，不存图。
+
 **DOM 技巧：** 折叠区块和懒加载内容已在 DOM 中，eval 可直接提取。Shadow DOM 和 iframe 在 snapshot 中展开一级，eval 可递归穿透。`scroll down` 触发懒加载后再提取图片 URL。

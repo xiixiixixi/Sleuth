@@ -179,6 +179,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "$SI
 1. 读取 `${SLEUTH_OUTPUT}` 下所有子 Agent 的 deliver save 文件。
 2. 合成为一份最终报告，不生成多个"final / merged / summary"版本。
 3. 报告建议区分：已验证事实、高置信推断、未确认线索、冲突信息、覆盖缺口。
+4. 每个核心结论内联来源 URL，不要只在末尾堆 sources 列表。图片分析结论附原始图片 URL，标注"视觉分析"。
 
 **输出按优先级：**
 
