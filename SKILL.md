@@ -8,16 +8,27 @@ description: >-
 
 sleuth 是搜索、浏览和研究判断层。不垄断网络入口，也不拦截工具——但必须知道每类工具能证明什么、不能证明什么。
 
+## 建立 session
+
+**sleuth 触发后第一件事：建 session。每次都必须，不跳过。**
+
+```bash
+SID=$(node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action start --query "用户问题" --type "技术文档|学术论文|产品评测|政策法规|实时热点|生活消费|其他")
+SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --output-dir --sid "$SID")
+```
+
+所有后续操作都带 `$SID`。同一对话内多次调用 sleuth 时，每次都建新 session，不复用旧的。
+
 ## 响应层级
 
 从最轻的路径开始，不够再升级。不确定时先走低一级。
 
 | 层级 | 适用场景 | 常见做法 |
 |------|----------|----------|
-| **直答** | 已有知识足够，且无明显时效风险 | 直接回复 |
-| **快速验证** | 一两个高质量来源就能确认 | 侦察 + 验证 |
+| **直答** | 已有知识足够，且无明显时效风险 | 直接回复，session 只做记录 |
+| **快速验证** | 一两个高质量来源就能确认 | 搜索 + 验证 |
 | **定向研究** | 需要多步查证，但问题仍集中 | 混合工具，按需升级 |
-| **深度研究** | 多源交叉、冲突、用户需要完整交付物 | session + 子 Agent + 完整报告 |
+| **深度研究** | 多源交叉、冲突、用户需要完整交付物 | 子 Agent + 完整报告 |
 
 ## 工具选择
 
@@ -27,6 +38,7 @@ sleuth 是搜索、浏览和研究判断层。不垄断网络入口，也不拦�
 - **缺正文**（知道在哪，但没读内容）→ WebFetch / reader 先拿；拿不到或不满意 → 浏览器
 - **缺证据强度**（需要确认内容真实性）→ reader 结果只是线索；核心结论必须回到原始来源验证；不确定 reader 给的是不是真的 → 浏览器
 - **缺交互 / 登录态 / 动态内容** → 浏览器
+- **其他工具都不可用**（WebSearch 被限、reader 返回空/失败）→ 必须用浏览器，不能因为没有轻量工具就放弃
 
 | 工具 | 适合做什么 | 证据边界 |
 |------|------------|----------|
@@ -39,14 +51,10 @@ sleuth 是搜索、浏览和研究判断层。不垄断网络入口，也不拦�
 
 ## 定向研究
 
-定向研究不需要 session 和脚本，直接用工具完成。
-
 - 至少给用户一个可追溯来源 URL。
 - reader 结果是线索不是证据——页面需要动态交互、登录态或真实状态验证时，不要假装 reader 够用，直接切浏览器。
 
 ## 深度研究
-
-### 建立 session
 
 ```bash
 SID=$(node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action start --query "问题" --type research)
@@ -55,7 +63,7 @@ SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --output-dir -
 
 常见做法：
 
-- 重要发现、难复现发现、跨轮次会丢的发现及时 `deliver save`。
+- **以下情况必须 deliver save**：WebReader 抓到核心证据页面的摘录、浏览器验证完关键事实后的结论、子 Agent 完成某个子任务后的 findings。
 - 只有当角度真正独立时，才并行派子 Agent。
 - 证据稳定时直接写报告；关键结论仍脆弱、冲突或覆盖不足时，做独立审查或补查。
 
@@ -188,10 +196,18 @@ node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "$SI
 3. **复杂问题** → 最终 Markdown 报告存入 `~/.sleuth/output/`，同时复制一份到用户 cwd，并内联总结性回复。
 
 ```bash
-# 重要、难复现的发现及时保存（子 Agent 和主 Agent 均可用）
+# 直接 pipe 内容保存（不需要先写临时文件）
+cat <<'CONTENT' | node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action save \
+  --source /dev/stdin --type doc --name "页面名-摘录" --url "来源URL" --sid "$SID"
+## 页面标题
+
+摘录内容、关键数据、证据...
+CONTENT
+
+# 保存已有文件（截图等）
 node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action save \
-  --type <doc|screenshot|image|transcript|data|page> \
-  --source <源> --name <名> --url <URL> --sid "$SID"
+  --type <screenshot|image|data> \
+  --source <文件路径> --name <名> --url <URL> --sid "$SID"
 
 # 多个中间交付物需要整理时才 merge（不是最终报告生成器）
 node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action merge --sid "$SID"

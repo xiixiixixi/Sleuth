@@ -103,21 +103,27 @@ node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}
 
 ## 保存发现
 
+**每个重要页面提取后必须 deliver save，不能只在上下文里累积。**
+
 ```bash
-cat <<'CONTENT' | node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action save --source /dev/stdin --type doc --name "report-name" --url "来源URL" --sid "${SID}"
-调研内容...
+cat <<'CONTENT' | node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action save --source /dev/stdin --type doc --name "页面名-摘录" --url "来源URL" --sid "${SID}"
+## 页面标题
+
+摘录内容、关键数据、证据...
 CONTENT
 ```
 
-值得保存的内容：
+必须 deliver save 的场景：
 
-- 昂贵或难复现的发现
-- 重要一手页面的结构化摘录
-- 后续审查需要引用的关键证据
+- WebReader 抓到核心证据页面的摘录
+- 浏览器验证完关键事实后的结论
+- 完成某个子任务后的 findings
+
+主 Agent 最终报告时从 `${SLEUTH_OUTPUT}` 读所有子 Agent 的 deliver save 文件来合成。你不 save，主 Agent 就读不到你的发现。
 
 ## 完成时按顺序做
 
-1. 如有需要，`deliver save` 保存发现
+1. 最后一次 `deliver save` 保存剩余发现
 2. 记录完成：
    ```bash
    node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" \
