@@ -63,6 +63,13 @@ const VALID_QUERY_TYPES = [
 // 合法的结束结果（供 finish 命令使用）
 const VALID_OUTCOMES = ['success', 'partial', 'fail'];
 
+// 合法的调用方角色。
+// main     — 主 Agent（默认）：可以 start / log / finish。
+// subagent — 研究子 Agent：只能 log，禁止 start / finish。
+//            子 Agent 必须复用主 Agent 给的 SID，不得自建 session，
+//            也不得 finish 主 session（见 references/subagent-guide.md）。
+const VALID_ROLES = ['main', 'subagent'];
+
 // ── 工具函数 ──────────────────────────────────────────────────────
 
 /** 确保 sessions 目录存在 */
@@ -268,8 +275,9 @@ function cmdLog(sid, operationJson) {
  *
  * @param {string} sid - session ID
  * @param {string} outcome - 结果：success（成功）/ partial（部分完成）/ fail（失败）
+ * @param {boolean} [force] - 跳过 subagent_done 完整性检查
  */
-function cmdFinish(sid, outcome) {
+function cmdFinish(sid, outcome, force) {
   if (!VALID_OUTCOMES.includes(outcome)) {
     console.error(
       `Warning: invalid outcome "${outcome}". Must be one of: ${VALID_OUTCOMES.join(', ')}`
@@ -281,6 +289,22 @@ function cmdFinish(sid, outcome) {
   withLock(lockPath, () => {
     const session = loadSession(sid);
     if (!session) return;
+
+    // 完整性检查：有 deliver 却没有任何 subagent_done，
+    // 说明主 session 很可能在子 Agent 完成前就被 finish（早产的 success）。
+    // 不阻断（并非所有 session 都用子 Agent），但显著告警并留痕，便于事后审计。
+    const ops = session.operations || [];
+    const deliverCount = ops.filter((o) => o.type === 'deliver').length;
+    const doneCount = ops.filter((o) => o.type === 'subagent_done').length;
+    if (!force && deliverCount > 0 && doneCount === 0) {
+      console.error(
+        `Warning: session 有 ${deliverCount} 个 deliver 但 0 个 subagent_done。` +
+          ` 若使用了子 Agent，主 session 可能在它们完成前被 finish。` +
+          ` 如确认无误请加 --force。`
+      );
+      session.finish_warning = true;
+    }
+
     session.finished = new Date().toISOString();
     session.outcome = outcome;
     saveSession(sid, session);
@@ -300,24 +324,43 @@ async function main() {
       sid:       { type: 'string' },  // log/finish 时的 session ID
       operation: { type: 'string' },  // log 时的操作 JSON
       outcome:   { type: 'string' },  // finish 时的结果
+      role:      { type: 'string' },  // 调用方角色：main（默认）/ subagent
+      force:     { type: 'boolean' }, // finish 时跳过 subagent_done 完整性检查
       help:      { type: 'boolean', short: 'h' },
     },
   });
 
   if (values.help) {
     console.log('Usage: node session-logger.mjs --action <start|log|finish> [options]');
-    console.log('  --action start  --query <text> [--type <type>]   Start a new session');
+    console.log('  --action start  --query <text> [--type <type>]   Start a new session (main only)');
     console.log('  --action log    --sid <id> --operation \'<json>\'   Log an operation');
-    console.log('  --action finish --sid <id> --outcome <outcome>    Finish a session');
+    console.log('  --action finish --sid <id> --outcome <outcome> [--force]   Finish a session (main only)');
+    console.log('');
+    console.log('  --role <main|subagent>   调用方角色，默认 main。subagent 只能 log，禁止 start/finish。');
+    console.log('  --force                  finish 时跳过 subagent_done 完整性检查');
     console.log('');
     console.log('Query types: ' + VALID_QUERY_TYPES.join(', '));
     console.log('Outcomes: ' + VALID_OUTCOMES.join(', '));
     return;
   }
 
+  // 解析调用方角色（默认 main，向后兼容：不传 --role 时行为不变）
+  const role = values.role || 'main';
+  if (!VALID_ROLES.includes(role)) {
+    console.error(`Error: invalid role "${role}". Must be one of: ${VALID_ROLES.join(', ')}`);
+    process.exit(2);
+  }
+
   // 根据子命令分发
   switch (values.action) {
     case 'start': {
+      // 子 Agent 禁止自建 session：必须复用主 Agent 给的 SID
+      if (role === 'subagent') {
+        console.error('Error: 子 Agent 禁止创建 session（--role subagent）。');
+        console.error('       请复用主 Agent 提供的 SID，完成时只记 subagent_done。');
+        console.error('       见 references/subagent-guide.md');
+        process.exit(2);
+      }
       if (!values.query) {
         console.error('Error: --query is required for action "start"');
         process.exit(2);
@@ -342,6 +385,13 @@ async function main() {
       break;
     }
     case 'finish': {
+      // 子 Agent 禁止 finish 主 session：会导致主 session 在子任务完成前被标 success
+      if (role === 'subagent') {
+        console.error('Error: 子 Agent 禁止 finish 主 session（--role subagent）。');
+        console.error('       完成时只记 {"type":"subagent_done",...}，由主 Agent 统一 finish。');
+        console.error('       见 references/subagent-guide.md');
+        process.exit(2);
+      }
       if (!values.sid) {
         console.error('Error: --sid is required for action "finish"');
         process.exit(2);
@@ -350,7 +400,7 @@ async function main() {
         console.error('Error: --outcome is required for action "finish"');
         process.exit(2);
       }
-      cmdFinish(values.sid, values.outcome);
+      cmdFinish(values.sid, values.outcome, values.force);
       break;
     }
     default:
