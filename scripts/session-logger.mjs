@@ -36,6 +36,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -59,6 +60,19 @@ const VALID_QUERY_TYPES = [
   '生活消费',    // 购物、旅游、生活服务
   '其他',        // 不属于以上分类
 ];
+
+// query_type → 英文 slug 前缀。
+// 当 query 主要是中文、无法生成可读的英文 slug 时，
+// 用分类英文名 + 短哈希兜底，避免出现 "youtube" / "222025-2026ai" 这类乱码 ID。
+const QUERY_TYPE_SLUG = {
+  技术文档: 'tech',
+  学术论文: 'paper',
+  产品评测: 'review',
+  政策法规: 'policy',
+  实时热点: 'news',
+  生活消费: 'life',
+  其他: 'misc',
+};
 
 // 合法的结束结果（供 finish 命令使用）
 const VALID_OUTCOMES = ['success', 'partial', 'fail'];
@@ -93,9 +107,10 @@ function createSessionDir() {
  *   - 无有效字符时用 "session" 替代
  *
  * @param {string} query - 用户输入的查询文本
+ * @param {string} [queryType] - 问题分类，用于中文 query 的语义化兜底
  * @returns {string} session ID
  */
-function generateSessionId(query) {
+function generateSessionId(query, queryType) {
   const now = new Date();
   // 日期 + 精确到毫秒的时间戳，确保唯一性
   const datePart =
@@ -119,7 +134,23 @@ function generateSessionId(query) {
     .toLowerCase()
     .replace(/^-+|-+$/g, '');          // 去掉首尾连字符
 
-  if (!slug) slug = 'session'; // 纯中文/特殊字符 query 的兜底
+  // 中文为主的 query 删空后，剩下的英文/数字碎片往往是乱码
+  // （如"翻译22个2025视频字幕" → "222025"，或孤立的 "youtube"）。
+  // 判据：① CJK 字符占比高（query 主体是中文，剩余英文不足以表义），
+  //       或 ② 有效字符过少。命中则回退到 "分类英文名-短哈希"：
+  //       可读、唯一、且通过 validateSessionId。
+  const cjkCount = (query.match(/[一-鿿぀-ヿ가-힯]/g) || []).length;
+  const totalNonSpace = query.replace(/\s/g, '').length || 1;
+  const cjkRatio = cjkCount / totalNonSpace;
+  const alnum = slug.replace(/-/g, '');
+  if (alnum.length < 4 || cjkRatio >= 0.3) {
+    const prefix = QUERY_TYPE_SLUG[queryType] || 'q';
+    const hash = createHash('sha256')
+      .update(query + datePart)        // query + 毫秒时间戳，保证唯一
+      .digest('hex')
+      .slice(0, 6);
+    slug = `${prefix}-${hash}`;
+  }
 
   return datePart + '-' + slug;
 }
@@ -216,7 +247,7 @@ function autoIndexSession(sid) {
  */
 function cmdStart(query, queryType) {
   createSessionDir();
-  const sid = generateSessionId(query);
+  const sid = generateSessionId(query, queryType);
   const now = new Date().toISOString();
   const session = {
     session_id: sid,
