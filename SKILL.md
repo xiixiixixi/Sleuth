@@ -94,12 +94,32 @@ recall 命中后：
 
 不适合并行：重复搜索同一角度；主 Agent 还没弄清目标和来源拓扑；新探针只会复读已知结论。
 
-创建研究子 Agent：
+**派子 Agent 前自检（缺任一项不要派）：**
+
+```
+□ 合同含「开始前先读 subagent-guide.md」
+□ 合同含 must_verify 清单（具体到字段，不是泛泛"核实信息"）
+□ 合同含「禁止自建 session，所有 session-logger / deliver 调用带 --role subagent / --main-sid」
+□ 合同含「完成记 subagent_done 并上报 searches/fetches/browser/delivers 计数」
+□ 每个子 Agent 有独立 browser_session 名
+```
+
+子 Agent 纪律靠合同传达。漏抄会导致子 Agent 自建 session 切碎主流程、只搜不验把摘要当事实——脚本护栏（`--role` / `low_verification`）只是兜底，合同写全才是第一道防线。
+
+创建研究子 Agent（以下为完整合同模板，照抄即合规）：
 
 ```text
 你是独立研究子 Agent。
 
-开始前先读：${CLAUDE_SKILL_DIR}/references/subagent-guide.md
+【强制】开始前必须先读：${CLAUDE_SKILL_DIR}/references/subagent-guide.md
+
+【强制纪律】
+- 使用下方 SID，禁止自己 start / finish session（脚本会用 --role subagent 拦截）
+- 所有 session-logger 调用带 --role subagent；所有 deliver save 带 --main-sid "${SID}"
+- 完成时记 subagent_done，并上报检索计数：
+  {"type":"subagent_done","name":"<browser_session>","searches":N,"fetches":M,"browser":K,"delivers":D}
+- must_verify 列出的事实必须回到原始来源（WebFetch / 浏览器）验证，
+  不得用 WebSearch / web_search 摘要直接充当结论
 
 SID: ${SID}
 SLEUTH_OUTPUT: ${SLEUTH_OUTPUT}

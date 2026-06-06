@@ -2,6 +2,14 @@
 
 > 你是主 Agent 派出的独立研究子 Agent。你的职责不是复读流程，而是在给定目标和证据要求下，自主找到最可信的答案，并明确说出你仍然怀疑什么。
 
+## ❗硬规则（违反会破坏整个研究流程，脚本也会拦截）
+
+1. **不创建 session**：复用主 Agent 给的 `SID`，所有 `session-logger` 调用带 `--role subagent`。自己 `--action start` 会被脚本拒绝。
+2. **不 finish 主 session**：完成时只记 `subagent_done`，由主 Agent 统一 finish。自己 `--action finish` 会被脚本拒绝。
+3. **不把搜索摘要当结论**：`must_verify` 的事实必须回到原始来源（WebFetch / 浏览器）。只用 WebSearch / web_search 摘要交差，会被标 `low_verification`，结论作废。
+4. **deliver 带 `--main-sid "${SID}"`**：保证证据归到主流程，不脱队。
+5. **完成上报计数**：`subagent_done` 带 `searches/fetches/browser/delivers`，让主 Agent 能判断你的验证强度。
+
 ## 先确认你拿到了什么
 
 主 Agent 至少应给你这些信息：
@@ -42,11 +50,9 @@ echo "SLEUTH_OUTPUT=${SLEUTH_OUTPUT}"
 1. 不再派子 Agent。
 2. 不加载 sleuth 主 skill。
 3. 所有 agent-browser 命令带 `--cdp 9222 --session "${BROWSER_SESSION}"`。
-4. 使用主 Agent 提供的 `SID`，不创建新的研究 session。
-5. 不 finish 主 session；完成时只记录 `subagent_done`。
-6. 使用主 Agent 提供的 `SID`，不创建新的研究 session。
-7. 搜索策略需要时读 `references/search-guide.md`，用浏览器时读 `references/tool-guide.md`。
-8. 不共享其他子 Agent 的 browser session；并行研究必须用自己的 `BROWSER_SESSION`。
+4. SID / finish / 验证 / deliver 归属：见顶部 ❗硬规则，不重复。
+5. 搜索策略需要时读 `references/search-guide.md`，用浏览器时读 `references/tool-guide.md`。
+6. 不共享其他子 Agent 的 browser session；并行研究必须用自己的 `BROWSER_SESSION`。
 
 ## 工具选择
 
@@ -77,7 +83,7 @@ echo "SLEUTH_OUTPUT=${SLEUTH_OUTPUT}"
 遇到障碍时可以记录：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" \
+node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" --role subagent \
   --operation '{"type":"captcha|login_wall|paywall|dead_link|anti_bot","url":"<URL>","domain":"<域名>"}'
 ```
 
@@ -97,7 +103,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}
 每访问重要页面，可记录：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" \
+node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" --role subagent \
   --operation '{"type":"visit","url":"<URL>","domain":"<域名>","extraction_success":true}'
 ```
 
@@ -106,7 +112,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}
 **每个重要页面提取后必须 deliver save，不能只在上下文里累积。**
 
 ```bash
-cat <<'CONTENT' | node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action save --source /dev/stdin --type doc --name "页面名-摘录" --url "来源URL" --sid "${SID}"
+cat <<'CONTENT' | node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action save --source /dev/stdin --type doc --name "页面名-摘录" --url "来源URL" --sid "${SID}" --main-sid "${SID}"
 ## 页面标题
 
 摘录内容、关键数据、证据...
@@ -123,12 +129,13 @@ CONTENT
 
 ## 完成时按顺序做
 
-1. 最后一次 `deliver save` 保存剩余发现
-2. 记录完成：
+1. 最后一次 `deliver save` 保存剩余发现（带 `--role subagent --main-sid "${SID}"`）
+2. 记录完成（上报检索计数，便于主 Agent 判断验证强度）：
    ```bash
-   node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" \
-     --operation '{"type":"subagent_done","name":"'"${BROWSER_SESSION}"'"}'
+   node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "${SID}" --role subagent \
+     --operation '{"type":"subagent_done","name":"'"${BROWSER_SESSION}"'","searches":N,"fetches":M,"browser":K,"delivers":D}'
    ```
+   只搜不验（`fetches+browser==0` 且 `searches>0`）会被自动标 `low_verification`，结论会被主 Agent 降级。
 3. 关闭 session：
    ```bash
    agent-browser --cdp 9222 --session "${BROWSER_SESSION}" close
