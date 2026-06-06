@@ -262,6 +262,19 @@ function cmdLog(sid, operationJson) {
   // 自动补充时间戳
   op.timestamp = op.timestamp || new Date().toISOString();
 
+  // A4 低验证强度标记：子 Agent 完成时上报检索计数
+  // （searches/fetches/browser），若只用搜索（fetch+browser==0 且 search>0），
+  // 说明结论很可能停留在搜索摘要层、没有回到原始来源验证 —— 自动打标，
+  // 便于主 Agent 合成时识别并要求补验。不阻断，只留痕。
+  if (op.type === 'subagent_done') {
+    const searches = Number(op.searches) || 0;
+    const fetches = Number(op.fetches) || 0;
+    const browser = Number(op.browser) || 0;
+    if (searches > 0 && fetches + browser === 0) {
+      op.low_verification = true;
+    }
+  }
+
   withLock(lockPath, () => {
     const session = loadSession(sid);
     if (!session) return;

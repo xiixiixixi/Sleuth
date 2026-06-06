@@ -184,9 +184,9 @@ node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "$SI
 
 **流程：关闭 session → 读取所有子 Agent 输出 → 合成最终报告 → 交付。**
 
-1. 读取 `${SLEUTH_OUTPUT}` 下所有子 Agent 的 deliver save 文件。
+1. 读取子 Agent 的 deliver save 文件。**优先用 `deliver --action list --sid "$SID"` 按主 SID 汇总**，而不是只 `ls ${SLEUTH_OUTPUT}/docs`：子 Agent 若用了独立 session，证据会落到别处，全局 `registry.jsonl` 才能关联到它们。`deliver save` 出现"证据脱离主流程"告警时，必须回到 registry 补齐，不要漏掉这些文件。
 2. 合成为一份最终报告，不生成多个"final / merged / summary"版本。
-3. 报告建议区分：已验证事实、高置信推断、未确认线索、冲突信息、覆盖缺口。
+3. 报告建议区分：已验证事实、高置信推断、未确认线索、冲突信息、覆盖缺口。**子 Agent 的 `subagent_done` 带 `low_verification` 标记时，其结论只到搜索摘要层，必须降级为"未确认线索"或回原始来源补验后再用。**
 4. 每个核心结论内联来源 URL，不要只在末尾堆 sources 列表。图片分析结论附原始图片 URL，标注"视觉分析"。
 
 **输出按优先级：**

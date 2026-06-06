@@ -169,10 +169,20 @@ function registerDeliveryArtifact({ sid, filePath, type, name, source, url }) {
  *   5. 输出目标路径到 stdout
  *   6. 如果有 sid → 调用 session-logger.mjs 记录 type=deliver 操作
  */
-async function cmdSave(source, type, name, sid, url) {
+async function cmdSave(source, type, name, sid, url, mainSid) {
   if (!source) {
     console.error('Error: --source is required for action "save"');
     process.exit(2);
+  }
+
+  // A3 归属校验：子 Agent 传入主 SID 时，若与本次 deliver 的 --sid 不一致，
+  // 说明证据被写到了主流程之外的 session 目录，主 Agent 若只扫主 SLEUTH_OUTPUT
+  // 就会漏掉它。告警提示改用全局 registry 关联（见 SKILL.md 合成阶段）。不阻断。
+  if (mainSid && sid && mainSid !== sid) {
+    console.warn(
+      `Warning: deliver 的 --sid (${sid}) 与主 SID (${mainSid}) 不一致，` +
+        `该证据可能脱离主流程。主 Agent 合成时应扫全局 registry，而非单一 SLEUTH_OUTPUT。`
+    );
   }
 
   // 验证源文件存在
@@ -420,6 +430,7 @@ async function main() {
       source: { type: 'string' },  // save 时的源文件路径
       name:   { type: 'string' },  // save 时的目标文件名（可选）
       sid:    { type: 'string' },  // session ID
+      'main-sid': { type: 'string' }, // 主 Agent 的 SID（子 Agent 传入，用于归属校验）
       url:    { type: 'string' },  // save 时的来源 URL
       help:   { type: 'boolean', short: 'h' },
     },
@@ -427,10 +438,12 @@ async function main() {
 
   if (values.help) {
     console.log('Usage: node deliver.mjs --action <save|list|init|merge> [options]');
-    console.log('  --action save   --source <path> [--type <type>] [--name <name>] [--url <来源URL>] [--sid <id>]');
+    console.log('  --action save   --source <path> [--type <type>] [--name <name>] [--url <来源URL>] [--sid <id>] [--main-sid <主SID>]');
     console.log('  --action list   [--sid <id>]');
     console.log('  --action init   [--sid <id>]');
     console.log('  --action merge  --sid <id> [--name <filename>]');
+    console.log('');
+    console.log('  --main-sid <主SID>   子 Agent 传入主 SID；若与 --sid 不一致则告警（证据可能脱离主流程）');
     console.log('');
     console.log('Content types: ' + Object.keys(TYPE_SUBDIR_MAP).join(', '));
     return;
@@ -443,7 +456,7 @@ async function main() {
 
   switch (values.action) {
     case 'save':
-      await cmdSave(values.source, values.type, values.name, values.sid, values.url);
+      await cmdSave(values.source, values.type, values.name, values.sid, values.url, values['main-sid']);
       break;
     case 'list':
       cmdList(values.sid);
