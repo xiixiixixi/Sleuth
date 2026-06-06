@@ -30,17 +30,42 @@ OUTDIR="${2:-$HOME/.sleuth/output/transcripts}"
 
 mkdir -p "$OUTDIR"
 
+# ── 字幕文件识别（避免批量串台）────────────────────────────────
+# 旧实现用 `find "$OUTDIR" -name "*.srt" | head -1`，会捞到同目录下
+# 之前别的视频下载的字幕，导致批量处理时误判"成功"并返回错误文件。
+# 改为：每个策略下载前对目录做快照，下载后只认本次新增的字幕文件。
+SNAPSHOT_FILE="$(mktemp)"
+trap 'rm -f "$SNAPSHOT_FILE"' EXIT
+
+snapshot_subs() {
+    find "$OUTDIR" -maxdepth 1 \( -name "*.srt" -o -name "*.vtt" \) 2>/dev/null | sort > "$SNAPSHOT_FILE"
+}
+
+# 输出本次新增的字幕文件（与快照对比），按修改时间取最新一个
+newest_new_sub() {
+    local current
+    current="$(find "$OUTDIR" -maxdepth 1 \( -name "*.srt" -o -name "*.vtt" \) 2>/dev/null | sort)"
+    # 局部关闭 pipefail：head -1 会提前关闭管道，使上游 sort 收到 SIGPIPE 返回非零，
+    # 在 set -o pipefail 下会被误判为失败。这里的非零是预期行为，单独隔离。
+    set +o pipefail
+    comm -13 "$SNAPSHOT_FILE" <(echo "$current") \
+        | while IFS= read -r f; do [[ -n "$f" ]] && printf '%s\t%s\n' "$(stat -f '%m' "$f" 2>/dev/null || echo 0)" "$f"; done \
+        | sort -rn | head -1 | cut -f2-
+    set -o pipefail
+}
+
 echo ">>> 尝试提取字幕: $URL"
 echo ""
 
 # ─── 策略 1：yt-dlp 人工中文字幕 ─────────────────────────────────
 echo "  策略 1: 提取内嵌人工字幕（中文优先）..."
+snapshot_subs
 if yt-dlp --write-subs --sub-langs "zh-Hans,zh-Hant,zh,zh-CN,zh-TW" \
     --sub-format srt/vtt --skip-download \
     -o "${OUTDIR}/%(title)s.%(ext)s" \
     --no-playlist "$URL" 2>/dev/null; then
-    # 查找刚生成的字幕文件
-    FOUND=$(find "$OUTDIR" -name "*.srt" -o -name "*.vtt" 2>/dev/null | head -1)
+    # 只认本次新增的字幕文件，避免捞到同目录里别的视频的字幕
+    FOUND="$(newest_new_sub)"
     if [[ -n "$FOUND" ]]; then
         echo "  ✅ 找到人工中文字幕: $FOUND"
         echo "$FOUND"
@@ -51,11 +76,12 @@ echo "  无人工中文字幕"
 
 # ─── 策略 2：yt-dlp 英文字幕 ─────────────────────────────────────
 echo "  策略 2: 提取英文人工字幕..."
+snapshot_subs
 if yt-dlp --write-subs --sub-langs "en,en-US,en-GB" \
     --sub-format srt/vtt --skip-download \
     -o "${OUTDIR}/%(title)s.%(ext)s" \
     --no-playlist "$URL" 2>/dev/null; then
-    FOUND=$(find "$OUTDIR" -name "*.srt" -o -name "*.vtt" 2>/dev/null | head -1)
+    FOUND="$(newest_new_sub)"
     if [[ -n "$FOUND" ]]; then
         echo "  ✅ 找到英文字幕: $FOUND"
         echo "$FOUND"
@@ -67,11 +93,12 @@ echo "  无英文人工字幕"
 # ─── 策略 3：yt-dlp 自动生成字幕 ──────────────────────────────────
 # 自动生成字幕准确度较低，但聊胜于无
 echo "  策略 3: 提取自动生成字幕..."
+snapshot_subs
 if yt-dlp --write-auto-subs --sub-langs "zh-Hans,zh,en" \
     --sub-format srt/vtt --skip-download \
     -o "${OUTDIR}/%(title)s.%(ext)s" \
     --no-playlist "$URL" 2>/dev/null; then
-    FOUND=$(find "$OUTDIR" -name "*.srt" -o -name "*.vtt" 2>/dev/null | head -1)
+    FOUND="$(newest_new_sub)"
     if [[ -n "$FOUND" ]]; then
         echo "  ✅ 找到自动生成字幕: $FOUND"
         echo "$FOUND"
