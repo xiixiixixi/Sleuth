@@ -40,7 +40,7 @@ Sleuth 根据任务复杂度分四个层级：
 |------|------|
 | **Node.js >= 18** | 运行辅助脚本 |
 | **agent-browser** | 浏览器操作 CLI，`npm i -g agent-browser && agent-browser install` |
-| **Chrome** | 使用你日常的 Chrome，带登录态 |
+| **Chrome** | 驱动一个独立的持久浏览器 profile（与日常 Chrome 隔离；需登录的站点用 `--ensure-login` 登一次即可） |
 
 可选：**sqlite3**（Chrome 历史搜索）、**yt-dlp**（YouTube 字幕）。
 
@@ -67,7 +67,11 @@ npx skills update sleuth
 
 ### Chrome 连接
 
-首次使用时 sleuth 会自动检测并连接 Chrome。它会复制你的 Chrome profile 到独立目录，开启远程调试端口——登录态完整保留，不影响你日常使用。
+Sleuth **不会复制你的日常 Chrome profile**。它维护一个**独立的持久浏览器 profile**（`~/.sleuth/cdp-profile`），并以远程调试端口启动一个 Chrome，让 agent-browser 通过 `--cdp <port>` 连上去。
+
+- 这个 profile 与你日常用的 Chrome 完全隔离，互不影响。
+- 需要登录态的站点：跑一次 `node scripts/check-deps.mjs --ensure-login <url>`，在弹出的窗口登录一次，cookie 会**长期保存在该 profile**，之后所有研究会话共享，无需重复登录。
+- 它不是每次复制、也不是一次性快照，而是**建一次、持续复用、自我累积**的真实 profile。
 
 ## 安全
 

@@ -49,7 +49,7 @@ echo "SLEUTH_OUTPUT=${SLEUTH_OUTPUT}"
 
 1. 不再派子 Agent。
 2. 不加载 sleuth 主 skill。
-3. 所有 agent-browser 命令带 `--cdp 9222 --session "${BROWSER_SESSION}"`。
+3. 所有 agent-browser 命令带 `--cdp 9222 --session "${BROWSER_SESSION}"`（该端口背后是 sleuth 的持久登录 profile，公开页和登录态都走它；不要用 `--profile`，它与 `--cdp` 互斥，且并行 session 无法共享同一 profile 目录）。
 4. SID / finish / 验证 / deliver 归属：见顶部 ❗硬规则，不重复。
 5. 搜索策略需要时读 `references/search-guide.md`，用浏览器时读 `references/tool-guide.md`。
 6. 不共享其他子 Agent 的 browser session；并行研究必须用自己的 `BROWSER_SESSION`。

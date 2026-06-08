@@ -14,7 +14,7 @@ agent-browser --cdp 9222 --session ${SID}-main open https://example.com
 agent-browser open https://example.com
 ```
 
-> 以下所有命令省略 `--cdp 9222 --session ${SID}-main` 前缀，实际调用时必须带上。
+> 以下所有命令省略 `--cdp 9222 --session ${SID}-main` 前缀，实际调用时必须带上。该 `--cdp` 端口背后是 sleuth 维护的**单一持久登录 profile**（登录一次长期复用）；需要登录态先跑 `check-deps.mjs --ensure-login <url>`。不要用 `--profile`（与 `--cdp` 互斥）。
 
 ## 核心姿势
 

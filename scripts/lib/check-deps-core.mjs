@@ -418,8 +418,38 @@ async function openLoginUrl(port, loginUrl) {
   }
 }
 
+async function handleEnsureLogin(url) {
+  const cdp = await ensureCDP(); // 用 CDP_PROFILE_DIR 启动/复用持久 managed Chrome
+  if (!cdp.cdp_port) {
+    console.error('ensure-login: 无法启动 managed 浏览器（未找到 Chrome 或 CDP 启动超时）');
+    process.exitCode = 1;
+    return;
+  }
+  await openLoginUrl(cdp.cdp_port, url);
+  console.log('');
+  console.log(`Sleuth 已在持久 profile 中打开登录页：${url}`);
+  console.log(`Profile: ${CDP_PROFILE_DIR}（登录一次，长期复用，不影响你日常的 Chrome）`);
+  console.log('请在弹出的 Chrome 窗口完成登录，然后按 Enter 继续…');
+  await new Promise((resolve) => {
+    process.stdin.once('data', () => resolve());
+    process.stdin.resume();
+  });
+  process.stdin.pause();
+  console.log(`已确认。登录态保存在持久 profile，后续 --cdp ${cdp.cdp_port} 的会话可直接复用。`);
+}
+
 async function main(options = {}) {
   const results = {};
+
+  if (options.profileDirOnly) {
+    console.log(CDP_PROFILE_DIR);
+    return results;
+  }
+
+  if (options.ensureLogin) {
+    await handleEnsureLogin(options.ensureLogin);
+    return results;
+  }
 
   if (options.outputDirOnly) {
     const outDir = resolveOutputDir(options.sid);

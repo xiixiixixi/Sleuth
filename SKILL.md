@@ -26,8 +26,8 @@ SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --output-dir -
 | 层级 | 适用场景 | 常见做法 |
 |------|----------|----------|
 | **直答** | 已有知识足够，且无明显时效风险 | 直接回复，session 只做记录 |
-| **快速验证** | 一两个高质量来源就能确认 | 搜索 + 验证 |
-| **定向研究** | 需要多步查证，但问题仍集中 | 混合工具，按需升级 |
+| **快速验证** | 一两个高质量来源就能确认 | 搜索发现入口 + 对**一手来源**做一次 fetch 确认（不能停在 snippet） |
+| **定向研究** | 需要多步查证，但问题仍集中 | 混合工具；`must_verify` 的事实必须回 WebFetch / 浏览器，不靠搜索摘要 |
 | **深度研究** | 多源交叉、冲突、用户需要完整交付物 | 子 Agent + 完整报告 |
 
 ## 工具选择
@@ -106,80 +106,46 @@ recall 命中后：
 
 子 Agent 纪律靠合同传达。漏抄会导致子 Agent 自建 session 切碎主流程、只搜不验把摘要当事实——脚本护栏（`--role` / `low_verification`）只是兜底，合同写全才是第一道防线。
 
-创建研究子 Agent（以下为完整合同模板，照抄即合规）：
+创建研究子 Agent（合同由脚本生成，不再手抄；把下面命令的整段输出贴进子 Agent prompt）：
 
-```text
-你是独立研究子 Agent。
-
-【强制】开始前必须先读：${CLAUDE_SKILL_DIR}/references/subagent-guide.md
-
-【强制纪律】
-- 使用下方 SID，禁止自己 start / finish session（脚本会用 --role subagent 拦截）
-- 所有 session-logger 调用带 --role subagent；所有 deliver save 带 --main-sid "${SID}"
-- 完成时记 subagent_done，并上报检索计数：
-  {"type":"subagent_done","name":"<browser_session>","searches":N,"fetches":M,"browser":K,"delivers":D}
-- must_verify 列出的事实必须回到原始来源（WebFetch / 浏览器）验证，
-  不得用 WebSearch / web_search 摘要直接充当结论
-
-SID: ${SID}
-SLEUTH_OUTPUT: ${SLEUTH_OUTPUT}
-browser_session: ${SID}-pricing
-
-goal: 验证该产品当前公开定价与计费单位。
-enough_when: 找到官方 pricing / help / docs 中能直接支持价格结论的页面，或明确写出公开价格不存在。
-must_verify:
-- 价格数字
-- 计费单位
-- 是否需要 sales contact
-known_clues:
-- 域名: example.com
-- 可能入口: pricing / docs / help center
-- 已知疑点: 搜索结果里有旧价格
-
-返回：findings、sources、gaps、red_flags、trust_notes。
+```bash
+node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
+  --sid "$SID" \
+  --browser-session "${SID}-pricing" \
+  --goal "验证该产品当前公开定价与计费单位" \
+  --enough-when "找到官方 pricing / help / docs 中能直接支持价格结论的页面，或明确写出公开价格不存在" \
+  --must-verify "价格数字" \
+  --must-verify "计费单位" \
+  --must-verify "是否需要 sales contact" \
+  --known-clue "域名: example.com" \
+  --known-clue "可能入口: pricing / docs / help center" \
+  --known-clue "已知疑点: 搜索结果里有旧价格"
 ```
 
-### 独立审查
+> 合同由脚本生成，主 Agent 不会再漏抄纪律条款。每个并行子 Agent 仍要用独立 `browser_session` 名。
 
-不是每个任务都需要。适合：结论影响决策且来源多冲突多；报告范围大主 Agent 有沉没成本；关键数字容易过时或被营销话术污染。轻量验证主 Agent 自检即可。
+### 独立审查（深度研究强制）
 
-决定做审查时，派审查子 Agent：
+**派了 ≥2 个研究子 Agent 的深度研究，盖 `success` 前必须先过一次独立审查。** 这不是可选项：`session-logger --action finish --outcome success` 会检查本 session 有没有 `review_done`，没有就硬拒（`--force` 也绕不过），只能补审查或如实标 `partial`。简单任务（<2 子 Agent）不受此约束。
 
-```text
-你是独立审查子 Agent。
+审查合同由脚本生成（把整段输出贴进审查子 Agent prompt）：
 
-开始前先读：${CLAUDE_SKILL_DIR}/references/subagent-guide.md
-
-SID: ${SID}
-SLEUTH_OUTPUT: ${SLEUTH_OUTPUT}
-
-goal: 审查已有研究结论是否足够可信，是否有未暴露的关键缺口。
-enough_when: 完成对所有核心结论的质疑，给出 is_enough 判断。
-审查对象: ${SLEUTH_OUTPUT} 下的交付文件
-
-审查重点：
-- 目标覆盖：用户的问题答了没有
-- 来源强度：核心结论是否过度依赖单一来源、低级来源或营销页
-- 一手验证：价格、版本、融资等关键事实是否回到了原始来源
-- 冲突处理：冲突是明确写出了，还是被强行抹平
-- 时效性：旧数据有没有冒充新结论
-- 视角覆盖：是否只有官方视角
-
-返回：
-  is_enough: true / false
-  coverage: 已答问题 / 未答问题
-  weak_claims: 证据脆弱或单一来源的结论
-  missing_perspectives: 缺失的来源类型或立场
-  red_flags: critical / warning 级风险
-  conflicts: 未解释清楚的冲突
-  next_actions: 需要补的动作（只列关键的）
+```bash
+node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" --review --sid "$SID"
 ```
 
-审查返回 `is_enough=false` 时，主 Agent 根据 next_actions 委派新的研究子 Agent 补查（用正常研究合同）。缺口不可得时在最终报告里披露。
+审查子 Agent 读 `${SLEUTH_OUTPUT}` 下所有交付文件，质疑核心结论，完成时记 `review_done`：
+
+```bash
+node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "$SID" --role subagent \
+  --operation '{"type":"review_done","is_enough":true}'
+```
+
+审查返回 `is_enough=false` 时，主 Agent 根据 `next_actions` 委派新的研究子 Agent 补查（用正常研究合同），补完再审一次。缺口确实不可得时，在最终报告里披露，并用 `--outcome partial` 收尾。
 
 ### 浏览器
 
-所有命令带 `--cdp 9222 --session <name>`，主 Agent 用 `${SID}-main`，子 Agent 用各自独立 session。
+所有命令带 `--cdp 9222 --session <name>`，主 Agent 用 `${SID}-main`，子 Agent 用各自独立 session。该 `--cdp` 端口背后是 sleuth 维护的**单一持久 profile**（登录一次长期复用，与你日常 Chrome 隔离）。需要登录态的站点先跑一次 `node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --ensure-login "<登录页URL>"`，之后所有会话共享该登录态。不要用 agent-browser 的 `--profile`（与 `--cdp` 互斥，且并行 session 无法共享同一 profile 目录）。
 
 并行原则：不同域名/子问题可以并行开独立 session；同一账号后台或会产生状态变更的流程不并行。
 
@@ -197,6 +163,8 @@ agent-browser session list
 agent-browser close --all    # 安全操作，不影响用户手动打开的 Chrome
 
 # 结束 session 日志
+# 注意：若有子 Agent 被标 low_verification 且未补验，--outcome success 会被硬拒（exit 3，--force 也绕不过）。
+# 只能二选一：① 回原始来源补验后再标 success；② 或如实用 --outcome partial。
 node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "$SID" --outcome success|partial|fail
 ```
 

@@ -18,6 +18,8 @@ const HELP = `用法: node check-deps.mjs [选项]
   --domain <domain>         限制 real-browser 操作范围到指定域名
   --cdp-port <port>         显式指定 real-browser 使用的 CDP 端口
   --output-dir              仅输出目录路径
+  --profile-dir             仅输出持久 profile 目录路径
+  --ensure-login <url>      在持久 profile 中打开登录页，引导一次性登录
   --json                    输出机器可读 JSON
   --sid <id>                指定 session ID
   --help, -h                显示此帮助`;
@@ -25,9 +27,10 @@ const HELP = `用法: node check-deps.mjs [选项]
 const KNOWN_FLAGS = new Set([
   '--output-dir', '--check-only', '--ensure-cdp', '--login-url', '--auth-required',
   '--real-browser', '--domain', '--cdp-port', '--json', '--sid', '--help', '-h',
+  '--profile-dir', '--ensure-login',
 ]);
 
-const VALUE_FLAGS = new Set(['--login-url', '--sid', '--auth-required', '--domain', '--cdp-port']);
+const VALUE_FLAGS = new Set(['--login-url', '--sid', '--auth-required', '--domain', '--cdp-port', '--ensure-login']);
 
 function parseArgv(argv) {
   const values = {};
@@ -85,6 +88,8 @@ if (unknown.length > 0) {
 
 const options = {
   outputDirOnly: booleans.has('outputDir'),
+  profileDirOnly: booleans.has('profileDir'),
+  ensureLogin: typeof values.ensureLogin === 'string' ? values.ensureLogin : undefined,
   checkOnly: booleans.has('checkOnly'),
   ensureCdp: booleans.has('ensureCdp'),
   loginUrl: typeof values.loginUrl === 'string' ? values.loginUrl : undefined,

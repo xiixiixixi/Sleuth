@@ -330,14 +330,16 @@ function cmdFinish(sid, outcome, force) {
   }
 
   const lockPath = sessionPath(sid) + '.lock';
+  let blocked = false;
   withLock(lockPath, () => {
     const session = loadSession(sid);
     if (!session) return;
 
-    // 完整性检查：有 deliver 却没有任何 subagent_done，
+    const ops = session.operations || [];
+
+    // 完整性检查（软告警）：有 deliver 却没有任何 subagent_done，
     // 说明主 session 很可能在子 Agent 完成前就被 finish（早产的 success）。
     // 不阻断（并非所有 session 都用子 Agent），但显著告警并留痕，便于事后审计。
-    const ops = session.operations || [];
     const deliverCount = ops.filter((o) => o.type === 'deliver').length;
     const doneCount = ops.filter((o) => o.type === 'subagent_done').length;
     if (!force && deliverCount > 0 && doneCount === 0) {
@@ -349,10 +351,48 @@ function cmdFinish(sid, outcome, force) {
       session.finish_warning = true;
     }
 
+    // 终点硬卡（不可绕过）：success 不能盖在"只搜未验"(low_verification)的子 Agent 之上。
+    // 这是 sleuth 最想拦截的失败模式——把搜索摘要当一手事实交付。
+    // 不接受 --force、不接受任何 override：要么补验，要么用 --outcome partial 如实收尾。
+    const lowVerifSubs = ops.filter(
+      (o) => o.type === 'subagent_done' && o.low_verification === true
+    );
+    if (outcome === 'success' && lowVerifSubs.length > 0) {
+      const names = lowVerifSubs.map((o) => o.name || '(unnamed)').join(', ');
+      console.error(
+        `Error: 无法盖 success。以下子 Agent 只搜未验(low_verification): ${names}。\n` +
+          `       sleuth 不允许把未验证结论标为成功。请二选一：\n` +
+          `       1) 回到原始来源(WebFetch / 浏览器)补验后再 finish --outcome success；\n` +
+          `       2) 如确实无法核实，用 --outcome partial 如实收尾（并在报告标注未一手核实的结论）。`
+      );
+      blocked = true;
+      return;
+    }
+
+    // 深度研究强制审查（≥2 个研究子 Agent）：盖 success 前必须有一次独立审查(review_done)。
+    // 与 low_verification 同为硬卡，--force 不可绕过。简单任务(<2 子 Agent)不受影响。
+    const REVIEW_REQUIRED_THRESHOLD = 2;
+    const researchSubCount = ops.filter((o) => o.type === 'subagent_done').length;
+    const hasReview = ops.some((o) => o.type === 'review_done');
+    if (outcome === 'success' && researchSubCount >= REVIEW_REQUIRED_THRESHOLD && !hasReview) {
+      console.error(
+        `Error: 无法盖 success。本次为深度研究(${researchSubCount} 个研究子 Agent)，盖 success 前必须先派一次独立审查子 Agent。\n` +
+          `       生成审查合同：spawn-subagent.mjs --review --sid "${sid}"；审查完成记 {"type":"review_done","is_enough":true}。\n` +
+          `       审查 is_enough=false 时先按 next_actions 补查；或如实用 --outcome partial 收尾。`
+      );
+      blocked = true;
+      return;
+    }
+
     session.finished = new Date().toISOString();
     session.outcome = outcome;
     saveSession(sid, session);
   });
+
+  if (blocked) {
+    process.exitCode = 3;
+    return;
+  }
 
   autoIndexSession(sid);
 }
