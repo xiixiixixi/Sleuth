@@ -47,6 +47,8 @@ const LOW = { type: 'subagent_done', name: 'kling', searches: 22, fetches: 0, br
 const OK = { type: 'subagent_done', name: 'runway', searches: 18, fetches: 8, browser: 6 };
 const OK2 = { type: 'subagent_done', name: 'pika', searches: 10, fetches: 5, browser: 3 };
 const REVIEW = { type: 'review_done', is_enough: true };
+const DELIVER = { type: 'deliver', content_type: 'doc', file: '/tmp/report.md' };
+const VISIT = { type: 'visit', url: 'https://example.com/pricing', domain: 'example.com' };
 
 test('blocks success when an unverified (low_verification) subagent exists', () => {
   seed([LOW]);
@@ -110,4 +112,43 @@ test('single-subagent success does not require a review', () => {
   finish('success');
   const s = JSON.parse(readFileSync(FILE, 'utf8'));
   assert.strictEqual(s.outcome, 'success');
+});
+
+test('floor gate: delivered report with zero verification trace blocks success', () => {
+  seed([DELIVER]); // 交付了报告，但 0 visit、0 verified subagent
+  let threw = false;
+  try { finish('success'); } catch (e) { threw = true; assert.match(String(e.stderr), /一手核验/); }
+  assert.ok(threw, 'success should be blocked when no verification was logged');
+  const s = JSON.parse(readFileSync(FILE, 'utf8'));
+  assert.strictEqual(s.outcome, null);
+});
+
+test('floor gate: --force does NOT bypass the floor', () => {
+  seed([DELIVER]);
+  let threw = false;
+  try { finish('success', ['--force']); } catch (e) { threw = true; }
+  assert.ok(threw, '--force must not bypass the verification floor');
+  const s = JSON.parse(readFileSync(FILE, 'utf8'));
+  assert.strictEqual(s.outcome, null);
+});
+
+test('floor gate: a single logged visit satisfies the floor', () => {
+  seed([DELIVER, VISIT]);
+  finish('success');
+  const s = JSON.parse(readFileSync(FILE, 'utf8'));
+  assert.strictEqual(s.outcome, 'success');
+});
+
+test('floor gate: a verified subagent satisfies the floor', () => {
+  seed([DELIVER, OK]); // OK 带 fetches/browser>0；单个 subagent，不触发审查门
+  finish('success');
+  const s = JSON.parse(readFileSync(FILE, 'utf8'));
+  assert.strictEqual(s.outcome, 'success');
+});
+
+test('floor gate: partial is always allowed even with zero trace', () => {
+  seed([DELIVER]);
+  finish('partial');
+  const s = JSON.parse(readFileSync(FILE, 'utf8'));
+  assert.strictEqual(s.outcome, 'partial');
 });

@@ -384,6 +384,29 @@ function cmdFinish(sid, outcome, force) {
       return;
     }
 
+    // 地板硬卡：交付了报告却零核验痕迹 → 不许 success。
+    // 核验痕迹 = 至少一条 visit，或一个带 fetch/browser 的 subagent_done。
+    // 目的：让 success 至少意味着"有过可追溯的一手核验"。不可 --force 绕过。
+    // 局限：可被一条 token visit 糊弄；它抬高地板，不保证完整审计。
+    const hasDeliver = ops.some((o) => o.type === 'deliver');
+    const visitCount = ops.filter((o) => o.type === 'visit').length;
+    const verifiedSubCount = ops.filter(
+      (o) => o.type === 'subagent_done' && ((o.fetches || 0) + (o.browser || 0)) > 0
+    ).length;
+    if (outcome === 'success' && hasDeliver && visitCount === 0 && verifiedSubCount === 0) {
+      console.error(
+        `Error: 无法盖 success。本 session 交付了报告，但没有任何已记录的一手核验痕迹` +
+          `（0 个 visit、0 个带 fetch/browser 的 subagent_done）。\n` +
+          `       success 必须建立在可追溯的核验之上。请二选一：\n` +
+          `       1) 对一手来源的每次抓取记一条 visit：\n` +
+          `          session-logger --action log --sid "$SID" --operation '{"type":"visit","url":"<URL>","domain":"<域名>","extraction_success":true}'\n` +
+          `          （或改用带核验计数的子 Agent），再 finish --outcome success；\n` +
+          `       2) 如确实没有可追溯核验，用 --outcome partial 如实收尾。`
+      );
+      blocked = true;
+      return;
+    }
+
     session.finished = new Date().toISOString();
     session.outcome = outcome;
     saveSession(sid, session);

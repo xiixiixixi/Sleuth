@@ -40,6 +40,7 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -169,7 +170,27 @@ function registerDeliveryArtifact({ sid, filePath, type, name, source, url }) {
  *   5. 输出目标路径到 stdout
  *   6. 如果有 sid → 调用 session-logger.mjs 记录 type=deliver 操作
  */
-async function cmdSave(source, type, name, sid, url, mainSid) {
+async function cmdSave(source, type, name, sid, url, mainSid, download) {
+  // --download：从 --url 拉取（图片）到临时文件，再走正常 save 流程。
+  if (download && url && !source) {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(30000) });
+      if (!resp.ok) {
+        console.error(`Error: download failed (HTTP ${resp.status}): ${url}`);
+        process.exit(1);
+      }
+      const buf = Buffer.from(await resp.arrayBuffer());
+      const m = url.match(/\.(png|jpe?g|webp|gif|svg)(?:[?#]|$)/i);
+      const ext = m ? `.${m[1].toLowerCase()}` : '.png';
+      const tmp = path.join(os.tmpdir(), `sleuth-img-${Date.now()}${ext}`);
+      writeFileSync(tmp, buf);
+      source = tmp;
+    } catch (err) {
+      console.error(`Error: download failed: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
   if (!source) {
     console.error('Error: --source is required for action "save"');
     process.exit(2);
@@ -432,13 +453,14 @@ async function main() {
       sid:    { type: 'string' },  // session ID
       'main-sid': { type: 'string' }, // 主 Agent 的 SID（子 Agent 传入，用于归属校验）
       url:    { type: 'string' },  // save 时的来源 URL
+      download: { type: 'boolean' }, // --download：从 --url 下载（图片）后再保存
       help:   { type: 'boolean', short: 'h' },
     },
   });
 
   if (values.help) {
     console.log('Usage: node deliver.mjs --action <save|list|init|merge> [options]');
-    console.log('  --action save   --source <path> [--type <type>] [--name <name>] [--url <来源URL>] [--sid <id>] [--main-sid <主SID>]');
+    console.log('  --action save   --source <path> | --download --url <imgURL>  [--type <type>] [--name <name>] [--url <来源URL>] [--sid <id>] [--main-sid <主SID>]');
     console.log('  --action list   [--sid <id>]');
     console.log('  --action init   [--sid <id>]');
     console.log('  --action merge  --sid <id> [--name <filename>]');
@@ -456,7 +478,7 @@ async function main() {
 
   switch (values.action) {
     case 'save':
-      await cmdSave(values.source, values.type, values.name, values.sid, values.url, values['main-sid']);
+      await cmdSave(values.source, values.type, values.name, values.sid, values.url, values['main-sid'], values.download);
       break;
     case 'list':
       cmdList(values.sid);
