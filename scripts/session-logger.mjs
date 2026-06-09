@@ -384,6 +384,20 @@ function cmdFinish(sid, outcome, force) {
       return;
     }
 
+    // 结论硬卡：审查跑了但判定 is_enough=false → 不许 success（取最新一次审查为准）。
+    // 把"审查存在即过"升级成"审查得过关"，堵死"记一条 review_done 交差、无视其否定结论"。
+    const reviewDoneOps = ops.filter((o) => o.type === 'review_done');
+    const latestReview = reviewDoneOps[reviewDoneOps.length - 1];
+    if (outcome === 'success' && latestReview && latestReview.is_enough === false) {
+      console.error(
+        `Error: 无法盖 success。最近一次独立审查 is_enough=false（审查认为结论尚不足够可信）。\n` +
+          `       请按审查的 next_actions 补查，补完重新派审查直到 is_enough=true 再 finish success；\n` +
+          `       或如实用 --outcome partial 收尾，并在报告披露未解决的缺口。`
+      );
+      blocked = true;
+      return;
+    }
+
     // 地板硬卡：交付了报告却零核验痕迹 → 不许 success。
     // 核验痕迹 = 至少一条 visit，或一个带 fetch/browser 的 subagent_done。
     // 目的：让 success 至少意味着"有过可追溯的一手核验"。不可 --force 绕过。

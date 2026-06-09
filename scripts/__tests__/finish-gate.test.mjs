@@ -49,6 +49,7 @@ const OK2 = { type: 'subagent_done', name: 'pika', searches: 10, fetches: 5, bro
 const REVIEW = { type: 'review_done', is_enough: true };
 const DELIVER = { type: 'deliver', content_type: 'doc', file: '/tmp/report.md' };
 const VISIT = { type: 'visit', url: 'https://example.com/pricing', domain: 'example.com' };
+const REVIEW_FAIL = { type: 'review_done', is_enough: false };
 
 test('blocks success when an unverified (low_verification) subagent exists', () => {
   seed([LOW]);
@@ -151,4 +152,36 @@ test('floor gate: partial is always allowed even with zero trace', () => {
   finish('partial');
   const s = JSON.parse(readFileSync(FILE, 'utf8'));
   assert.strictEqual(s.outcome, 'partial');
+});
+
+test('review-verdict gate: a review with is_enough=false blocks success', () => {
+  seed([OK, OK2, REVIEW_FAIL]); // 深度研究，审查跑了但判定不够
+  let threw = false;
+  try { finish('success'); } catch (e) { threw = true; assert.match(String(e.stderr), /is_enough=false/); }
+  assert.ok(threw, 'a failing review must block success');
+  const s = JSON.parse(readFileSync(FILE, 'utf8'));
+  assert.strictEqual(s.outcome, null);
+});
+
+test('review-verdict gate: --force does NOT bypass is_enough=false', () => {
+  seed([OK, OK2, REVIEW_FAIL]);
+  let threw = false;
+  try { finish('success', ['--force']); } catch (e) { threw = true; }
+  assert.ok(threw, '--force must not bypass a failing review');
+  const s = JSON.parse(readFileSync(FILE, 'utf8'));
+  assert.strictEqual(s.outcome, null);
+});
+
+test('review-verdict gate: is_enough=false still allows partial', () => {
+  seed([OK, OK2, REVIEW_FAIL]);
+  finish('partial');
+  const s = JSON.parse(readFileSync(FILE, 'utf8'));
+  assert.strictEqual(s.outcome, 'partial');
+});
+
+test('review-verdict gate: a later passing re-review unblocks success', () => {
+  seed([OK, OK2, REVIEW_FAIL, REVIEW]); // 先 false，补查后重审为 true → 以最新为准
+  finish('success');
+  const s = JSON.parse(readFileSync(FILE, 'utf8'));
+  assert.strictEqual(s.outcome, 'success');
 });

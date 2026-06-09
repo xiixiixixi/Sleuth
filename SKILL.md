@@ -141,7 +141,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "$SID" 
   --operation '{"type":"review_done","is_enough":true}'
 ```
 
-审查返回 `is_enough=false` 时，主 Agent 根据 `next_actions` 委派新的研究子 Agent 补查（用正常研究合同），补完再审一次。缺口确实不可得时，在最终报告里披露，并用 `--outcome partial` 收尾。
+**这条是硬卡**：审查返回 `is_enough=false` 时，`finish --outcome success` 会被直接拒绝（`--force` 也绕不过）。主 Agent 必须按 `next_actions` 补查后重新派审查到 `is_enough=true` 再标 success，或如实 `--outcome partial` 收尾并在报告披露未解决的缺口。**不要为了过闸把 review_done 当勾选项——闸门看的是 is_enough，不是有没有记。**
 
 ### 浏览器
 
