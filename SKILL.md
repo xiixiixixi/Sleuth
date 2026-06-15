@@ -165,6 +165,8 @@ agent-browser close --all    # 安全操作，不影响用户手动打开的 Chr
 # 结束 session 日志
 # 注意：若有子 Agent 被标 low_verification 且未补验，--outcome success 会被硬拒（exit 3，--force 也绕不过）。
 # 只能二选一：① 回原始来源补验后再标 success；② 或如实用 --outcome partial。
+# partial 收尾时若交付了报告却零一手核验，会告警并在 session 打 unverified_delivery 标记——
+# 必须在交付物里如实披露"结论基于搜索摘要、未一手核验"及覆盖缺口，不要当完整结论交付。
 node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "$SID" --outcome success|partial|fail
 ```
 
@@ -172,7 +174,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "$SI
 
 **流程：关闭 session → 读取所有子 Agent 输出 → 合成最终报告 → 交付。**
 
-1. 读取子 Agent 的 deliver save 文件。**优先用 `deliver --action list --sid "$SID"` 按主 SID 汇总**，而不是只 `ls ${SLEUTH_OUTPUT}/docs`：子 Agent 若用了独立 session，证据会落到别处，全局 `registry.jsonl` 才能关联到它们。`deliver save` 出现"证据脱离主流程"告警时，必须回到 registry 补齐，不要漏掉这些文件。
+1. 读取子 Agent 的 deliver save 文件。**优先用 `deliver --action list --sid "$SID"` 按主 SID 汇总**，而不是只 `ls ${SLEUTH_OUTPUT}/docs`：子 Agent 若用了独立 session，证据会落到别处，全局 `registry.jsonl` 才能关联到它们。`deliver save` 出现"证据脱离主流程"告警时，必须回到 registry 补齐，不要漏掉这些文件。**另：`deliver save` 交付 doc 报告时，若本 session 尚无任何一手核验记录（visit / 带 fetch 的子 Agent），会告警——别停在 WebSearch 摘要层，先回 WebFetch/浏览器核验承重结论再交付。**
 2. 合成为一份最终报告，不生成多个"final / merged / summary"版本。
 3. 报告建议区分：已验证事实、高置信推断、未确认线索、冲突信息、覆盖缺口。**子 Agent 的 `subagent_done` 带 `low_verification` 标记时，其结论只到搜索摘要层，必须降级为"未确认线索"或回原始来源补验后再用。**
 4. 每个核心结论内联来源 URL，不要只在末尾堆 sources 列表。

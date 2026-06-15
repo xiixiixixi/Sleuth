@@ -1,6 +1,6 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -50,6 +50,7 @@ const REVIEW = { type: 'review_done', is_enough: true };
 const DELIVER = { type: 'deliver', content_type: 'doc', file: '/tmp/report.md' };
 const VISIT = { type: 'visit', url: 'https://example.com/pricing', domain: 'example.com' };
 const REVIEW_FAIL = { type: 'review_done', is_enough: false };
+const DELIVER_SHOT = { type: 'deliver', content_type: 'screenshot', file: '/tmp/shot.png' };
 
 test('blocks success when an unverified (low_verification) subagent exists', () => {
   seed([LOW]);
@@ -184,4 +185,57 @@ test('review-verdict gate: a later passing re-review unblocks success', () => {
   finish('success');
   const s = JSON.parse(readFileSync(FILE, 'utf8'));
   assert.strictEqual(s.outcome, 'success');
+});
+
+// ── deliver-time 早期预警 + partial 诚实披露闸 ──────────────────────
+
+// 直接走 session-logger --action log 记一条 deliver，捕获 stderr。
+function logOp(op) {
+  return spawnSync(
+    'node',
+    [LOGGER, '--action', 'log', '--sid', SID, '--operation', JSON.stringify(op)],
+    { encoding: 'utf8' }
+  );
+}
+
+const DELIVER_WARN = /尚无任何一手核验/;
+
+test('deliver-time gate: a doc deliver with zero verification trace warns', () => {
+  seed([]);
+  const r = logOp(DELIVER); // DELIVER = content_type:'doc'
+  assert.match(r.stderr, DELIVER_WARN, 'delivering a doc with no verification must warn');
+});
+
+test('deliver-time gate: a prior visit suppresses the warning', () => {
+  seed([VISIT]);
+  const r = logOp(DELIVER);
+  assert.doesNotMatch(r.stderr, DELIVER_WARN, 'a logged visit means verification exists');
+});
+
+test('deliver-time gate: a verified subagent suppresses the warning', () => {
+  seed([OK]); // OK 带 fetches/browser>0
+  const r = logOp(DELIVER);
+  assert.doesNotMatch(r.stderr, DELIVER_WARN, 'a verified subagent means verification exists');
+});
+
+test('deliver-time gate: a non-doc deliver (screenshot) does not warn', () => {
+  seed([]);
+  const r = logOp(DELIVER_SHOT);
+  assert.doesNotMatch(r.stderr, DELIVER_WARN, 'only doc reports trigger the snippet-only warning');
+});
+
+test('partial disclosure gate: partial + delivered report + zero verification flags unverified_delivery', () => {
+  seed([DELIVER]);
+  finish('partial');
+  const s = JSON.parse(readFileSync(FILE, 'utf8'));
+  assert.strictEqual(s.outcome, 'partial', 'partial stays the honest fallback');
+  assert.strictEqual(s.unverified_delivery, true, 'a silent unverified partial must leave an audit flag');
+});
+
+test('partial disclosure gate: a verification trace means no unverified_delivery flag', () => {
+  seed([DELIVER, VISIT]);
+  finish('partial');
+  const s = JSON.parse(readFileSync(FILE, 'utf8'));
+  assert.strictEqual(s.outcome, 'partial');
+  assert.notStrictEqual(s.unverified_delivery, true, 'verified partial must not be flagged');
 });

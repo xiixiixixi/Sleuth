@@ -309,6 +309,27 @@ function cmdLog(sid, operationJson) {
   withLock(lockPath, () => {
     const session = loadSession(sid);
     if (!session) return;
+
+    // 交付时早期预警（不阻断）：交付 doc 报告时，若本 session 既有操作里
+    // 没有任何一手核验痕迹（0 visit、0 带 fetch/browser 的子 Agent），
+    // 说明研究可能停在 WebSearch 摘要层。借 deliver（唯一被工具强制记录的 op）
+    // 当锚点，在 Agent 仍有上下文时提示补核验。stderr 经 deliver.mjs 透传给 Agent。
+    if (op.type === 'deliver' && op.content_type === 'doc') {
+      const existing = session.operations || [];
+      const visits = existing.filter((o) => o.type === 'visit').length;
+      const verifiedSubs = existing.filter(
+        (o) => o.type === 'subagent_done' && ((o.fetches || 0) + (o.browser || 0)) > 0
+      ).length;
+      if (visits === 0 && verifiedSubs === 0) {
+        console.error(
+          `Warning: 正在交付报告(doc)，但本 session 尚无任何一手核验记录` +
+            `（0 个 visit、0 个带 fetch/browser 的子 Agent）。\n` +
+            `         若研究停在 WebSearch 摘要层，结论可能不准。请对承重结论回 WebFetch/浏览器核验，并记一条 visit：\n` +
+            `         session-logger --action log --sid "$SID" --operation '{"type":"visit","url":"<URL>","domain":"<域名>","extraction_success":true}'`
+        );
+      }
+    }
+
     session.operations.push(op);
     saveSession(sid, session);
   });
@@ -407,7 +428,8 @@ function cmdFinish(sid, outcome, force) {
     const verifiedSubCount = ops.filter(
       (o) => o.type === 'subagent_done' && ((o.fetches || 0) + (o.browser || 0)) > 0
     ).length;
-    if (outcome === 'success' && hasDeliver && visitCount === 0 && verifiedSubCount === 0) {
+    const noVerificationTrace = hasDeliver && visitCount === 0 && verifiedSubCount === 0;
+    if (outcome === 'success' && noVerificationTrace) {
       console.error(
         `Error: 无法盖 success。本 session 交付了报告，但没有任何已记录的一手核验痕迹` +
           `（0 个 visit、0 个带 fetch/browser 的 subagent_done）。\n` +
@@ -419,6 +441,19 @@ function cmdFinish(sid, outcome, force) {
       );
       blocked = true;
       return;
+    }
+
+    // partial 诚实披露闸：partial 收尾 + 交付了报告 + 零核验痕迹 → 放行，但强制披露并留痕。
+    // 堵死“success 被地板闸拦下后，静默降级 partial、却把 snippet-only 结论当完整结论交付给用户”。
+    // 不阻断（partial 是诚实兜底）、不检查 --force（披露要求不可绕过），只警告 + 打 unverified_delivery 标记。
+    if (outcome === 'partial' && noVerificationTrace) {
+      console.error(
+        `Warning: 以 partial 收尾，但本 session 交付了报告且零一手核验` +
+          `（0 个 visit、0 个带 fetch/browser 的 subagent_done）。\n` +
+          `         必须在交付物里显著标注“结论基于搜索摘要、未一手核验”及覆盖缺口，` +
+          `不要当作完整结论交付给用户。`
+      );
+      session.unverified_delivery = true;
     }
 
     session.finished = new Date().toISOString();

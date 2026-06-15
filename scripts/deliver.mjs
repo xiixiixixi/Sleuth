@@ -290,7 +290,7 @@ async function cmdSave(source, type, name, sid, url, mainSid, download) {
       execFileSync(
         'node',
         [SESSION_LOGGER, '--action', 'log', '--sid', sid, '--operation', op],
-        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 }
+        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'inherit'], timeout: 10000 }
       );
     } catch (err) {
       // session 日志记录失败不影响文件保存
@@ -424,7 +424,7 @@ function cmdMerge(sid, name) {
       execFileSync(
         'node',
         [SESSION_LOGGER, '--action', 'log', '--sid', sid, '--operation', op],
-        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 }
+        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'inherit'], timeout: 10000 }
       );
     } catch (err) {
       console.warn(`Warning: session logging failed: ${err.message}`);
