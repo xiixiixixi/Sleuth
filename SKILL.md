@@ -60,7 +60,6 @@ SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --output-dir -
 | 页面需登录但登录态未确认 | `check-deps.mjs --ensure-login <登录页>` 登一次再抓 | 仍无法确认 → 停止依赖登录态的抓取，写“登录态未验证”入缺口，不伪造 |
 | 浏览器被杀 / 会话丢失 | 重开 session 并重新验证登录态 | 关键结论重验前不得标 success |
 | 同一路径反复失败、无新信息 | 换路：换来源 / 换工具 / 换角度 | 仍无突破 → 如实 `--outcome partial` 并披露缺口，不盲目重试 |
-| 子 Agent 只搜未验（`low_verification`） | 回一手来源补 fetch / browser | 补不了 → 结论降级“未确认线索”，`success` 会被硬拒 |
 
 ## 定向研究
 
