@@ -49,6 +49,19 @@ SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --output-dir -
 
 做搜索时读 `references/search-guide.md`，用浏览器时读 `references/tool-guide.md`。
 
+## 失败与兜底
+
+工具失败不是放弃的理由——按“触发信号 → 一线修复 → 仍失败兜底”处理，绝不拿空结果或搜索摘要冒充一手事实。
+
+| 失败信号 | 一线修复 | 仍失败兜底 |
+|---|---|---|
+| WebSearch 被限 / 返回空 | 换关键词、别名再搜一次 | 直接上浏览器找入口，不因没有轻量工具就放弃 |
+| reader / WebFetch 返回空、登录墙或疑似 JS 壳 | 升级浏览器（`--cdp`）抓真实渲染 | 仍拿不到 → 该来源标“未取得正文”写入缺口，不拿空结果当内容 |
+| 页面需登录但登录态未确认 | `check-deps.mjs --ensure-login <登录页>` 登一次再抓 | 仍无法确认 → 停止依赖登录态的抓取，写“登录态未验证”入缺口，不伪造 |
+| 浏览器被杀 / 会话丢失 | 重开 session 并重新验证登录态 | 关键结论重验前不得标 success |
+| 同一路径反复失败、无新信息 | 换路：换来源 / 换工具 / 换角度 | 仍无突破 → 如实 `--outcome partial` 并披露缺口，不盲目重试 |
+| 子 Agent 只搜未验（`low_verification`） | 回一手来源补 fetch / browser | 补不了 → 结论降级“未确认线索”，`success` 会被硬拒 |
+
 ## 定向研究
 
 - 至少给用户一个可追溯来源 URL。
