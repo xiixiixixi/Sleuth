@@ -204,3 +204,24 @@ eval "Array.from(document.querySelectorAll('img')).map(i => ({src: i.src, alt: i
 - **不做**：不对敏感 / 登录后页面截图；归档仅作研究留证，尊重版权。
 
 **DOM 技巧：** 折叠区块和懒加载内容已在 DOM 中，eval 可直接提取。Shadow DOM 和 iframe 在 snapshot 中展开一级，eval 可递归穿透。`scroll down` 触发懒加载后再提取图片 URL。
+
+## AppleScript 模式命令对照（macOS）
+
+macOS 上 sleuth 自动检测 AppleScript 可用性。以下操作通过 `execJS` 完成，不需要 CDP 端口：
+
+| 操作 | agent-browser (CDP) | AppleScript 等价 |
+|------|--------------------|--------------------|
+| 提取文本 | `eval "document.body.innerText"` | `execJS("document.body.innerText")` |
+| 结构化提取 | `eval --stdin <<'EOF'` | `execJS("(function(){...})()")` |
+| 页面标题 | `get title` | `execJS("document.title")` |
+| 当前 URL | `get url` | `execJS("location.href")` |
+| 导航 | `open <url>` | `navigate(url)` |
+| 点击 | `click @e1` | `clickViaJS("selector")` |
+| 填表 | `fill @e1 "text"` | `fillViaJS("selector", "text")` |
+| 滚动 | `scroll down 500` | `scrollViaJS(0, 500)` |
+| 结构化 DOM 树 | `snapshot -i` | `pseudoSnapshot()` |
+| 截图 | `screenshot` | `screenshot(path)` (macOS screencapture) |
+| 列出标签 | `tab` | `listTabs()` |
+
+> AppleScript 模式下 agent-browser 不可用（Chrome 149 日常 profile 403）。
+> snapshot 用 pseudoSnapshot 近似替代。screenshot 用 macOS screencapture。

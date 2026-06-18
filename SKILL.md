@@ -157,17 +157,16 @@ node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "$SID" 
 
 ### 浏览器
 
-sleuth 按平台自动选最优浏览器连接方式：
+sleuth 按平台自动选浏览器连接方式：
 
-| 模式 | 平台 | 用户一次性操作 | 之后 |
-|------|------|--------------|------|
-| **AppleScript** | macOS | Chrome 菜单 View → Developer → 勾 "Allow JavaScript from Apple Events" | 永久零摩擦，直接操控日常 Chrome（全部登录态） |
-| **Approval mode** | Win/Linux | `chrome://inspect/#remote-debugging` 勾 toggle | 每次新 session Chrome 弹窗点 Allow |
-| **Managed**（fallback） | 全平台 | 无（自起独立 Chrome） | 需 `--ensure-login` 手动登录每个站点 |
+**macOS（AppleScript 模式）**：勾一次 Chrome 菜单 View → Developer → "Allow JavaScript from Apple Events" → 永久零摩擦操控日常 Chrome。所有操作通过 execJS 完成（导航/eval/点击/填表/滚动/截图）。结构化 DOM 树用 pseudoSnapshot（JS 近似版）。
 
-check-deps 自动检测平台和模式可用性。macOS 优先 AppleScript（最简），不可用时降级。Win/Linux 走 Chrome 144+ approval mode（需 Chrome ≥ 144）。都不行时 fallback 到自起隔离 Chrome。
+**Windows / Linux（CDP approval 模式）**：勾一次 chrome://inspect/#remote-debugging → sleuth 自动发现 DevToolsActivePort → 拼 ws:// URL → agent-browser 全 CDP 能力。每次新连接 Chrome 可能弹 Allow。
 
-AppleScript / approval mode 都连的是你的**日常 Chrome**——天然带全部登录态，无需重复登录。Managed 模式用的是独立空 profile。
+**Fallback（全平台）**：以上不可用时自起独立 Chrome（需 `--ensure-login` 登录）。
+
+check-deps 自动检测并选最优路径。
+
 ### 关闭 session
 
 **所有子 Agent 完成后、合成报告前，先关闭 session。** 避免写报告时遗忘。

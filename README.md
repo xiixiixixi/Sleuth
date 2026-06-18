@@ -40,7 +40,7 @@ Sleuth 根据任务复杂度分四个层级：
 |------|------|
 | **Node.js >= 18** | 运行辅助脚本 |
 | **agent-browser** | 浏览器操作 CLI，`npm i -g agent-browser && agent-browser install` |
-| **Chrome** | macOS 走 AppleScript（零摩擦操控日常 Chrome）；Win/Linux 走 Chrome 144+ approval mode（需 ≥ 144）；fallback 自起独立 Chrome |
+| **Chrome** | macOS 走 AppleScript（零摩擦操控日常 Chrome）；Win/Linux 走 Chrome 144+ approval mode；fallback 自起独立 Chrome |
 
 可选：**sqlite3**（Chrome 历史搜索）、**yt-dlp**（YouTube 字幕）。
 
@@ -67,13 +67,11 @@ npx skills update sleuth
 
 ### Chrome 连接
 
-Sleuth 按平台自动选最优浏览器连接方式：
-
 - **macOS（AppleScript 模式）**：直接操控你的日常 Chrome，天然带全部登录态。一次性操作：Chrome 菜单 `View → Developer → 勾选 "Allow JavaScript from Apple Events"`。
-- **Windows / Linux（Chrome 144+ approval mode）**：连你的日常 Chrome。一次性操作：`chrome://inspect/#remote-debugging` 勾选 toggle。每次新 session Chrome 弹窗点 Allow。
-- **Fallback（全平台）**：以上都不可用时，sleuth 自起独立 Chrome（`~/.sleuth/cdp-profile`），需用 `--ensure-login` 手动登录站点。
+- **Windows / Linux（CDP approval 模式）**：连你的日常 Chrome。一次性操作：`chrome://inspect/#remote-debugging` 勾选 toggle。每次新连接 Chrome 弹窗点 Allow。
+- **Fallback（全平台）**：sleuth 自起独立 Chrome，需用 `--ensure-login` 登录。
 
-check-deps 自动检测并选最优路径。你不需要手动选模式。
+check-deps 自动检测并选最优路径。
 
 ## 安全
 
