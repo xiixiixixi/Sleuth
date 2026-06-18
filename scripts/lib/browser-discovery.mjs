@@ -70,3 +70,15 @@ export async function selectBrowser() {
   }
   return { kind: 'empty', detected: [] };
 }
+
+/**
+ * 从 DevToolsActivePort 构造完整的 ws:// URL。
+ * agent-browser 用这个 URL 直连，绕过 /json/version HTTP 探测（404 问题）。
+ * @returns {Promise<{wsUrl: string, port: number, label: string} | null>}
+ */
+export async function getWebSocketUrl() {
+  const sel = await selectBrowser();
+  if (sel.kind !== 'ok' || !sel.browser?.wsPath) return null;
+  const wsUrl = `ws://127.0.0.1:${sel.port}${sel.browser.wsPath}`;
+  return { wsUrl, port: sel.port, label: sel.browser.label };
+}
