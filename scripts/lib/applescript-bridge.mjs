@@ -89,3 +89,90 @@ export async function openTab(url) {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 }
+
+/**
+ * 点击匹配选择器的元素。
+ * @param {string} selector - CSS 选择器
+ * @returns {Promise<string>} 'clicked' | 'not_found'
+ */
+export async function clickViaJS(selector) {
+  return execJS(`
+    (function() {
+      var el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return 'not_found';
+      el.click();
+      return 'clicked';
+    })()
+  `);
+}
+
+/**
+ * 填充输入框。
+ * @param {string} selector - CSS 选择器
+ * @param {string} value - 填入的值
+ * @returns {Promise<string>} 'filled' | 'not_found'
+ */
+export async function fillViaJS(selector, value) {
+  const escapedValue = JSON.stringify(value);
+  return execJS(`
+    (function() {
+      var el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return 'not_found';
+      el.value = ${escapedValue};
+      el.dispatchEvent(new Event('input', {bubbles: true}));
+      el.dispatchEvent(new Event('change', {bubbles: true}));
+      return 'filled';
+    })()
+  `);
+}
+
+/**
+ * 滚动页面。
+ * @param {number} x - 水平像素
+ * @param {number} y - 垂直像素
+ * @returns {Promise<void>}
+ */
+export async function scrollViaJS(x = 0, y = 500) {
+  await execJS(`window.scrollBy(${x}, ${y})`);
+}
+
+/**
+ * 导航到 URL（在当前标签页）。
+ * @param {string} url
+ * @returns {Promise<void>}
+ */
+export async function navigate(url) {
+  await execJS(`location.href = ${JSON.stringify(url)}`);
+}
+
+/**
+ * 提取页面的交互元素树（agent-browser snapshot 的 AppleScript 近似版）。
+ * @returns {Promise<string>} JSON 字符串
+ */
+export async function pseudoSnapshot() {
+  return execJS(`
+    (function() {
+      var interactive = 'a, button, input, select, textarea, [role="button"], [role="link"], [role="tab"], [onclick]';
+      var els = document.querySelectorAll(interactive);
+      var results = [];
+      for (var i = 0; i < els.length && i < 200; i++) {
+        var el = els[i];
+        var rect = el.getBoundingClientRect();
+        var visible = rect.width > 0 && rect.height > 0 && el.offsetParent !== null;
+        if (!visible) continue;
+        var selector = el.id ? '#' + el.id : el.className ? el.tagName.toLowerCase() + '.' + el.className.split(' ')[0] : el.tagName.toLowerCase();
+        var text = (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim().slice(0, 80);
+        results.push({
+          tag: el.tagName.toLowerCase(),
+          role: el.getAttribute('role') || '',
+          text: text,
+          href: el.getAttribute('href') || '',
+          selector: selector,
+          type: el.getAttribute('type') || ''
+        });
+      }
+      return JSON.stringify(results);
+    })()
+  `);
+}
+
