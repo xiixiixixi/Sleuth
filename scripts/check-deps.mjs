@@ -21,16 +21,15 @@ const HELP = `用法: node check-deps.mjs [选项]
   --profile-dir             仅输出持久 profile 目录路径
   --ensure-login <url>      在持久 profile 中打开登录页，引导一次性登录
   --json                    输出机器可读 JSON
-  --sid <id>                指定 session ID
   --help, -h                显示此帮助`;
 
 const KNOWN_FLAGS = new Set([
   '--output-dir', '--check-only', '--ensure-cdp', '--login-url', '--auth-required',
-  '--real-browser', '--domain', '--cdp-port', '--json', '--sid', '--help', '-h',
+  '--real-browser', '--domain', '--cdp-port', '--json', '--help', '-h',
   '--profile-dir', '--ensure-login',
 ]);
 
-const VALUE_FLAGS = new Set(['--login-url', '--sid', '--auth-required', '--domain', '--cdp-port', '--ensure-login']);
+const VALUE_FLAGS = new Set(['--login-url', '--auth-required', '--domain', '--cdp-port', '--ensure-login']);
 
 function parseArgv(argv) {
   const values = {};
@@ -98,7 +97,6 @@ const options = {
   domain: typeof values.domain === 'string' ? values.domain : undefined,
   cdpPort: typeof values.cdpPort === 'string' ? values.cdpPort : undefined,
   json: booleans.has('json'),
-  sid: typeof values.sid === 'string' ? values.sid : undefined,
 };
 
 main(options).catch((err) => {

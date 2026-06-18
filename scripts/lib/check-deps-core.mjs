@@ -475,7 +475,7 @@ async function main(options = {}) {
   }
 
   if (options.outputDirOnly) {
-    const outDir = resolveOutputDir(options.sid);
+    const outDir = resolveOutputDir();
     ensureOutputDir(outDir);
     console.log(outDir);
     return results;
@@ -596,26 +596,13 @@ async function main(options = {}) {
   }
 
   if (!options.checkOnly) {
-    const outDir = resolveOutputDir(options.sid);
+    const outDir = resolveOutputDir();
     fs.mkdirSync(outDir, { recursive: true });
     results.outputDir = outDir;
     if (!options.json) console.log(`output-dir: ${outDir}`);
 
-    try {
-      const cleanupPath = path.join(ROOT, 'scripts', 'cleanup-output.mjs');
-      const origLog = console.log;
-      try {
-        if (options.json) console.log = () => {};
-        const { main: cleanupMain } = await import(cleanupPath);
-        cleanupMain({ days: 7, dryRun: false });
-      } finally {
-        console.log = origLog;
-      }
-    } catch (err) {
-      if (err.code !== 'ERR_MODULE_NOT_FOUND' && !options.json) console.warn(`cleanup: ${err.message}`);
-    }
   } else {
-    results.outputDir = resolveOutputDir(options.sid);
+    results.outputDir = resolveOutputDir();
   }
 
   const patterns = listSitePatterns();

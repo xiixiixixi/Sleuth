@@ -8,16 +8,15 @@ description: >-
 
 sleuth 是搜索、浏览和研究判断层。不垄断网络入口，也不拦截工具——但必须知道每类工具能证明什么、不能证明什么。
 
-## 建立 session
+## 环境检查
 
-**sleuth 触发后第一件事：建 session。每次都必须，不跳过。**
+**sleuth 触发后第一件事：跑 check-deps。每次都必须，不跳过。**
 
 ```bash
-SID=$(node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action start --query "用户问题" --type "技术文档|学术论文|产品评测|政策法规|实时热点|生活消费|其他")
-SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --output-dir --sid "$SID")
+node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 ```
 
-所有后续操作都带 `$SID`。同一对话内多次调用 sleuth 时，每次都建新 session，不复用旧的。
+脚本会检查 Node.js、agent-browser、Chrome 调试端口，输出当前浏览器连接模式和环境变量（`SLEUTH_CDP_PORT` / `SLEUTH_CDP_WS`）。后续所有 agent-browser 命令带上这些变量。
 
 ## 响应层级
 
@@ -25,10 +24,9 @@ SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --output-dir -
 
 | 层级 | 适用场景 | 常见做法 |
 |------|----------|----------|
-| **直答** | 已有知识足够，且无明显时效风险 | 直接回复，session 只做记录 |
+| **直答** | 已有知识足够，且无明显时效风险 | 直接回复 |
 | **快速验证** | 一两个高质量来源就能确认 | 搜索发现入口 + 对**一手来源**做一次 fetch 确认（不能停在 snippet） |
 | **定向研究** | 需要多步查证，但问题仍集中 | 混合工具；`must_verify` 的事实必须回 WebFetch / 浏览器，不靠搜索摘要 |
-| **深度研究** | 多源交叉、冲突、用户需要完整交付物 | 子 Agent + 完整报告 |
 
 ## 工具选择
 
@@ -58,107 +56,51 @@ SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --output-dir -
 | WebSearch 被限 / 返回空 | 换关键词、别名再搜一次 | 直接上浏览器找入口，不因没有轻量工具就放弃 |
 | reader / WebFetch 返回空、登录墙或疑似 JS 壳 | 升级浏览器（`--cdp`）抓真实渲染 | 仍拿不到 → 该来源标“未取得正文”写入缺口，不拿空结果当内容 |
 | 页面需登录但登录态未确认 | `check-deps.mjs --ensure-login <登录页>` 登一次再抓 | 仍无法确认 → 停止依赖登录态的抓取，写“登录态未验证”入缺口，不伪造 |
-| 浏览器被杀 / 会话丢失 | 重开 session 并重新验证登录态 | 关键结论重验前不得标 success |
-| 同一路径反复失败、无新信息 | 换路：换来源 / 换工具 / 换角度 | 仍无突破 → 如实 `--outcome partial` 并披露缺口，不盲目重试 |
+| 浏览器被杀 / 会话丢失 | 重开并重新验证登录态 | 关键结论重验前不得当已确认事实 |
+| 同一路径反复失败、无新信息 | 换路：换来源 / 换工具 / 换角度 | 仍无突破 → 如实在报告里披露未解决的缺口，不盲目重试 |
 
 ## 定向研究
 
 - 至少给用户一个可追溯来源 URL。
 - reader 结果是线索不是证据——页面需要动态交互、登录态或真实状态验证时，不要假装 reader 够用，直接切浏览器。
 
-## 深度研究
+## 子 Agent
 
-```bash
-SID=$(node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action start --query "问题" --type research)
-SLEUTH_OUTPUT=$(node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --output-dir --sid "$SID")
-```
+任务包含多个**独立**调研目标时（如同时调研 N 个产品、N 个来源），鼓励合理分治给子 Agent 并行执行，而非主 Agent 串行处理。
 
-常见做法：
+**好处：**
+- **速度**：多子 Agent 并行，总耗时约等于单个子任务时长
+- **上下文保护**：抓取内容不进入主 Agent 上下文，主 Agent 只接收摘要，节省 token
 
-- **以下情况必须 deliver save**：WebReader 抓到核心证据页面的摘录、浏览器验证完关键事实后的结论、子 Agent 完成某个子任务后的 findings。
-- 只有当角度真正独立时，才并行派子 Agent。
-- 证据稳定时直接写报告；关键结论仍脆弱、冲突或覆盖不足时，做独立审查或补查。
+**并行 CDP 操作**：每个子 Agent 在当前用户浏览器实例中，自行创建所需的后台 tab，自行操作，任务结束自行关闭。所有子 Agent 共享一个浏览器，通过不同 session 名操作不同 tab，无竞态风险。忘了关可以 `agent-browser close --all` 兜底。
 
-### 按需起手
+**子 Agent Prompt 写法：目标导向，而非步骤指令**
+- 必须在子 Agent prompt 中写 `必须加载 sleuth skill 并遵循指引`，子 Agent 会自动加载 skill，无需在 prompt 中复制 skill 内容或指定路径。
+- 子 Agent 有自主判断能力。主 Agent 的职责是说清楚**要什么**，仅在必要与确信时限定**怎么做**。过度指定步骤会剥夺子 Agent 的判断空间，反而引入主 Agent 的假设错误。**避免 prompt 用词对子 Agent 行为的暗示**：「搜索 xx」会把子 Agent 锚定到 WebSearch，而实际上有些反爬站点需要浏览器直接访问主站才能有效获取内容。主 Agent 写 prompt 时应描述目标（「获取」「调研」「了解」），避免用暗示具体手段的动词（「搜索」「抓取」「爬取」）。
 
-不是每次都跑所有脚本。只在能减少重复劳动时才用。
-
-```bash
-# 看以前有没有做过类似研究
-node "${CLAUDE_SKILL_DIR}/scripts/research-index.mjs" --action recall --query "关键词" --limit 5
-
-# 命名实体无召回命中时，可回填最近资料
-node "${CLAUDE_SKILL_DIR}/scripts/research-index.mjs" --action backfill --days 7
-
-# 用户提到"之前看过 / 书签里 / 内部系统"时
-node "${CLAUDE_SKILL_DIR}/scripts/find-url.mjs" "关键词" --since 7d
-```
-
-recall 命中后：
-
-1. 读最相关的 1-3 个文件，标为"历史线索"，不当当前事实。
-2. 会过期或影响决策的事实重新验证原始来源。
-3. 有价值时用 `deliver save` 保存本轮摘录，不复制整份旧 session。
-
-### 子 Agent
-
-适合并行的情况：不同来源类型彼此独立；同一主题下彼此不干扰的站点；任务大到主 Agent 上下文混乱。
-
-不适合并行：重复搜索同一角度；主 Agent 还没弄清目标和来源拓扑；新探针只会复读已知结论。
-
-**派子 Agent 前自检（缺任一项不要派）：**
-
-```
-□ 合同含「开始前先读 subagent-guide.md」
-□ 合同含 must_verify 清单（具体到字段，不是泛泛"核实信息"）
-□ 合同含「禁止自建 session，所有 session-logger / deliver 调用带 --role subagent / --main-sid」
-□ 合同含「完成记 subagent_done 并上报 searches/fetches/browser/delivers 计数」
-□ 每个子 Agent 有独立 browser_session 名
-```
-
-子 Agent 纪律靠合同传达。漏抄会导致子 Agent 自建 session 切碎主流程、只搜不验把摘要当事实——脚本护栏（`--role` / `low_verification`）只是兜底，合同写全才是第一道防线。
-
-创建研究子 Agent（合同由脚本生成，不再手抄；把下面命令的整段输出贴进子 Agent prompt）：
+创建子 Agent（把命令的整段输出贴进子 Agent prompt）：
 
 ```bash
 node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
-  --sid "$SID" \
-  --browser-session "${SID}-pricing" \
   --goal "验证该产品当前公开定价与计费单位" \
-  --enough-when "找到官方 pricing / help / docs 中能直接支持价格结论的页面，或明确写出公开价格不存在" \
   --must-verify "价格数字" \
   --must-verify "计费单位" \
   --must-verify "是否需要 sales contact" \
   --known-clue "域名: example.com" \
-  --known-clue "可能入口: pricing / docs / help center" \
-  --known-clue "已知疑点: 搜索结果里有旧价格"
+  --known-clue "可能入口: pricing / docs / help center"
 ```
 
-> 合同由脚本生成，主 Agent 不会再漏抄纪律条款。每个并行子 Agent 仍要用独立 `browser_session` 名。
+**分治判断标准：**
 
-### 独立审查（深度研究强制）
+| 适合分治 | 不适合分治 |
+|----------|-----------|
+| 目标相互独立，结果互不依赖 | 目标有依赖关系，下一个需要上一个的结果 |
+| 每个子任务量足够大（多页抓取、多轮搜索） | 简单单页查询，分治开销大于收益 |
+| 需要浏览器或长时间运行的任务 | 几次 WebSearch 就能完成的轻量查询 |
 
-**派了 ≥2 个研究子 Agent 的深度研究，盖 `success` 前必须先过一次独立审查。** 这不是可选项：`session-logger --action finish --outcome success` 会检查本 session 有没有 `review_done`，没有就硬拒（`--force` 也绕不过），只能补审查或如实标 `partial`。简单任务（<2 子 Agent）不受此约束。
+## 浏览器
 
-审查合同由脚本生成（把整段输出贴进审查子 Agent prompt）：
-
-```bash
-node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" --review --sid "$SID"
-```
-
-审查子 Agent 读 `${SLEUTH_OUTPUT}` 下所有交付文件，质疑核心结论，完成时记 `review_done`：
-
-```bash
-node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "$SID" --role subagent \
-  --operation '{"type":"review_done","is_enough":true}'
-```
-
-**这条是硬卡**：审查返回 `is_enough=false` 时，`finish --outcome success` 会被直接拒绝（`--force` 也绕不过）。主 Agent 必须按 `next_actions` 补查后重新派审查到 `is_enough=true` 再标 success，或如实 `--outcome partial` 收尾并在报告披露未解决的缺口。**不要为了过闸把 review_done 当勾选项——闸门看的是 is_enough，不是有没有记。**
-
-### 浏览器
-
-sleuth 按平台自动选浏览器连接方式：
-
+sleuth 自动选浏览器连接方式：
 
 **Chrome 144+ approval mode（全平台主力）**：勾一次 `chrome://inspect/#remote-debugging` → sleuth 自动发现 DevToolsActivePort → 拼 ws:// URL → agent-browser 全 CDP 能力。每次新连接 Chrome 可能弹 Allow。
 
@@ -166,58 +108,25 @@ sleuth 按平台自动选浏览器连接方式：
 
 check-deps 自动检测并选最优路径。
 
-### 关闭 session
+## 交付
 
-**所有子 Agent 完成后、合成报告前，先关闭 session。** 避免写报告时遗忘。
+**每个核心结论必须内联来源 URL**：`[结论](https://来源URL)`。不要只在末尾堆 sources 列表——结论和 URL 必须一一对应。没有 URL 的结论视为编造，不写入报告。
 
-```bash
-# 关闭所有浏览器 session
-agent-browser --cdp 9222 --session "${SID}-main" close
-# 如有子 Agent 未正确关闭
-agent-browser session list
-agent-browser close --all    # 安全操作，不影响用户手动打开的 Chrome
-
-# 结束 session 日志
-# 注意：若有子 Agent 被标 low_verification 且未补验，--outcome success 会被硬拒（exit 3，--force 也绕不过）。
-# 只能二选一：① 回原始来源补验后再标 success；② 或如实用 --outcome partial。
-# partial 收尾时若交付了报告却零一手核验，会告警并在 session 打 unverified_delivery 标记——
-# 必须在交付物里如实披露"结论基于搜索摘要、未一手核验"及覆盖缺口，不要当完整结论交付。
-node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action finish --sid "$SID" --outcome success|partial|fail
-```
-
-### 交付
-
-**流程：关闭 session → 读取所有子 Agent 输出 → 合成最终报告 → 交付。**
-
-1. 读取子 Agent 的 deliver save 文件。**优先用 `deliver --action list --sid "$SID"` 按主 SID 汇总**，而不是只 `ls ${SLEUTH_OUTPUT}/docs`：子 Agent 若用了独立 session，证据会落到别处，全局 `registry.jsonl` 才能关联到它们。`deliver save` 出现"证据脱离主流程"告警时，必须回到 registry 补齐，不要漏掉这些文件。**另：`deliver save` 交付 doc 报告时，若本 session 尚无任何一手核验记录（visit / 带 fetch 的子 Agent），会告警——别停在 WebSearch 摘要层，先回 WebFetch/浏览器核验承重结论再交付。**
-2. 合成为一份最终报告，不生成多个"final / merged / summary"版本。
-3. 报告建议区分：已验证事实、高置信推断、未确认线索、冲突信息、覆盖缺口。**子 Agent 的 `subagent_done` 带 `low_verification` 标记时，其结论只到搜索摘要层，必须降级为"未确认线索"或回原始来源补验后再用。**
-4. 每个核心结论内联来源 URL，不要只在末尾堆 sources 列表。
-5. **图文并茂（按 query 类型）**：产品对比 / 设计 / 图表解读 / 评测类报告，**必须图文并茂**——呈现型图片按 `references/tool-guide.md` 的"呈现型"流程归档并 `![图注](来源URL)` 内嵌，图注带来源 URL + 日期。纯事实 / 政策类不强求配图。证据型图片仍只附 URL + 标注"视觉分析"。
+报告建议区分可信度：
+- 已验证事实（有原始来源 URL）
+- 高置信推断
+- 未确认线索
+- 冲突信息
+- 覆盖缺口
 
 **输出按优先级：**
 
-1. **用户指定了输出要求** → 严格按照用户要求输出，不做自作主张的调整。
+1. **用户指定了输出要求** → 严格按照用户要求输出。
 2. **简单问题** → 内联回复 + 可追溯来源 URL。
-3. **复杂问题** → 最终 Markdown 报告存入 `~/.sleuth/output/`，同时复制一份到用户 cwd，并内联总结性回复。
+3. **复杂问题** → 用 Write 工具把 Markdown 报告写到用户 cwd 或 `~/.sleuth/output/`，同时内联总结性回复。
+4. **多个子 Agent 并行调研** → 主 Agent 收齐子 Agent 返回的摘要，合成一份最终报告，不生成多个"final / merged / summary"版本。
 
-```bash
-# 直接 pipe 内容保存（不需要先写临时文件）
-cat <<'CONTENT' | node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action save \
-  --source /dev/stdin --type doc --name "页面名-摘录" --url "来源URL" --sid "$SID"
-## 页面标题
-
-摘录内容、关键数据、证据...
-CONTENT
-
-# 保存已有文件（截图等）
-node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action save \
-  --type <screenshot|image|data> \
-  --source <文件路径> --name <名> --url <URL> --sid "$SID"
-
-# 多个中间交付物需要整理时才 merge（不是最终报告生成器）
-node "${CLAUDE_SKILL_DIR}/scripts/deliver.mjs" --action merge --sid "$SID"
-```
+**图文并茂（按 query 类型）**：产品对比 / 设计 / 图表解读 / 评测类报告，**必须图文并茂**——呈现型图片按 `references/tool-guide.md` 的"呈现型"流程归档并 `![图注](来源URL)` 内嵌，图注带来源 URL + 日期。纯事实 / 政策类不强求配图。证据型图片仍只附 URL + 标注"视觉分析"。
 
 ## 运行边界
 

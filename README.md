@@ -21,7 +21,7 @@ Sleuth 根据任务复杂度分四个层级：
 | 直答 | Agent 已有知识足够 | 直接回答 |
 | 快速验证 | 一两个来源就能确认 | 搜索 + 验证 |
 | 定向研究 | 需要多步查证但问题集中 | 混合使用工具，按需升级 |
-| 深度研究 | 多源冲突、需要完整报告 | 启动研究 session、派子 Agent 并行调查 |
+| 并行调研 | 多个独立目标需同时查 | 派子 Agent 并行，主 Agent 合成摘要 |
 
 核心原则：**从最轻的工具开始，证据不够再升级。**
 
@@ -86,8 +86,7 @@ check-deps 自动检测并选最优路径。
 ├── SKILL.md                    主 skill 文件
 ├── references/
 │   ├── tool-guide.md           浏览器命令参考
-│   ├── search-guide.md         搜索策略
-│   └── subagent-guide.md       子 Agent 合同
+│   └── search-guide.md         搜索策略
 ├── scripts/                    辅助脚本
 ├── LICENSE
 └── README.md

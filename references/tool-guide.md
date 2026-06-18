@@ -197,7 +197,7 @@ eval "Array.from(document.querySelectorAll('img')).map(i => ({src: i.src, alt: i
 
 - **证据型**（只为抽事实，如一张定价截图）：用 vision 工具（analyze_image / analyze_data_visualization）分析 → 结论写进报告 → **附原始图片 URL，不存图**。
 - **呈现型**（报告本身需要给人看：产品图 / 对比图表 / 官方规格图 / UI / 示意图）：**归档 + 内嵌**——
-  1. 归档：`deliver --action save --type image --url "<图片URL>" --download --sid "$SID"`（下到 `output/images`，留来源、防烂链）。
+  1. 下载：用 curl 或 WebFetch 把图片 URL 拉到本地（如 `curl -o /tmp/img.jpg "<图片URL>"`）。
   2. 内嵌：报告里默认用**来源 URL** 内嵌 `![图注](来源URL)`（可移植，GitHub/各 viewer 都能渲染）；本地归档作离线备份。
   3. 图注必带：来源 URL + 抓取日期 +（如有）视觉分析结论。
 - **不做**：不对敏感 / 登录后页面截图；归档仅作研究留证，尊重版权。
