@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { resolveOutputDir, ensureOutputDir } from './output.mjs';
 
 import { isAppleScriptAvailable } from './applescript-bridge.mjs';
-import { selectBrowser as selectDailyBrowser, detectAll as detectDailyBrowsers } from './browser-discovery.mjs';
+import { selectBrowser as selectDailyBrowser, detectAll as detectDailyBrowsers, getWebSocketUrl } from './browser-discovery.mjs';
 
 // 浏览器连接模式
 const BROWSER_MODE_APPLESCRIPT = 'applescript';
@@ -275,52 +275,61 @@ async function ensureCDP() {
   const status = {
     browser_mode: 'unavailable',
     cdp_port: null,
+    cdp_ws: null,
     browser_label: null,
     applescript: false,
     auth_state: 'unknown',
     guidance: null,
   };
 
-  // 路径 1: macOS AppleScript
+  // 路径 1: macOS AppleScript（零摩擦，不需要 CDP 端口）
   if (os.platform() === 'darwin') {
-    const available = await isAppleScriptAvailable();
-    if (available) {
-      status.browser_mode = BROWSER_MODE_APPLESCRIPT;
+    const asAvailable = await isAppleScriptAvailable();
+    if (asAvailable) {
+      status.browser_mode = 'applescript';
       status.applescript = true;
-      status.browser_label = 'Chrome (via AppleScript)';
-      status.guidance = 'AppleScript 模式：直接操控你的日常 Chrome，无需 CDP 端口。';
-      return status;
+      status.browser_label = 'Chrome (AppleScript)';
     }
-    status.guidance = '提示：在 Chrome 菜单 View → Developer → 勾选 "Allow JavaScript from Apple Events" 可启用零摩擦模式。';
   }
 
-  // 路径 2: Chrome 144+ approval mode
-  const dailyBrowser = await selectDailyBrowser();
-  if (dailyBrowser.kind === 'ok' && dailyBrowser.port) {
-    status.browser_mode = BROWSER_MODE_APPROVAL;
-    status.cdp_port = dailyBrowser.port;
-    status.browser_label = dailyBrowser.browser?.label || 'Chrome';
-    status.guidance = 'Chrome 144+ approval mode：请在 chrome://inspect/#remote-debugging 勾选 toggle，连接时点 Allow。';
+  // 路径 2: Chrome 144+ approval mode（Win/Linux 主力，macOS 备用）
+  const wsInfo = await getWebSocketUrl();
+  if (wsInfo) {
+    if (status.browser_mode === 'applescript') {
+      // macOS 混合：AppleScript + CDP ws://（CDP 可能 403，标记但不依赖）
+      status.cdp_ws = wsInfo.wsUrl;
+      status.cdp_port = wsInfo.port;
+    } else {
+      // 纯 approval mode
+      status.browser_mode = 'approval';
+      status.cdp_ws = wsInfo.wsUrl;
+      status.cdp_port = wsInfo.port;
+      status.browser_label = wsInfo.label;
+    }
     return status;
   }
 
-  // 路径 3: fallback managed browser (旧逻辑保留)
+  // macOS 有 AppleScript 但没 CDP → 纯 AppleScript 模式
+  if (status.browser_mode === 'applescript') {
+    status.guidance = 'AppleScript 模式：eval/导航/点击/截图 全可用，无 CDP snapshot。';
+    return status;
+  }
+
+  // 路径 3: fallback managed browser
   const managed = await detectManagedCDPPort();
   if (managed.port) {
-    status.browser_mode = BROWSER_MODE_MANAGED;
+    status.browser_mode = 'managed';
     status.cdp_port = managed.port;
-    status.browser_label = 'Managed Chrome (隔离 profile)';
-    status.guidance = 'Managed 模式：sleuth 自起独立 Chrome，需用 --ensure-login 登录。';
+    status.browser_label = 'Managed Chrome';
     return status;
   }
 
-  // 尝试自起
   const launched = await launchManagedBrowser({});
   if (launched.ready) {
-    status.browser_mode = BROWSER_MODE_MANAGED;
+    status.browser_mode = 'managed';
     status.cdp_port = launched.port;
     status.browser_label = 'Managed Chrome (新启动)';
-    status.guidance = 'Managed 模式：sleuth 自起独立 Chrome，需用 --ensure-login 登录。';
+    status.guidance = 'Managed 模式：需 --ensure-login 登录。';
   }
 
   return status;
@@ -547,18 +556,26 @@ async function main(options = {}) {
   results.cdp = cdpStatus;
 
   if (!options.json) {
-    if (cdpStatus.browser_mode === BROWSER_MODE_APPLESCRIPT) {
-      console.log(`chrome: ok (AppleScript 模式，直接操控你的日常 Chrome)`);
+    if (cdpStatus.browser_mode === 'applescript') {
+      console.log(`chrome: ok (AppleScript 模式)`);
+      if (cdpStatus.cdp_ws) {
+        console.log(`SLEUTH_CDP_WS=${cdpStatus.cdp_ws}`);
+      } else {
+        console.log(`(纯 AppleScript：无 CDP snapshot，用 pseudoSnapshot 替代)`);
+      }
+    } else if (cdpStatus.cdp_ws) {
+      console.log(`chrome-cdp: ok (${cdpStatus.browser_label}, port ${cdpStatus.cdp_port})`);
+      console.log(`SLEUTH_CDP_WS=${cdpStatus.cdp_ws}`);
+      console.log(`SLEUTH_CDP_PORT=${cdpStatus.cdp_port}`);
     } else if (cdpStatus.cdp_port) {
-      console.log(`chrome-cdp: ok (port ${cdpStatus.cdp_port}，模式: ${cdpStatus.browser_mode}${cdpStatus.browser_label ? '，' + cdpStatus.browser_label : ''})`);
+      console.log(`chrome-cdp: ok (port ${cdpStatus.cdp_port}，模式: ${cdpStatus.browser_mode})`);
       console.log(`SLEUTH_CDP_PORT=${cdpStatus.cdp_port}`);
     } else {
-      console.log('chrome-cdp: 未发现可连的浏览器');
-      if (cdpStatus.guidance) console.log(cdpStatus.guidance);
+      console.log('chrome: 未发现可连的浏览器');
       if (os.platform() === 'darwin') {
-        console.log('  推荐：Chrome 菜单 View → Developer → 勾选 "Allow JavaScript from Apple Events"（零摩擦模式）');
+        console.log('  推荐：Chrome 菜单 View → Developer → 勾 "Allow JavaScript from Apple Events"');
       }
-      console.log('  或：chrome://inspect/#remote-debugging 勾选 toggle（Chrome 144+）');
+      console.log('  或：chrome://inspect/#remote-debugging 勾 toggle（Chrome 144+）');
     }
   }
 
