@@ -40,7 +40,7 @@ Sleuth 根据任务复杂度分四个层级：
 |------|------|
 | **Node.js >= 18** | 运行辅助脚本 |
 | **agent-browser** | 浏览器操作 CLI，`npm i -g agent-browser && agent-browser install` |
-| **Chrome** | 驱动一个独立的持久浏览器 profile（与日常 Chrome 隔离；需登录的站点用 `--ensure-login` 登一次即可） |
+| **Chrome** | macOS 走 AppleScript（零摩擦操控日常 Chrome）；Win/Linux 走 Chrome 144+ approval mode（需 ≥ 144）；fallback 自起独立 Chrome |
 
 可选：**sqlite3**（Chrome 历史搜索）、**yt-dlp**（YouTube 字幕）。
 
@@ -67,11 +67,13 @@ npx skills update sleuth
 
 ### Chrome 连接
 
-Sleuth **不会复制你的日常 Chrome profile**。它维护一个**独立的持久浏览器 profile**（`~/.sleuth/cdp-profile`），并以远程调试端口启动一个 Chrome，让 agent-browser 通过 `--cdp <port>` 连上去。
+Sleuth 按平台自动选最优浏览器连接方式：
 
-- 这个 profile 与你日常用的 Chrome 完全隔离，互不影响。
-- 需要登录态的站点：跑一次 `node scripts/check-deps.mjs --ensure-login <url>`，在弹出的窗口登录一次，cookie 会**长期保存在该 profile**，之后所有研究会话共享，无需重复登录。
-- 它不是每次复制、也不是一次性快照，而是**建一次、持续复用、自我累积**的真实 profile。
+- **macOS（AppleScript 模式）**：直接操控你的日常 Chrome，天然带全部登录态。一次性操作：Chrome 菜单 `View → Developer → 勾选 "Allow JavaScript from Apple Events"`。
+- **Windows / Linux（Chrome 144+ approval mode）**：连你的日常 Chrome。一次性操作：`chrome://inspect/#remote-debugging` 勾选 toggle。每次新 session Chrome 弹窗点 Allow。
+- **Fallback（全平台）**：以上都不可用时，sleuth 自起独立 Chrome（`~/.sleuth/cdp-profile`），需用 `--ensure-login` 手动登录站点。
+
+check-deps 自动检测并选最优路径。你不需要手动选模式。
 
 ## 安全
 

@@ -157,12 +157,17 @@ node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "$SID" 
 
 ### 浏览器
 
-所有命令带 `--cdp 9222 --session <name>`，主 Agent 用 `${SID}-main`，子 Agent 用各自独立 session。该 `--cdp` 端口背后是 sleuth 维护的**单一持久 profile**（登录一次长期复用，与你日常 Chrome 隔离）。需要登录态的站点先跑一次 `node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --ensure-login "<登录页URL>"`，之后所有会话共享该登录态。不要用 agent-browser 的 `--profile`（与 `--cdp` 互斥，且并行 session 无法共享同一 profile 目录）。
+sleuth 按平台自动选最优浏览器连接方式：
 
-并行原则：不同域名/子问题可以并行开独立 session；同一账号后台或会产生状态变更的流程不并行。
+| 模式 | 平台 | 用户一次性操作 | 之后 |
+|------|------|--------------|------|
+| **AppleScript** | macOS | Chrome 菜单 View → Developer → 勾 "Allow JavaScript from Apple Events" | 永久零摩擦，直接操控日常 Chrome（全部登录态） |
+| **Approval mode** | Win/Linux | `chrome://inspect/#remote-debugging` 勾 toggle | 每次新 session Chrome 弹窗点 Allow |
+| **Managed**（fallback） | 全平台 | 无（自起独立 Chrome） | 需 `--ensure-login` 手动登录每个站点 |
 
-登录态原则：首次进入需登录态的任务时先确认页面确实已登录；未登录时停止依赖登录态的抓取，把"登录态未验证"写入缺口；浏览器被杀后重新打开也必须重新验证。
+check-deps 自动检测平台和模式可用性。macOS 优先 AppleScript（最简），不可用时降级。Win/Linux 走 Chrome 144+ approval mode（需 Chrome ≥ 144）。都不行时 fallback 到自起隔离 Chrome。
 
+AppleScript / approval mode 都连的是你的**日常 Chrome**——天然带全部登录态，无需重复登录。Managed 模式用的是独立空 profile。
 ### 关闭 session
 
 **所有子 Agent 完成后、合成报告前，先关闭 session。** 避免写报告时遗忘。

@@ -4,17 +4,20 @@
 
 ## 连接
 
-前提：CDP 端口已通过 `check-deps.mjs` 就绪（见 SKILL.md "按需起手"）。
+前提：浏览器已通过 `check-deps.mjs` 就绪。sleuth 按平台自动选择连接方式（AppleScript / approval mode / managed），`check-deps` 输出会告诉你当前模式和端口。
 
 ```bash
-# 正确
-agent-browser --cdp 9222 --session ${SID}-main open https://example.com
+# check-deps 输出的 SLEUTH_CDP_PORT 变量（approval/managed 模式用）
+# AppleScript 模式不输出端口（直接操控日常 Chrome）
+
+# 正确（managed/approval 模式）
+agent-browser --cdp $SLEUTH_CDP_PORT --session ${SID}-main open https://example.com
 
 # 错误：启动无登录态的 Chrome for Testing
 agent-browser open https://example.com
 ```
 
-> 以下所有命令省略 `--cdp 9222 --session ${SID}-main` 前缀，实际调用时必须带上。该 `--cdp` 端口背后是 sleuth 维护的**单一持久登录 profile**（登录一次长期复用）；需要登录态先跑 `check-deps.mjs --ensure-login <url>`。不要用 `--profile`（与 `--cdp` 互斥）。
+> 以下所有命令省略 `--cdp $SLEUTH_CDP_PORT --session ${SID}-main` 前缀，实际调用时必须带上（approval/managed 模式）。AppleScript 模式下端口可能不固定，以 check-deps 输出为准。不要用 `--profile`（与 `--cdp` 互斥）。
 
 ## 核心姿势
 
