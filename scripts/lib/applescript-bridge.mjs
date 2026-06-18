@@ -14,10 +14,16 @@ export async function isAppleScriptAvailable() {
   if (os.platform() !== 'darwin') return false;
 
   try {
-    const result = execSync(
-      `osascript -e 'tell application "Google Chrome" to execute javascript "1+1" in active tab of front window'`,
-      { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
-    ).trim();
+    // Chrome 149+ 的 AppleScript 字典要求嵌套 tell 格式，
+    // 单行 'execute javascript "..." in active tab' 会报 -1723。
+    const result = execSync(`osascript -e '
+      tell application "Google Chrome"
+        tell front window
+          tell active tab
+            execute javascript "1+1"
+          end tell
+        end tell
+      end tell'`, { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
     return result !== '';
   } catch {
     return false;
@@ -31,11 +37,16 @@ export async function isAppleScriptAvailable() {
  */
 export async function execJS(js) {
   const escapedJs = js.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const script = `tell application "Google Chrome" to execute javascript "${escapedJs}" in active tab of front window`;
-  return execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
-    encoding: 'utf8',
-    timeout: 10000,
-    stdio: ['pipe', 'pipe', 'pipe'],
+  // Chrome 149+ 要求嵌套 tell 格式（单行 'in active tab' 报 -1723）
+  const script = `tell application "Google Chrome"
+    tell front window
+      tell active tab
+        execute javascript "${escapedJs}"
+      end tell
+    end tell
+  end tell`;
+  return execSync(`osascript -e '${script.replace(/'/g, "'\\\\''")}'`, {
+    encoding: 'utf8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'],
   }).trim();
 }
 
