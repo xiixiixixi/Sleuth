@@ -17,11 +17,9 @@ import { fileURLToPath } from 'node:url';
 
 import { resolveOutputDir, ensureOutputDir } from './output.mjs';
 
-import { isAppleScriptAvailable } from './applescript-bridge.mjs';
 import { selectBrowser as selectDailyBrowser, detectAll as detectDailyBrowsers, getWebSocketUrl } from './browser-discovery.mjs';
 
 // 浏览器连接模式
-const BROWSER_MODE_APPLESCRIPT = 'applescript';
 const BROWSER_MODE_APPROVAL    = 'approval';
 const BROWSER_MODE_MANAGED     = 'managed';
 
@@ -277,45 +275,21 @@ async function ensureCDP() {
     cdp_port: null,
     cdp_ws: null,
     browser_label: null,
-    applescript: false,
     auth_state: 'unknown',
     guidance: null,
   };
 
-  // 路径 1: macOS AppleScript（零摩擦，不需要 CDP 端口）
-  if (os.platform() === 'darwin') {
-    const asAvailable = await isAppleScriptAvailable();
-    if (asAvailable) {
-      status.browser_mode = 'applescript';
-      status.applescript = true;
-      status.browser_label = 'Chrome (AppleScript)';
-    }
-  }
-
-  // 路径 2: Chrome 144+ approval mode（Win/Linux 主力，macOS 备用）
+  // 路径 1: Chrome 144+ approval mode（全平台主力）
   const wsInfo = await getWebSocketUrl();
   if (wsInfo) {
-    if (status.browser_mode === 'applescript') {
-      // macOS 混合：AppleScript + CDP ws://（CDP 可能 403，标记但不依赖）
-      status.cdp_ws = wsInfo.wsUrl;
-      status.cdp_port = wsInfo.port;
-    } else {
-      // 纯 approval mode
-      status.browser_mode = 'approval';
-      status.cdp_ws = wsInfo.wsUrl;
-      status.cdp_port = wsInfo.port;
-      status.browser_label = wsInfo.label;
-    }
+    status.browser_mode = 'approval';
+    status.cdp_ws = wsInfo.wsUrl;
+    status.cdp_port = wsInfo.port;
+    status.browser_label = wsInfo.label;
     return status;
   }
 
-  // macOS 有 AppleScript 但没 CDP → 纯 AppleScript 模式
-  if (status.browser_mode === 'applescript') {
-    status.guidance = 'AppleScript 模式：eval/导航/点击/截图 全可用，无 CDP snapshot。';
-    return status;
-  }
-
-  // 路径 3: fallback managed browser
+  // 路径 2: fallback managed browser
   const managed = await detectManagedCDPPort();
   if (managed.port) {
     status.browser_mode = 'managed';
@@ -525,18 +499,24 @@ async function main(options = {}) {
   if (options.checkOnly) {
     let mode = 'unavailable';
     let detectedPort = null;
-    const managed = await detectManagedCDPPort();
-    if (managed.port) {
-      mode = 'managed';
-      detectedPort = managed.port;
+    let detectedWs = null;
+    let detectedLabel = null;
+    // 路径 1: Chrome 144+ approval mode（DevToolsActivePort + TCP 探活，不走 HTTP）
+    const wsInfo = await getWebSocketUrl();
+    if (wsInfo) {
+      mode = 'approval';
+      detectedPort = wsInfo.port;
+      detectedWs = wsInfo.wsUrl;
+      detectedLabel = wsInfo.label;
     } else {
-      const external = await detectCDPPort();
-      if (external.port) {
-        mode = 'external';
-        detectedPort = external.port;
+      // 路径 2: sleuth managed browser
+      const managed = await detectManagedCDPPort();
+      if (managed.port) {
+        mode = 'managed';
+        detectedPort = managed.port;
       }
     }
-    cdpStatus = { browser_mode: mode, cdp_port: detectedPort, profile_dir: CDP_PROFILE_DIR, auth_state: 'unknown' };
+    cdpStatus = { browser_mode: mode, cdp_port: detectedPort, cdp_ws: detectedWs, browser_label: detectedLabel, profile_dir: CDP_PROFILE_DIR, auth_state: 'unknown' };
   } else {
     const origLog = console.log;
     const origErr = console.error;
@@ -556,14 +536,7 @@ async function main(options = {}) {
   results.cdp = cdpStatus;
 
   if (!options.json) {
-    if (cdpStatus.browser_mode === 'applescript') {
-      console.log(`chrome: ok (AppleScript 模式)`);
-      if (cdpStatus.cdp_ws) {
-        console.log(`SLEUTH_CDP_WS=${cdpStatus.cdp_ws}`);
-      } else {
-        console.log(`(纯 AppleScript：无 CDP snapshot，用 pseudoSnapshot 替代)`);
-      }
-    } else if (cdpStatus.cdp_ws) {
+    if (cdpStatus.cdp_ws) {
       console.log(`chrome-cdp: ok (${cdpStatus.browser_label}, port ${cdpStatus.cdp_port})`);
       console.log(`SLEUTH_CDP_WS=${cdpStatus.cdp_ws}`);
       console.log(`SLEUTH_CDP_PORT=${cdpStatus.cdp_port}`);
@@ -572,10 +545,7 @@ async function main(options = {}) {
       console.log(`SLEUTH_CDP_PORT=${cdpStatus.cdp_port}`);
     } else {
       console.log('chrome: 未发现可连的浏览器');
-      if (os.platform() === 'darwin') {
-        console.log('  推荐：Chrome 菜单 View → Developer → 勾 "Allow JavaScript from Apple Events"');
-      }
-      console.log('  或：chrome://inspect/#remote-debugging 勾 toggle（Chrome 144+）');
+      console.log('  推荐：chrome://inspect/#remote-debugging 勾 toggle（Chrome 144+）');
     }
   }
 

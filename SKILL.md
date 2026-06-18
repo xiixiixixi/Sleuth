@@ -159,9 +159,8 @@ node "${CLAUDE_SKILL_DIR}/scripts/session-logger.mjs" --action log --sid "$SID" 
 
 sleuth 按平台自动选浏览器连接方式：
 
-**macOS（AppleScript 模式）**：勾一次 Chrome 菜单 View → Developer → "Allow JavaScript from Apple Events" → 永久零摩擦操控日常 Chrome。所有操作通过 execJS 完成（导航/eval/点击/填表/滚动/截图）。结构化 DOM 树用 pseudoSnapshot（JS 近似版）。
 
-**Windows / Linux（CDP approval 模式）**：勾一次 chrome://inspect/#remote-debugging → sleuth 自动发现 DevToolsActivePort → 拼 ws:// URL → agent-browser 全 CDP 能力。每次新连接 Chrome 可能弹 Allow。
+**Chrome 144+ approval mode（全平台主力）**：勾一次 `chrome://inspect/#remote-debugging` → sleuth 自动发现 DevToolsActivePort → 拼 ws:// URL → agent-browser 全 CDP 能力。每次新连接 Chrome 可能弹 Allow。
 
 **Fallback（全平台）**：以上不可用时自起独立 Chrome（需 `--ensure-login` 登录）。
 
