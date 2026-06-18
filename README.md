@@ -40,7 +40,7 @@ Sleuth 根据任务复杂度分四个层级：
 |------|------|
 | **Node.js >= 18** | 运行辅助脚本 |
 | **agent-browser** | 浏览器操作 CLI，`npm i -g agent-browser && agent-browser install` |
-| **Chrome** | Chrome 144+ approval mode（chrome://inspect 勾选，全平台）；fallback 自起独立 Chrome |
+| **Chrome** | Chrome 144+（chrome://inspect/#remote-debugging 勾选 toggle） |
 
 可选：**sqlite3**（Chrome 历史搜索）、**yt-dlp**（YouTube 字幕）。
 
@@ -67,10 +67,9 @@ npx skills update sleuth
 
 ### Chrome 连接
 
-- **Approval mode（全平台）**：连你的日常 Chrome，天然带登录态。一次性操作：`chrome://inspect/#remote-debugging` 勾选 toggle。每次新连接 Chrome 弹窗点 Allow。
-- **Fallback（全平台）**：sleuth 自起独立 Chrome，需用 `--ensure-login` 登录。
+- **Approval mode（全平台）**：连你的日常 Chrome，天然带登录态。一次性操作：`chrome://inspect/#remote-debugging` 勾选 toggle。每次新连接 Chrome 弹窗点 Allow。没开 toggle 就报错，sleuth 不自起 Chrome。
 
-check-deps 自动检测并选最优路径。
+check-deps 检查环境，输出端口和连接变量。
 
 ## 安全
 

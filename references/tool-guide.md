@@ -4,12 +4,12 @@
 
 ## 连接
 
-前提：浏览器已通过 `check-deps.mjs` 就绪。sleuth 自动选择连接方式（approval mode / managed），`check-deps` 输出会告诉你当前模式和端口。
+前提：浏览器已通过 `check-deps.mjs` 就绪。`check-deps` 输出会告诉你当前端口和环境变量。
 
 ```bash
-# check-deps 输出的 SLEUTH_CDP_PORT 变量（approval/managed 模式用）
+# check-deps 输出的 SLEUTH_CDP_PORT 变量
 
-# 正确（managed/approval 模式）
+# 正确用法
 agent-browser --cdp $SLEUTH_CDP_PORT --session ${SID}-main open https://example.com
 
 # 错误：启动无登录态的 Chrome for Testing

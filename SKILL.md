@@ -55,7 +55,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 |---|---|---|
 | WebSearch 被限 / 返回空 | 换关键词、别名再搜一次 | 直接上浏览器找入口，不因没有轻量工具就放弃 |
 | reader / WebFetch 返回空、登录墙或疑似 JS 壳 | 升级浏览器（`--cdp`）抓真实渲染 | 仍拿不到 → 该来源标“未取得正文”写入缺口，不拿空结果当内容 |
-| 页面需登录但登录态未确认 | `check-deps.mjs --ensure-login <登录页>` 登一次再抓 | 仍无法确认 → 停止依赖登录态的抓取，写“登录态未验证”入缺口，不伪造 |
+| 页面需登录但登录态未确认 | 用 agent-browser 打开登录页，让用户手动登一下，登完继续 | 仍无法确认 → 停止依赖登录态的抓取，写“登录态未验证”入缺口，不伪造 |
 | 浏览器被杀 / 会话丢失 | 重开并重新验证登录态 | 关键结论重验前不得当已确认事实 |
 | 同一路径反复失败、无新信息 | 换路：换来源 / 换工具 / 换角度 | 仍无突破 → 如实在报告里披露未解决的缺口，不盲目重试 |
 
@@ -97,11 +97,10 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 
 sleuth 自动选浏览器连接方式：
 
-**Chrome 144+ approval mode（全平台主力）**：勾一次 `chrome://inspect/#remote-debugging` → sleuth 自动发现 DevToolsActivePort → 拼 ws:// URL → agent-browser 全 CDP 能力。每次新连接 Chrome 可能弹 Allow。
+**Chrome 144+ approval mode**：勾一次 `chrome://inspect/#remote-debugging` → sleuth 自动发现 DevToolsActivePort → 拼 ws:// URL → agent-browser 全 CDP 能力。每次新连接 Chrome 可能弹 Allow。没开 toggle 就报错， sleuth 不自起 Chrome。
 
-**Fallback（全平台）**：以上不可用时自起独立 Chrome（需 `--ensure-login` 登录）。
 
-check-deps 自动检测并选最优路径。
+check-deps 跑一遍检查环境。
 
 ## 交付
 
