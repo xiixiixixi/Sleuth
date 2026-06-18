@@ -66,38 +66,33 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 
 ## 子 Agent
 
-任务包含多个**独立**调研目标时（如同时调研 N 个产品、N 个来源），鼓励合理分治给子 Agent 并行执行，而非主 Agent 串行处理。
+对比 N 个独立产品、查证多个互不相关的事实时，可以派子 Agent 并行。主 Agent 串行做会慢，而且多次抓取的原始内容会占满上下文。
 
-**好处：**
-- **速度**：多子 Agent 并行，总耗时约等于单个子任务时长
-- **上下文保护**：抓取内容不进入主 Agent 上下文，主 Agent 只接收摘要，节省 token
-
-**并行 CDP 操作**：每个子 Agent 在当前用户浏览器实例中，自行创建所需的后台 tab，自行操作，任务结束自行关闭。所有子 Agent 共享一个浏览器，通过不同 session 名操作不同 tab，无竞态风险。忘了关可以 `agent-browser close --all` 兜底。
-
-**子 Agent Prompt 写法：目标导向，而非步骤指令**
-- 必须在子 Agent prompt 中写 `必须加载 sleuth skill 并遵循指引`，子 Agent 会自动加载 skill，无需在 prompt 中复制 skill 内容或指定路径。
-- 子 Agent 有自主判断能力。主 Agent 的职责是说清楚**要什么**，仅在必要与确信时限定**怎么做**。过度指定步骤会剥夺子 Agent 的判断空间，反而引入主 Agent 的假设错误。**避免 prompt 用词对子 Agent 行为的暗示**：「搜索 xx」会把子 Agent 锚定到 WebSearch，而实际上有些反爬站点需要浏览器直接访问主站才能有效获取内容。主 Agent 写 prompt 时应描述目标（「获取」「调研」「了解」），避免用暗示具体手段的动词（「搜索」「抓取」「爬取」）。
-
-创建子 Agent（把命令的整段输出贴进子 Agent prompt）：
+派之前先用 spawn-subagent 生成 prompt（把命令整段输出贴进子 Agent prompt）：
 
 ```bash
 node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
   --goal "验证该产品当前公开定价与计费单位" \
   --must-verify "价格数字" \
   --must-verify "计费单位" \
-  --must-verify "是否需要 sales contact" \
-  --known-clue "域名: example.com" \
-  --known-clue "可能入口: pricing / docs / help center"
+  --known-clue "域名: example.com"
 ```
 
-**分治判断标准：**
+关键句是「**必须加载 sleuth skill 并遵循指引**」——子 Agent 加载 skill 后，sleuth 的所有判断逻辑（响应层级、工具选择、失败兜底、可信度分级）对它自动生效。不需要在 prompt 里复制 skill 内容。
 
-| 适合分治 | 不适合分治 |
-|----------|-----------|
-| 目标相互独立，结果互不依赖 | 目标有依赖关系，下一个需要上一个的结果 |
-| 每个子任务量足够大（多页抓取、多轮搜索） | 简单单页查询，分治开销大于收益 |
-| 需要浏览器或长时间运行的任务 | 几次 WebSearch 就能完成的轻量查询 |
+**主 Agent 写 goal 时说要什么，不说怎么做。** 描述目标（「验证定价」「查融资历史」），不要指定路径（「搜 pricing」「爬 GitHub」）。指定路径会把子 Agent 锁死到主 Agent 的预设里，但有些事实需要走浏览器或 API，不是搜索能拿到的。must-verify 要具体到字段（「价格数字」「计费单位」），不要写「核实信息」这种泛泛话。
 
+**子 Agent 返回给主 Agent：**
+- findings：已验证结论，每个带来源 URL
+- gaps：没取得的内容
+- red_flags：可疑信息（疑似过期、营销话术、单一来源）
+
+主 Agent 收齐后按 sleuth 的 5 级可信度分级合成报告。子 Agent 自己关浏览器 tab（`agent-browser --session <name> close`）；忘了关用 `agent-browser close --all` 兜底。
+
+**不适合派子 Agent：**
+- 目标之间有依赖（下一个需要上一个的结果）
+- 几次 WebSearch 就能答完的轻量查询
+- 主 Agent 还没弄清要查什么
 ## 浏览器
 
 sleuth 自动选浏览器连接方式：
