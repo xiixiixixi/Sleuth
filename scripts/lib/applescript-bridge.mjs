@@ -23,3 +23,58 @@ export async function isAppleScriptAvailable() {
     return false;
   }
 }
+
+/**
+ * 在 Chrome 当前活跃标签页执行 JS，返回结果字符串。
+ * @param {string} js - JavaScript 代码
+ * @returns {Promise<string>}
+ */
+export async function execJS(js) {
+  const escapedJs = js.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const script = `tell application "Google Chrome" to execute javascript "${escapedJs}" in active tab of front window`;
+  return execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
+    encoding: 'utf8',
+    timeout: 10000,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+}
+
+/**
+ * 列出 Chrome 所有窗口的所有标签页。
+ * @returns {Promise<Array<{url: string, title: string}>>}
+ */
+export async function listTabs() {
+  const script = `tell application "Google Chrome"
+    set output to ""
+    repeat with w in windows
+      repeat with t in tabs of w
+        set output to output & (URL of t) & "\\t" & (title of t) & "\\n"
+      end repeat
+    end repeat
+    return output
+  end tell`;
+  const raw = execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
+    encoding: 'utf8',
+    timeout: 10000,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+  if (!raw) return [];
+  return raw.split('\n').filter(Boolean).map(line => {
+    const [url, ...titleParts] = line.split('\t');
+    return { url: url || '', title: titleParts.join('\t') || '' };
+  });
+}
+
+/**
+ * 在 Chrome 打开 URL（新窗口或当前窗口）。
+ * @param {string} url
+ * @returns {Promise<void>}
+ */
+export async function openTab(url) {
+  const script = `tell application "Google Chrome" to open location "${url}"`;
+  execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
+    encoding: 'utf8',
+    timeout: 10000,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+}
