@@ -2,7 +2,7 @@
 /**
  * spawn-subagent.mjs — 生成研究子 Agent 的 prompt 文本。
  *
- * 学 web-access 的目标导向写法：
+ * 目标导向的子 Agent prompt 生成器：
  *   - 子 Agent 必须加载 sleuth skill 并遵循指引（不是读孤立合同）
  *   - 主 Agent 只说目标，不指定步骤
  *   - 子 Agent 自主判断用什么工具、怎么走流程
