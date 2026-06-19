@@ -63,7 +63,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 
 - 至少给用户一个可追溯来源 URL。
 - reader 结果是线索不是证据——页面需要动态交互、登录态或真实状态验证时，不要假装 reader 够用，直接切浏览器。
-
+- 需要完整报告、多源交叉、覆盖充分时，读 `references/deep-research.md` 走 5 阶段工作流（澄清→规划→研究→压缩→合成）。
 ## 子 Agent
 
 对比 N 个独立产品、查证多个互不相关的事实时，可以派子 Agent 并行。主 Agent 串行做会慢，而且多次抓取的原始内容会占满上下文。
@@ -87,7 +87,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 - gaps：没取得的内容
 - red_flags：可疑信息（疑似过期、营销话术、单一来源）
 
-主 Agent 收齐后按 sleuth 的 5 级可信度分级合成报告。子 Agent 自己关浏览器 tab（`agent-browser --session <name> close`）；忘了关用 `agent-browser close --all` 兜底。
+主 Agent 收齐后按 sleuth 的 5 级可信度分级合成报告。子 Agent 自己关浏览器 tab（`agent-browser --session <name> close`）；忘了关用 `agent-browser close --all` 兜底。详细的分治判断、prompt 写法、合成阶段规则看 `references/multi-agent.md`。
 
 **不适合派子 Agent：**
 - 目标之间有依赖（下一个需要上一个的结果）
