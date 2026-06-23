@@ -25,6 +25,14 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 
 输出当前浏览器连接模式和环境变量（`SLEUTH_CDP_PORT` / `SLEUTH_CDP_WS`）。后续所有 agent-browser 命令带上这些变量。
 
+**如果 check-deps 输出 “chrome: 未发现可连的浏览器”**——Chrome 调试 toggle 没开，agent-browser 用不了。引导用户开：
+
+1. 跑 `open -a "Google Chrome" "chrome://inspect/#remote-debugging"` 帮用户打开 inspect 页面
+2. 告诉用户：页面上找到 **"Discover network targets"** 勾选框，勾上它
+3. 等用户确认后，重跑 `check-deps.mjs` 验证连上了
+
+没开 toggle 的任务（纯 WebSearch / WebFetch 能搞定的轻任务）可以继续，但涉及浏览器操作的任务必须等 toggle 开了再跑。
+
 ## 第 1 步：判断任务复杂度
 
 **轻任务**（直接答，不进 loop）：
