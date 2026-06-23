@@ -192,9 +192,9 @@ reader 是线索不是证据。核心结论必须回原始来源（浏览器或�
 
 ### 6.3 视频 / 音频 / PDF
 
-- 视频：字幕优先；无字幕操控 `<video>` + screenshot 采帧
-- 音频/播客：优先提取已有字幕和 shownotes；均失败告知用户无公开字幕，不伪造转录
-- PDF：eval 找链接，下载后用 Read 工具读取；arXiv 论文直接访问 `arxiv.org/pdf/<论文ID>`
+- 视频：字幕优先——用 `${CLAUDE_SKILL_DIR}/scripts/extract-subtitles.sh <URL>` 提取 YouTube 字幕，再用 `${CLAUDE_SKILL_DIR}/scripts/srt_to_transcript.py` 转成文本。无字幕时操控 `<video>` + screenshot 采帧（短视频 5-8 帧，中等 10-15 帧）
+- 音频/播客：优先提取已有字幕和 shownotes，搜 `"播客名" transcript`。均失败告知用户无公开字幕，不伪造转录
+- PDF：eval 找链接 `document.querySelectorAll('a[href$=".pdf"]')`，下载后用 Read 工具读取；arXiv 论文直接访问 `arxiv.org/pdf/<论文ID>`
 
 ### 6.4 DOM 提取
 

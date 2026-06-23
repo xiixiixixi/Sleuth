@@ -118,6 +118,16 @@ screenshot --full         # 全页
 screenshot --annotate     # 带 @ref 标注
 ```
 
+**截图默认存到 `~/.agent-browser/tmp/screenshots/`，不在当前目录。** 要搬到任务目录：
+
+```bash
+# 截图后搬到 output 目录
+agent-browser screenshot --cdp $SLEUTH_CDP_PORT
+cp ~/.agent-browser/tmp/screenshots/screenshot-*.png <outputDir>/screenshots/
+```
+
+不要用 `--file` 参数（不是有效的 screenshot flag，会报错）。
+
 ## 特殊场景
 
 ### 反爬 / anti-bot
