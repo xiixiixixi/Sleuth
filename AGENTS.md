@@ -128,7 +128,7 @@ npm i -g agent-browser@latest
 
 ## NOTES
 
-- **`docs/TESTING.md` 撒谎**：引用了 `finish-gate.test.mjs` 和"23 条测试"，**该文件不存在**（session 系统砍时一起删了）。要么删这段引用，要么补 test
+- **`docs/TESTING.md` 已重写（2026-06-23）**：旧版引用已删的 `finish-gate.test.mjs` / session-logger / deliver 系统；新版按当前架构重写（53 条自动化测试 + 手动 skill 行为测试清单 C1-C16 + 覆盖盲区 + 已知问题）
 - **docs/DECISION.md 与 RESEARCH_AUDIT.md 未在 WHERE TO LOOK 列出**：DECISION 是否决方案追溯，RESEARCH_AUDIT 是 2026-06-19 references 重构的依据文档（5 份→ 3 份的 audit）。两者都是 gitignored 本地文档。
 - **测试覆盖盲区**：`find-url.mjs`（341 行）、`check-deps.mjs`、`check-deps-core.mjs`、`output.mjs` 都 0 测试
 - **agent-browser 版本敏感**：0.27.1 的 `--cdp <ws-url>` 有 HTTP 预检 403 bug，必须 0.28+

@@ -86,7 +86,9 @@
 
 ### 4.3 中间记录格式（JSONL，返回给主 Agent）
 
-搜索 Agent 通过 stdout 返回 **每行一个 JSON 对象**，主 Agent parse 后 append 到 findings.jsonl。**子 Agent 不直接写文件**。返回格式示例：
+搜索 Agent 通过 stdout 返回 **每行一个 JSON 对象**，主 Agent parse 后 append 到 findings.jsonl。**子 Agent 不直接写文件**。
+
+返回格式（**硬约束——字段值只允许以下枚举，不允许自创**）：
 
 ```jsonl
 {"type":"finding","claim":"Claude API 输入定价 $3/M tokens","url":"https://www.anthropic.com/pricing","confidence":"已验证事实","tier":"T1","dimensions_seen":[{"dimension":"视角覆盖","observation":"Reddit r/LocalLLaMA 有用户吐槽价格涨幅","source_url":"https://reddit.com/r/LocalLLaMA/..."}]}
@@ -95,10 +97,32 @@
 {"type":"red_flag","claim":"...","reason":"疑似过期（2024 文章）"}
 ```
 
-**dimensions_seen 字段 schema**（不是自由文本）：
-- `dimension`: 必须是 `${CLAUDE_SKILL_DIR}/references/boundary.md` 的 4 固定维度之一（`来源类型` / `视角` / `时间` / `地域`）或已声明的扩展名（如 `价格` / `安全` / `性能基准` / `法务`）
-- `observation`: 该维度的具体观察（一句话，附 URL 最好）
-- `source_url`: 观察来源（可选但推荐）
+**`type` 字段——只允许以下 3 个值**：
+- `finding`：已验证或已提取的事实（**不允许** `funding_round` / `valuation` / `investor` 等自定义类型——把分类信息放进 `dimensions_seen`）
+- `gap`：还缺什么（字段用 `what` + `reason`，不用 `claim` / `url`）
+- `red_flag`：疑似过期 / 矛盾 / 不可靠（字段用 `claim` + `reason`）
+
+**`confidence` 字段——只允许以下 5 个值**（`gap` / `red_flag` 类型不需要此字段）：
+- `已验证事实`：多个独立源一致 + T1 来源
+- `高置信推断`：单源 + T1/T2 来源
+- `未确认线索`：单源 + T3 来源，或标了 red_flag
+- `冲突信息`：源之间矛盾
+- `覆盖缺口`：所有 gaps 汇总
+- **不允许** `已确认` / `高` / `低` 等缩写或自创值
+
+**`tier` 字段——字符串 `"T1"` / `"T2"` / `"T3"`，不是整数**：
+- `"T1"`：官方文档、官方博客、监管文件、同行评议
+- `"T2"`：行业分析、第三方评测、GitHub issues、成熟评论站
+- `"T3"`：搜索摘要、SEO 文、未署名新闻稿、单条论坛评论
+- ❌ `1` / `2` / `3`（整数不接受）
+- ❌ `"primary"` / `"secondary"` / `"tertiary"`
+
+**`dimensions_seen` 必须是对象数组**（不是字符串数组）：
+- ✅ `[{"dimension":"视角覆盖","observation":"Reddit 用户吐槽价格涨幅","source_url":"https://reddit.com/..."}]`
+- ❌ `["amount","date"]`（扁平字符串不接受——分类信息放 `dimension` 字段，具体观察放 `observation` 字段）
+- `dimension`：必须是 `${CLAUDE_SKILL_DIR}/references/boundary.md` 的 4 固定维度之一（`来源类型` / `视角` / `时间` / `地域`）或已声明的扩展名（如 `价格` / `安全` / `性能基准` / `法务`）
+- `observation`：该维度的具体观察（一句话，附 URL 最好）
+- `source_url`：观察来源（可选但推荐）
 
 **返回前必须去重**：同维度多条观察合并；不允许返回 5 条都是「视角覆盖」的 dimensions_seen。
 

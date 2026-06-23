@@ -106,8 +106,13 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 每个搜索 Agent 通过 stdout 返回 **JSONL**（每行一个 JSON 对象，格式见 `${CLAUDE_SKILL_DIR}/references/search.md` §4.3）。收齐后：
 
 1. `JSON.parse` 逐行解析
-2. 给每条 finding 补充字段：`ts`（当前 ISO 时间戳）、`round`（当前轮次）、`agent`（你给的 agent 名）、`claim_id`（`sha1(normalized_claim + url_domain)` 前 12 位；`normalized_claim` = lowercase + 去标点 + 折叠空白）
-3. 用 Write 工具 append 到 `<outputDir>/findings.jsonl`
+2. **校验 + 归一化**（子 Agent 可能不严格遵守 §4.3 枚举，必须清洗后再写）：
+   - `type` 不在 `finding` / `gap` / `red_flag` 里 → 强制改 `finding`（自定义类型如 `funding_round` / `valuation` 不保留）
+   - `confidence` 不在 5 级枚举（`已验证事实` / `高置信推断` / `未确认线索` / `冲突信息` / `覆盖缺口`）里 → 按 tier 推断：T1/T2 → `高置信推断`，T3 → `未确认线索`
+   - `tier` 是整数（`1`/`2`/`3`）或英文（`primary`/`secondary`/`tertiary`）→ 映射成 `"T1"` / `"T2"` / `"T3"`
+   - `dimensions_seen` 是字符串数组（如 `["amount","date"]`）→ 转成对象数组 `[{"dimension":"<原值>","observation":""}]`
+3. 给每条 finding 补充字段：`ts`（当前 ISO 时间戳）、`round`（当前轮次）、`agent`（你给的 agent 名）、`claim_id`（`sha1(normalized_claim + url_domain)` 前 12 位；`normalized_claim` = lowercase + 去标点 + 折叠空白）
+4. 用 Write 工具 append 到 `<outputDir>/findings.jsonl`
 
 **只有你写 findings.jsonl。** 子 Agent 不写文件——避免并发写撕行。
 
