@@ -9,4 +9,5 @@ docs/
 .claude/
 .omo/
 *.tgz
+.codegraph/
 test/

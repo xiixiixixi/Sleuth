@@ -91,13 +91,12 @@ export async function main(options = {}) {
   }
 
   // 3. 输出目录
+  // 3. 输出目录（任务模式优先于日期模式）
+  const outDir = resolveOutputDir(options.taskName);
+  results.outputDir = outDir;
   if (!options.checkOnly) {
-    const outDir = resolveOutputDir();
     ensureOutputDir(outDir);
-    results.outputDir = outDir;
     if (!options.json) console.log(`output-dir: ${outDir}`);
-  } else {
-    results.outputDir = resolveOutputDir();
   }
 
   // 4. site-patterns（占位，给 agent 用）

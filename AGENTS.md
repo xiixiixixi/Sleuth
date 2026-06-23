@@ -15,7 +15,7 @@ sleuth/
 ├── SKILL.md            概念入口；agent 触发后由 skills 系统自动加载
 ├── README.md           安装与安全边界
 ├── LICENSE             MIT
-├── references/         agent 按需读的展开文档（4 份，见 references/AGENTS.md）
+├── references/         agent 按需读的展开文档（4 份：search.md / boundary.md / review.md / tool-guide.md，见 references/AGENTS.md）
 ├── scripts/            CLI 工具（见 scripts/AGENTS.md）
 │   ├── lib/
 │   └── __tests__/
@@ -28,10 +28,12 @@ sleuth/
 | 任务 | 位置 | 备注 |
 |------|------|------|
 | 改 skill 行为规则 | `SKILL.md` | 这是 agent 读的主入口，所有硬规则的根 |
-| 加搜索策略 | `references/search-guide.md` | 单次搜索方法论（必搜/必不搜/query 改写） |
-| 加深度研究流程 | `references/deep-research.md` | 5 阶段工作流（clarify→plan→research→compress→synthesize） |
-| 加多 Agent 协同 | `references/multi-agent.md` | supervisor-researcher 角色分工 |
-| 改浏览器命令参考 | `references/tool-guide.md` | agent-browser CLI 用法 |
+| 加搜索策略 / 查询规则 / 多模态提取 / 搜索循环 | `references/search.md` | 搜索子 Agent |
+| 加边界评估规则 | `references/boundary.md` | 边界子 Agent |
+| 加审查 Agent 规则 | `references/review.md` | 审查子 Agent |
+| 合成 / 证据分层 / 交付 | `SKILL.md` §7 | 主 Agent |
+| 改子 Agent 角色 / 任务分析 / loop / 长程任务行为 | `SKILL.md` 第 1-2 步（任务分析）+ 第 3-7 步（主 Agent loop：搜索/边界/审查）+「状态文件 schema」+「长程任务行为」段 | 4 角色（主/搜索/边界/审查）+ state schema + 零交互 / 就绪即执行 |
+| 改 agent-browser 命令参考 / 反爬降级 / 特殊内容类型 | `references/tool-guide.md` | 完整命令速查 |
 | 改环境检查 | `scripts/check-deps.mjs` + `scripts/lib/check-deps-core.mjs` | 薄 shim + 核心逻辑 |
 | 改子 Agent prompt 模板 | `scripts/spawn-subagent.mjs` | 单文件，无 lib 依赖 |
 | 改本地 URL 搜索 | `scripts/find-url.mjs` | 341 行单体脚本（注意：未测试） |
@@ -45,7 +47,7 @@ sleuth/
 - **ESM only**：`import` 全部带 `'node:'` 协议头；无 `require`、无 CommonJS
 - **Node ≥ 18**：README 声明，用 `node:util/parseArgs`、`node:test`、`fs.mkdirSync({ recursive: true })`
 - **零 npm 依赖**：`find . -name package.json` 应该空；scripts/ 全用 `node:*` 内建
-- **薄 shim 模式**：CLI 在 `scripts/<name>.mjs`，核心逻辑在 `scripts/lib/<name>-core.mjs`（参考 `check-deps.mjs` 64 行 + `lib/check-deps-core.mjs` 134 行）
+- **薄 shim 模式**：CLI 在 `scripts/<name>.mjs`，核心逻辑在 `scripts/lib/<name>-core.mjs`（参考 `check-deps.mjs` 86 行 + `lib/check-deps-core.mjs` 133 行）
 - **路径解析**：`fileURLToPath(import.meta.url)` 不要 `__dirname`（ESM 没有它）
 - **CLI shebang**：`#!/usr/bin/env node` 在 `scripts/*.mjs` 顶部；`lib/*.mjs` 不加
 - **错误处理**：`try { ... } catch { /* fallback */ }` 内联回退 + `console.error(msg)` + `process.exit(1|2)`
@@ -93,8 +95,10 @@ sleuth/
 - **3 套参数解析风格并存**（**tech debt**，未统一）：`check-deps.mjs` 手撸 flag、`spawn-subagent.mjs` 用 `util.parseArgs`、`find-url.mjs` 手撸位置参数
 - **`${CLAUDE_SKILL_DIR}` 硬绑定 Claude Code**：所有 SKILL.md 命令用此变量；README 宣称支持 50+ agent 但实际需要 Claude Code 兼容的 skill loader
 - **`spawn-subagent.mjs` 输出的 prompt 里 `${CLAUDE_SKILL_DIR}` 必须字面量**：由子 Agent 自己展开，主 Agent 不能预先替换（`spawn-subagent.mjs:56` 注释明确）
-- **output 目录按日期不按 session**：`~/.sleuth/output/YYYY-MM-DD/`（session 系统砍掉后改的，`lib/output.mjs:5` 注释）
-- **`check-deps-core.mjs` 行 128-134 有死 re-export**：`main as ensureCDP` 是旧名遗留，`resolveOutputDir`/`ensureOutputDir` 在 core 之外没消费者
+- **output 目录按 task-name 不按日期**：`~/.sleuth/output/<task-name>/`（多 Agent 协作需独立 task 目录；旧 `lib/output.mjs` 按日期，与新 loop 模式不兼容——见 SKILL.md「状态文件 schema」）
+- **`check-deps-core.mjs` 行 128-134 有死 re-export**：`main as ensureCDP` 是旧名遗留；`resolveOutputDir`/`ensureOutputDir` 现在在 core 内部被消费（行 94-100），外部 CLI 不直接 import output.mjs
+- **`output.mjs` task-name 模式（2026-06-19）**：`resolveOutputDir(taskName?)` 支持两种模式——传 taskName 则按 `~/.sleuth/output/<task-name>/`（多 Agent 协作需独立 task 目录），不传则按 `YYYY-MM-DD/`（向后兼容）。`sanitizeTaskName` 拒路径分隔符 / `..` / 特殊字符（只允许 `[a-zA-Z0-9-_.]`），防注入。空字符串视为「已传入但非法」会抛错（`if (taskName !== undefined)` 不是 truthy 检查）。check-deps CLI 通过 `--task-name <name>` 传入。
+- **`spawn-subagent.mjs` 的 3 role 模板**：`search`（Pattern A，默认）/ `boundary`（Pattern B，列未覆盖维度）/ `review`（Pattern D，证据链审计）。三个 builder 函数 `buildSearchContract` / `buildBoundaryContract` / `buildReviewContract` 分别生成不同 prompt。返回格式：search→findings+gaps+red_flags+dimensions_seen；boundary→uncovered_dimensions；review→audit_findings。
 
 ## COMMANDS
 
@@ -106,7 +110,14 @@ node scripts/check-deps.mjs --check-only
 node --test scripts/__tests__/
 
 # 生成子 Agent prompt 文本
-node scripts/spawn-subagent.mjs --goal "验证 X 的定价" --must-verify "价格"
+# 生成子 Agent prompt 文本（默认 search role）
+node scripts/spawn-subagent.mjs --goal "验证 X 的定价" --must-verify "价格" --deliverable "定价对比表" --stop-criteria "至少 3 个独立源"
+
+# 生成边界 Agent prompt
+node scripts/spawn-subagent.mjs --role boundary --goal "评估覆盖度" --task-dir ~/.sleuth/output/<task-name>/
+
+# 生成审查 Agent prompt
+node scripts/spawn-subagent.mjs --role review --goal "审计证据链" --task-dir ~/.sleuth/output/<task-name>/ --draft-path ~/.sleuth/output/<task-name>/draft.md
 
 # 找本地浏览器历史/书签 URL
 node scripts/find-url.mjs "关键词" --since 7d
@@ -118,7 +129,7 @@ npm i -g agent-browser@latest
 ## NOTES
 
 - **`docs/TESTING.md` 撒谎**：引用了 `finish-gate.test.mjs` 和"23 条测试"，**该文件不存在**（session 系统砍时一起删了）。要么删这段引用，要么补 test
-- **README 目录树与实际脱节**：README 只提 `tool-guide.md` + `search-guide.md`，实际有 4 份 references（多了 `deep-research.md`、`multi-agent.md`）。`scripts/lib/` 和 `scripts/__tests__/` 也未列出
+- **docs/DECISION.md 与 RESEARCH_AUDIT.md 未在 WHERE TO LOOK 列出**：DECISION 是否决方案追溯，RESEARCH_AUDIT 是 2026-06-19 references 重构的依据文档（5 份→ 3 份的 audit）。两者都是 gitignored 本地文档。
 - **测试覆盖盲区**：`find-url.mjs`（341 行）、`check-deps.mjs`、`check-deps-core.mjs`、`output.mjs` 都 0 测试
 - **agent-browser 版本敏感**：0.27.1 的 `--cdp <ws-url>` 有 HTTP 预检 403 bug，必须 0.28+
 - **chrome://inspect toggle 不持久**：Chrome 重启会重置，用户需重新勾选

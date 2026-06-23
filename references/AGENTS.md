@@ -1,45 +1,34 @@
 # references/
 
-agent 按需读的展开文档。SKILL.md 是主入口（声明触发条件和硬规则），references/ 是具体方法论的展开。
+| 文档 | 内容 |
+|---|---|
+| search.md | 搜索执行：必搜/必不搜、查询规则、工具选择、失败兜底、搜索循环、多模态提取、JSONL 返回、dimensions_seen、directions.json 格式 |
+| boundary.md | 边界评估：4 固定维度、terminate_recommended 判定、输出 schema |
+| review.md | 证据链审计：4 项审计、分层抽样、Tier 分级、5 级可信度、输出 schema |
+| tool-guide.md | agent-browser 命令速查、反爬降级、特殊内容类型 |
 
-## STRUCTURE
+## 每份文档的边界
 
-```
-references/
-├── search-guide.md      单次搜索方法论（206 行）
-├── deep-research.md     单 Agent 深度研究工作流（184 行）
-├── multi-agent.md       多 Agent 协同（169 行）
-└── tool-guide.md        agent-browser CLI 命令参考（206 行）
-```
-
-## WHERE TO LOOK
-
-| agent 场景 | 读哪份 |
-|------|------|
-| 做单次搜索 / WebSearch 调用 | `search-guide.md`（必搜/必不搜清单、query 改写、何时停、证据层级） |
-| 用户要"完整报告"、"深度调研"、"全面对比" | `deep-research.md`（5 阶段：clarify→plan→research→compress→synthesize） |
-| 有多个独立目标可并行，要派子 Agent | `multi-agent.md`（分治判断、目标导向 prompt、合成阶段） |
-| 实际调用 agent-browser（snapshot/click/eval/...） | `tool-guide.md`（命令速查、反爬降级、特殊内容类型） |
+- **search.md** 只讲搜索执行。不塞 agent-browser 命令细节（那是 tool-guide.md 的家）
+- **boundary.md** 只讲边界评估。自包含——不引用其他文档
+- **review.md** 只讲证据链审计。自包含——Tier 分级和 5 级可信度都内联（因为审计需要对照）
+- **tool-guide.md** 只讲命令参数。独立——不引用其他文档的逻辑
 
 ## CONVENTIONS
 
-- **每份文档单一主题**：search-guide 只讲单次搜索；deep-research 只讲多轮迭代；multi-agent 只讲并行分工。不要混。
-- **中文硬规则用 强势动词**：必须 / 绝不 / 不要 / 禁止 / 不允许。不要用英文 DO NOT/NEVER。
-- **每份文档独立可读**：agent 可能只读一份就回去干活，不要让 A 文档依赖 B 文档才能理解。
-- **跟 SKILL.md 的硬规则对齐**：SKILL.md 是根，references/ 是展开。展开时不要发明新规则，只能详细化已有规则。
-- **引用调研结论时附 URL**：`[结论](https://来源URL)`，单源最多 15 词直引。
+- **中文硬规则用 强势动词**：必须 / 绝不 / 不要 / 禁止 / 不允许
+- **每份文档独立可读**
+- **跟 SKILL.md 的硬规则对齐**：SKILL.md 是根，references/ 是各子 Agent 的展开
+- **引用调研结论时附 URL**：`[结论](https://来源URL)`，单源最多 15 词直引
 
 ## ANTI-PATTERNS
 
-- **不要把工具命令塞进方法论文档**：`search-guide.md` 不写 `agent-browser` 命令；`tool-guide.md` 不讲搜索策略。
-- **不要重新发明流程**：deep-research 的 5 阶段是定型的；multi-agent 的 supervisor-researcher 分工是定型的。要改先改 SKILL.md 的根规则。
-- **不要在 references/ 提"学 web-access"/"参考 Perplexity"**：sleuth 是独立设计，文档里禁止出现别的 skill 名字（commit `9096a05` 的教训）。
-- **不要加 hard cap（数字上限）**：之前 search-guide.md 有"4 轮/20 query/180 秒"的硬 cap，已删（commit `6a176e7`）。让 agent 用判断标准决定何时停。
+- **不要把工具命令塞进 search.md / boundary.md / review.md**
+- **不要在 references/ 提别的 skill 名字**（如 web-access）
+- **不要加 hard cap**（数字上限）
+- **不要把 system-layer framework 细节塞进来**（心跳看门狗 / cron / stall 阈值）
 
 ## NOTES
 
-- **`tool-guide.md` 里 `deliver` 引用已清干净**：曾经有 `deliver save --type image` 命令，deliver 系统砍后改成 curl 下载（commit `0b16d8f`）
-- **`tool-guide.md` 的 AppleScript 段已删**：commit `c54d49c`，只剩 approval mode + agent-browser CLI
-- **README 目录树未更新**：README 只提 `tool-guide.md` + `search-guide.md`，没列 `deep-research.md` 和 `multi-agent.md`——这是已知文档债
-- **`search-guide.md` 的引用纪律段跟 SKILL.md 交付段重复**：故意重复，因为这是 sleuth 最容易违反的硬规则
-- **`multi-agent.md` 的"目标导向 prompt 写法"是核心**：主 Agent 写 goal 时"说要什么，不说怎么做"——这条比所有 spawn-subagent.mjs 的 flag 都重要
+- **文档拆分历史**：原 research.md（363 行）逐步拆为现在的 search.md + boundary.md + review.md + tool-guide.md 四份独立文档；合成规则移入 SKILL.md §7
+- **每份子 Agent 文档自包含**：子 Agent 只读被指定的那一份 references，不跨文档跳转

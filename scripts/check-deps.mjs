@@ -12,11 +12,20 @@ const HELP = `用法: node check-deps.mjs [选项]
 选项:
   --check-only              非破坏性诊断（不写运行目录）
   --output-dir              仅输出目录路径
+  --task-name <name>        按任务名创建/解析输出目录（多 Agent 协作需独立目录）
   --json                    输出机器可读 JSON
-  --help, -h                显示此帮助`;
+  --help, -h                显示此帮助
+
+task-name 允许字符：字母/数字/-/_/.（拒路径分隔符）
+示例：
+  node check-deps.mjs --task-name openai-2026-06-19 --check-only`;
 
 const KNOWN_FLAGS = new Set([
   '--output-dir', '--check-only', '--json', '--help', '-h',
+]);
+
+const VALUE_FLAGS = new Set([
+  '--task-name',
 ]);
 
 function parseArgv(argv) {
@@ -24,14 +33,26 @@ function parseArgv(argv) {
   const booleans = new Set();
   const unknown = [];
 
-  for (const raw of argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const raw = argv[i];
     if (!raw.startsWith('-')) continue;
-    if (!KNOWN_FLAGS.has(raw)) {
+    if (!KNOWN_FLAGS.has(raw) && !VALUE_FLAGS.has(raw)) {
       unknown.push(raw);
       continue;
     }
     if (raw === '--help' || raw === '-h') {
       booleans.add('help');
+      continue;
+    }
+    if (VALUE_FLAGS.has(raw)) {
+      const value = argv[i + 1];
+      if (!value || value.startsWith('-')) {
+        console.error(`Error: ${raw} 需要一个值`);
+        process.exit(2);
+      }
+      const key = raw.replace(/^--/, '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      values[key] = value;
+      i++; // skip value
       continue;
     }
     booleans.add(raw.replace(/^--/, '').replace(/-([a-z])/g, (_, c) => c.toUpperCase()));
@@ -40,7 +61,7 @@ function parseArgv(argv) {
   return { values, booleans, unknown };
 }
 
-const { booleans, unknown } = parseArgv(process.argv.slice(2));
+const { values, booleans, unknown } = parseArgv(process.argv.slice(2));
 
 if (booleans.has('help')) {
   console.log(HELP);
@@ -56,6 +77,7 @@ const options = {
   outputDirOnly: booleans.has('outputDir'),
   checkOnly: booleans.has('checkOnly'),
   json: booleans.has('json'),
+  taskName: values.taskName,
 };
 
 main(options).catch((err) => {

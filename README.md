@@ -14,16 +14,14 @@ Sleuth 不是又一个搜索工具或浏览器自动化框架。它是一套判�
 
 ## 怎么工作
 
-Sleuth 根据任务复杂度分四个层级：
+Sleuth 根据任务复杂度分两条路径：
 
-| 层级 | 什么时候用 | 做什么 |
+| 路径 | 什么时候用 | 做什么 |
 |------|-----------|--------|
-| 直答 | Agent 已有知识足够 | 直接回答 |
-| 快速验证 | 一两个来源就能确认 | 搜索 + 验证 |
-| 定向研究 | 需要多步查证但问题集中 | 混合使用工具，按需升级 |
-| 并行调研 | 多个独立目标需同时查 | 派子 Agent 并行，主 Agent 合成摘要 |
+| 轻任务 | 1-2 次搜索能答完 | 直接答 + 必要时一次 WebFetch 验证一手来源 |
+| 并行调研 | 深度报告 / 多源交叉 / 多个独立子主题 / 跨多日 | 主 Agent 调度，派搜索/边界/审查 Agent，状态写文件 |
 
-核心原则：**从最轻的工具开始，证据不够再升级。**
+所有路径都遵循工具升级原则：**从最轻的工具开始，证据不够再升级。**
 
 - 找不到入口 → 先搜索
 - 知道在哪但没读内容 → 先用 reader
@@ -84,9 +82,15 @@ check-deps 检查环境，输出端口和连接变量。
 ```
 ├── SKILL.md                    主 skill 文件
 ├── references/
-│   ├── tool-guide.md           浏览器命令参考
-│   └── search-guide.md         搜索策略
-├── scripts/                    辅助脚本
+│   ├── search.md            搜索执行（查询 / 工具 / 失败 / 循环 / JSONL 返回）
+│   ├── boundary.md          边界评估（4 固定维度 / terminate_recommended / 输出 schema）
+│   ├── review.md            证据链审计（4 项审计 / 分层抽样 / Tier 分级 / 输出 schema）
+│   └── tool-guide.md        agent-browser 命令速查 / 反爬降级 / 特殊内容
+├── scripts/                    CLI 工具（环境检查 / 子 Agent prompt / 本地 URL 搜索）
+│   ├── check-deps.mjs       环境检查
+│   ├── spawn-subagent.mjs   子 Agent prompt 生成
+│   ├── find-url.mjs         本地 Chrome 历史/书签搜索
+│   └── lib/                 核心逻辑（环境检查 / 浏览器发现 / 输出目录）
 ├── LICENSE
 └── README.md
 ```

@@ -1,10 +1,8 @@
 # agent-browser 命令速查
 
-> 纯工具调用参考。策略判断看 `search-guide.md`，流程控制看 SKILL.md。
-
 ## 连接
 
-前提：浏览器已通过 `check-deps.mjs` 就绪。`check-deps` 输出会告诉你当前端口和环境变量。
+前提：浏览器已通过 `${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs` 就绪。`check-deps` 输出会告诉你当前端口和环境变量。
 
 ```bash
 # check-deps 输出的 SLEUTH_CDP_PORT 变量
@@ -183,7 +181,7 @@ network requests            # 查看所有请求
 
 ### 特殊内容类型
 
-**视频：** 字幕优先 → `extract-subtitles.sh <URL>` + `srt_to_transcript.py`。无字幕时操控 `<video>` + screenshot 采帧（短视频 5-8 帧，中等 10-15 帧）。B站、YouTube 也可站内搜索。
+**视频：** 字幕优先 → `${CLAUDE_SKILL_DIR}/scripts/extract-subtitles.sh <URL>` + `${CLAUDE_SKILL_DIR}/scripts/srt_to_transcript.py`。无字幕时操控 `<video>` + screenshot 采帧（短视频 5-8 帧，中等 10-15 帧）。B站、YouTube 也可站内搜索。
 
 **音频/播客：** 优先提取已有字幕和 shownotes，搜 `"播客名" transcript`。均失败则告知用户无公开字幕。
 
