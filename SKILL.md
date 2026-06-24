@@ -15,6 +15,10 @@ description: >-
 | **review.md** | 证据链审计：4 项审计 / 分层抽样 / Tier 分级 / 输出 schema |
 | **tool-guide.md** | agent-browser 命令速查 / 反爬降级 / 特殊内容 |
 
+## 角色边界
+
+主 Agent 只做 **调度 + 合成**——派子 Agent 做研究、收 findings、写报告、派审查。**不亲手做研究**：不自己搜、不自己开浏览器、不自己截图。你脑子里的 URL 可能是错的（如把 Windsurf 的官网记成 devin.ai），搜索子 Agent 的搜索结果比你的记忆可靠。研究由子 Agent 完成，主 Agent 用子 Agent 返回的 URL 和 findings 合成报告。
+
 ## 第 0 步：环境检查
 
 每次触发后第一件事，不跳过：
