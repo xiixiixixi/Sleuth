@@ -53,7 +53,22 @@ node "${CLAUDE_SKILL_DIR}/scripts/launch-chrome.mjs"
 - 单次搜索后发现比预想复杂
 - 需要多轮迭代才能收敛
 
-→ 继续第 2 步。
+→ 继续第 1.5 步。
+
+## 第 1.5 步：侦察（Scout）
+
+并行调研任务在写 task_spec 之前，先派 1 个侦察 Agent 做全局广度扫描：
+
+```bash
+node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs \
+  --role scout \
+  --goal "<用户问题领域>" \
+  --task-dir <outputDir>
+```
+
+侦察 Agent 做 3 类搜索（实体发现 / 结构对比 / 技术维度），返回 landscape.json（entities / perspectives / source_hints）。不做深度研究、不提取 claim。
+
+**拿到 landscape.json 后**：基于它写 task_spec——子问题按 entities 和 perspectives 拆，不是凭你脑子里的知识猜。侦察发现的实体和来源是你拆题的依据。
 
 ## 第 2 步：初始化任务目录 + 写 task_spec.md
 

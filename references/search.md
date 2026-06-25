@@ -58,14 +58,24 @@
 
 ---
 
-## 4. 核心循环（每轮必走）
+## 4. 核心循环（硬约束——不允许搜一轮就返回）
+
+搜索 Agent 必须跑完整迭代循环，直到满足退出条件：
 
 ```
-搜 → 读页面 → 反思 → 改写
- ↑                     ↓
- └─────────────────────┘
+搜 → 读页面 → 反思 → 够不够？
+ ↑                  ↓
+ └── 不够，改写 query ──┘
 ```
 
+**循环条件**：gap analysis 显示还有未验证的 must-verify 项 → 继续搜
+
+**退出条件**（满足任一即可返回）：
+1. 所有 must-verify 项已验证（回原始来源确认）
+2. 连续 2 次搜索返回类似信息（无新 claim 产出）
+3. 已做 10 次 tool call（硬上限）
+
+**绝对不允许**搜一轮就返回——那是浪费主 Agent 的派发。
 ### 4.1 gap 反哺（硬规则）
 
 每轮搜完做 gap analysis，按固定步骤：
@@ -151,8 +161,27 @@
 - `direction` 相似但 `source_type` 不同 → **不算重复**（同主题换来源类型是合法探索）
 - `direction` 完全不同 → 不算重复
 
-这是反认知循环硬规则的机器判定依据。
+### 4.5 返回前 cleanup（硬约束）
 
+返回 findings 之前，必须做一次清理压缩。不返回 raw HTML、不返回搜索摘要原文、不返回 tool call 日志。
+
+清理步骤：
+1. **删失败结果**：删掉失败的 tool call、404 页面、登录墙挡住的空结果
+2. **删跑题内容**：和 must-verify 无关的页面内容删掉
+3. **合并重复**：同一事实多个源 → 合成一条 finding，claim 里写“多源确认”，url 只列最权威的一个
+4. **补全字段**：每条 finding 必须有 claim + url + tier + confidence（按 §4.3 枚举）
+5. **提取 follow_up_questions**：搜索过程中发现的新实体 / 新概念 / 未覆盖方向，提取成具体问题
+
+follow_up_questions 规则：
+- 每条 finding 可以带 0-N 个 follow_up_questions
+- 只在发现了**新实体/新概念**时才提（不是“再搜一次”）
+- 每个必须是具体的问题（例：“Genesys 是否也有 AOP 机制？”）
+
+返回的 JSONL 里，finding 类型可以带 follow_up_questions 字段：
+
+    {"type":"finding","claim":"...","url":"...","tier":"T1","confidence":"已验证事实","follow_up_questions":["Genesys 是否也有 AOP 机制？"]}
+
+**cleanup 是返回前的最后一道工序——不清理就返回等于把垃圾丢给主 Agent。**
 ---
 
 ## 5. 终止信号

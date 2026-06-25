@@ -144,3 +144,35 @@ test('does NOT contain session/deliver/sid references in any role', () => {
   const reviewOut = run(['--role', 'review', '--goal', 'test', '--task-dir', '/tmp/x/', '--draft-path', '/tmp/d.md']);
   assert.doesNotMatch(reviewOut, /--sid|session-logger|deliver|--main-sid|--role subagent|subagent_done/);
 });
+
+// ===== Scout role tests =====
+
+test('scout role: generates prompt with landscape.json format', () => {
+  const out = run(['--role', 'scout', '--goal', 'test landscape']);
+  assert.match(out, /Scout/);
+  assert.match(out, /landscape\.json/);
+  assert.match(out, /entities/);
+  assert.match(out, /perspectives/);
+  assert.match(out, /source_hints/);
+});
+
+test('scout role: has 3 search types', () => {
+  const out = run(['--role', 'scout', '--goal', 'test']);
+  assert.match(out, /实体发现/);
+  assert.match(out, /结构对比/);
+  assert.match(out, /技术维度/);
+});
+
+test('scout role: exits non-zero when --goal missing', () => {
+  assert.throws(() => run(['--role', 'scout']), /scout role requires --goal/);
+});
+
+test('scout role: has tool call cap of 8', () => {
+  const out = run(['--role', 'scout', '--goal', 'test']);
+  assert.match(out, /8 次 tool call/);
+});
+
+test('scout role: does NOT contain session/deliver/sid references', () => {
+  const out = run(['--role', 'scout', '--goal', 'test']);
+  assert.doesNotMatch(out, /--sid|session-logger|deliver|--main-sid|--role subagent|subagent_done/);
+});

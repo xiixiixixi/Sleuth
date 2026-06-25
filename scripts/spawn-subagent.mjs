@@ -2,8 +2,9 @@
 /**
  * spawn-subagent.mjs — 生成研究子 Agent 的 prompt 文本。
  *
- * 支持 3 种子 Agent 角色：
- *   - search（默认）   搜索执行 Agent，单点研究
+ * 支持 4 种子 Agent 角色：
+ *   - scout            侦察 Agent，广度扫描摸地形
+ *   - search（默认）   搜索执行 Agent，自迭代深度研究
  *   - boundary         边界评估 Agent，列未覆盖维度 + terminate_recommended
  *   - review           证据链审计 Agent，按 Tier 分层抽样
  *
@@ -27,7 +28,7 @@
 
 import { parseArgs } from 'node:util';
 
-const VALID_ROLES = new Set(['search', 'boundary', 'review']);
+const VALID_ROLES = new Set(['scout', 'search', 'boundary', 'review']);
 
 function fail(msg) {
   console.error(`Error: ${msg}`);
@@ -51,8 +52,9 @@ const { values } = parseArgs({
 
 if (values.help) {
   console.log(
-    'Usage: node spawn-subagent.mjs --role <search|boundary|review> --goal <text> [options]\n\n' +
+    'Usage: node spawn-subagent.mjs --role <scout|search|boundary|review> --goal <text> [options]\n\n' +
       'Roles:\n' +
+      '  scout               侦察 Agent，广度扫描产出 landscape.json\n' +
       '  search (default)    搜索执行 Agent，返回 JSONL\n' +
       '  boundary            边界评估 Agent，返回 terminate_recommended + 未覆盖维度\n' +
       '  review              证据链审计 Agent，按 Tier 分层抽样\n\n' +
@@ -210,8 +212,63 @@ ${v['draft-path']}
 【完成标准】
 audit_findings + sampled_stats 已输出。`;
 }
+// --- scout role ---
+function buildScoutContract(v) {
+  if (!v.goal) fail('scout role requires --goal');
+
+  return `你是 sleuth 研究子 Agent（侦察 / Scout）。
+
+**环境变量**（主 Agent 已设置）：
+- \`CLAUDE_SKILL_DIR\`：skill 根目录——文档在 \`\${CLAUDE_SKILL_DIR}/references/\`
+- \`SLEUTH_CDP_PORT\`：Chrome 调试端口——agent-browser 命令带 \`--cdp $SLEUTH_CDP_PORT\`
+
+**必读文档**：\`\${CLAUDE_SKILL_DIR}/references/search.md\` §2（查询规则）+ §3（工具选择）
+
+**安全边界**（必须遵守）：
+- 不提取 cookie / 密码 / 敏感凭据
+- 不对敏感页面截图
+- 不绕付费墙
+- 🔴 产生状态变更的操作执行前必须先停下问——只读浏览无需确认
+
+**你的角色**：侦察。你是先遣部队，只负责摸清地形，不做深度研究。
+
+【目标】
+${v.goal}
+
+【你的任务】
+做系统性广度扫描（Systematic Breadth Scan），回答 3 个问题：
+1. **关键实体**（Entities）：这个领域有哪些玩家 / 产品 / 概念？
+2. **多元视角**（Perspectives）：从哪些角度切入这个主题？
+3. **一手来源**（Source Hints）：官方文档、API reference、开发者指南在哪？
+
+搜索策略——3 类查询各发 1-2 条：
+- 实体发现：\`<领域> platforms OR tools OR products 2026\`
+- 结构对比：\`<领域> comparison OR landscape OR Gartner OR Forrester\`
+- 技术维度：\`<核心技术概念> in <领域>\`
+
+**不做的事**：不做深度研究、不提取 claim、不写 findings、不截图。只画地图。
+
+【返回格式】
+返回一个 JSON 对象（landscape.json），格式：
+
+    {
+      "entities": [
+        {"name": "实体名", "domain": "example.com", "category": "分类"}
+      ],
+      "perspectives": ["技术架构", "商业模式", "用户体验", "安全合规"],
+      "source_hints": [
+        {"entity": "实体名", "url": "https://...", "type": "官方开发者文档"}
+      ]
+    }
+
+**硬上限**：最多 8 次 tool call。广度扫描不是深度研究，快速摸完就返回。
+
+【完成标准】
+landscape.json 已输出，包含至少 3 个实体 + 2 个视角 + 2 个来源。`;
+}
 
 const builders = {
+  scout: buildScoutContract,
   search: buildSearchContract,
   boundary: buildBoundaryContract,
   review: buildReviewContract,
