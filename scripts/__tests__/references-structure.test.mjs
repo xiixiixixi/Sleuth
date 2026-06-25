@@ -236,3 +236,55 @@ test('references/ do NOT reference SKILL.md (self-contained for sub-agents)', ()
     assert.doesNotMatch(content, /SKILL\.md/, `${f} must not reference SKILL.md (sub-agents can't read it)`);
   }
 });
+
+// ===== M4: Schema 归一化巩固 =====
+
+test('search.md §4.3 has hard constraint language for type/confidence/tier', () => {
+  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
+  assert.match(search, /硬约束.*不允许自创/, 'must have hard constraint language');
+  assert.match(search, /只允许以下 3 个值/, 'must enumerate allowed type values on one line');
+  assert.match(search, /整数不接受/, 'must reject integer tier values');
+});
+
+test('SKILL.md §3.3 has normalization step', () => {
+  const skill = readRel('SKILL.md');
+  assert.match(skill, /校验.*归一化/, 'must have normalization step');
+  assert.match(skill, /type.*不在.*强制改.*finding/, 'must force non-standard type to finding');
+  assert.match(skill, /tier.*整数.*映射/, 'must map integer tier to string');
+});
+
+// ===== M6: 并发控制 =====
+
+test('SKILL.md has concurrency cap of 5', () => {
+  const skill = readRel('SKILL.md');
+  assert.match(skill, /最多并行 5/, 'must have ≤5 concurrency cap');
+  assert.match(skill, /分两批/, 'must have batching strategy');
+});
+
+// ===== M7: One-shot 合成 =====
+
+test('SKILL.md §7 has one-shot synthesis rule', () => {
+  const skill = readRel('SKILL.md');
+  assert.match(skill, /一次性完成/, 'must have one-shot synthesis rule');
+  assert.match(skill, /不要让.*Agent.*写/, 'must prohibit sub-agents from writing report');
+});
+
+// ===== M9: 截图/视频工作流 =====
+
+test('tool-guide.md has correct screenshot save workflow', () => {
+  const tool = readFileSync(join(REFERENCES, 'tool-guide.md'), 'utf8');
+  assert.match(tool, /截图默认存到.*agent-browser.*tmp/, 'must document default save path');
+  assert.match(tool, /不要用.*--file/, 'must warn against --file flag');
+});
+
+test('tool-guide.md uses t0/t1/t2 tab format (not raw integers)', () => {
+  const tool = readFileSync(join(REFERENCES, 'tool-guide.md'), 'utf8');
+  assert.match(tool, /tab t2/, 'must use t0/t1/t2 format');
+  assert.doesNotMatch(tool, /tab 2\s/, 'must not show raw integer tab switching');
+});
+
+test('search.md §6.2 has screenshot→analyze→embed workflow', () => {
+  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
+  assert.match(search, /截图.*分析.*内嵌/, 'must have screenshot→analyze→embed flow');
+  assert.match(search, /vision 工具分析/, 'must mention vision tool analysis');
+});

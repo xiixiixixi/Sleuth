@@ -109,7 +109,9 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 
 ### 3.2 派发
 
-把上一步输出的**整段 prompt 文本**作为子 Agent 的 prompt，用你的运行时子 Agent 派发工具（如 Claude Code 的 `task` 工具）派发。多个子问题可并行派发。
+把上一步输出的**整段 prompt 文本**作为子 Agent 的 prompt，用你的运行时子 Agent 派发工具（如 Claude Code 的 `task` 工具）派发。
+
+**每轮最多并行 5 个搜索 Agent。** 子问题 > 5 个时分两批：第一批先派 5 个，收齐 findings 后再派剩余的。不要一次性把 7-8 个全丢出去——模型后台任务系统扛不住，会静默丢 Agent。
 
 **派发前必须设置子 Agent 的环境变量**：把第 0 步 check-deps 输出的 `SLEUTH_CDP_PORT`（和 `SLEUTH_CDP_WS` 如果有）作为环境变量传给子 Agent——子 Agent 的所有 agent-browser 命令依赖这个变量连浏览器。
 
@@ -166,6 +168,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 
 ## 第 7 步：合成 + 审查 + 交付
 
+⚠️ **合成只由你（主 Agent）一次性完成。** 子 Agent 只做 research，不写报告。不要让子 Agent 各写一段再拼——会产生前后矛盾。你收齐所有 findings，自己一口气写完 draft.md。
 ### 7.1 压缩
 
 进入合成前先压缩——把多轮搜索的 raw 内容去噪：
@@ -341,3 +344,4 @@ check-deps 跑一遍检查环境。
 - 不在同一条失败路径上盲目重试；没有新信息就换路。
 
 🔴 **CHECKPOINT · 执行前确认**：任何会产生记录或状态变更的动作——提交表单、发帖/留言、下单付款、改后台配置、点"确认/删除"——**执行前必须先获用户明确同意**。只读浏览（打开、滚动、读取、对非敏感页截图）无需确认。拿不准会不会改状态时，先停下来问，不要替用户按下按钮。
+替用户按下按钮。

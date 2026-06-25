@@ -99,8 +99,8 @@ find label "Email" fill "user@x.com"   # 按标签找
 ```bash
 tab                       # 列出
 tab new <url>             # 新建
-tab 2                     # 切换
-tab close 2               # 关闭
+tab t2                    # 切换（用 t0/t1/t2 格式，不接受纯数字）
+tab close t2              # 关闭
 ```
 
 ### 状态检查
