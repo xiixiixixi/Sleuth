@@ -241,10 +241,7 @@ ${v.goal}
 2. **多元视角**（Perspectives）：从哪些角度切入这个主题？
 3. **一手来源**（Source Hints）：官方文档、API reference、开发者指南在哪？
 
-搜索策略——3 类查询各发 1-2 条：
-- 实体发现：\`<领域> platforms OR tools OR products 2026\`
-- 结构对比：\`<领域> comparison OR landscape OR Gartner OR Forrester\`
-- 技术维度：\`<核心技术概念> in <领域>\`
+具体搜索策略看 \`\${CLAUDE_SKILL_DIR}/references/scout.md\` 的「广度扫描策略」段——按问题类型自适应，不固定查询模板。
 
 **不做的事**：不做深度研究、不提取 claim、不写 findings、不截图。只画地图。
 
@@ -260,8 +257,6 @@ ${v.goal}
         {"entity": "实体名", "url": "https://...", "type": "官方开发者文档"}
       ]
     }
-
-**硬上限**：最多 8 次 tool call。广度扫描不是深度研究，快速摸完就返回。
 
 【完成标准】
 landscape.json 已输出，包含至少 3 个实体 + 2 个视角 + 2 个来源。`;

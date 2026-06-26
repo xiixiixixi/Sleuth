@@ -156,20 +156,18 @@ test('scout role: generates prompt with landscape.json format', () => {
   assert.match(out, /source_hints/);
 });
 
-test('scout role: has 3 search types', () => {
+test('scout role: points to scout.md for strategy (no hardcoded types)', () => {
   const out = run(['--role', 'scout', '--goal', 'test']);
-  assert.match(out, /实体发现/);
-  assert.match(out, /结构对比/);
-  assert.match(out, /技术维度/);
+  assert.match(out, /scout\.md.*广度扫描策略/);
+  assert.doesNotMatch(out, /实体发现.*结构对比.*技术维度/);
 });
 
 test('scout role: exits non-zero when --goal missing', () => {
   assert.throws(() => run(['--role', 'scout']), /scout role requires --goal/);
 });
-
-test('scout role: has tool call cap of 8', () => {
+test('scout role: has no tool-call hardcap', () => {
   const out = run(['--role', 'scout', '--goal', 'test']);
-  assert.match(out, /8 次 tool call/);
+  assert.doesNotMatch(out, /硬上限.*tool call/);
 });
 
 test('scout role: does NOT contain session/deliver/sid references', () => {
