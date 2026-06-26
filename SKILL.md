@@ -91,15 +91,23 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs \
 # task_spec.md
 
 ## 用户问题（重写后）
-<把用户模糊问题转成具体可研究的 question>
+<把用户模糊问题转成具体可研究的问题>
 
-## 子问题
-1. <子问题 1>
-   - 来源类型：<官方/学术/新闻/...>
-   - 完成标准：<什么叫答完，如"找到 2+ 个独立源确认 X">
-2. <子问题 2>
-   - 来源类型：<...>
-   - 完成标准：<...>
+## 子问题（状态追踪）
+
+每个子问题用 `- [ ]` 标记未完成，`- [x]` 标记已完成。
+搜索过程中发现的 follow_up 问题挂载到对应子问题下作为子节点。
+
+- [ ] 1. <子问题 1>
+  - 来源类型：<官方/学术/新闻/...>
+  - 完成标准：<什么叫答完，如"找到 2+ 个独立源确认 X">
+  - [ ] 1.1 <Round N follow_up 问题>（来自 search-X Round N）
+  - [ ] 1.2 <Round N follow_up 问题>
+- [ ] 2. <子问题 2>
+  - 来源类型：<...>
+  - 完成标准：<...>
+- [ ] N. <后续新增的子问题>（来自 Round N follow_up 新增）
+- [ ] N+1. <合并的子问题>（A + B 合并，来自 Round N follow_up）
 
 ## 全局完成标准
 - 时间覆盖：<如"包含 2026 年内至少 2 个时间点">
@@ -110,6 +118,18 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs \
 **完成标准是终止判断的依据**——你在第 5 步对照它判断是否够。
 
 拆解原则：子问题独立（不依赖彼此）；每个单一目标；数量等于复杂度，不为拆而拆。
+
+### 2.2 task_spec 操作规则（每轮更新）
+
+task_spec 不是写一次就不动——**每轮搜索 Agent 收齐后，主 Agent 更新 task_spec 状态**：
+
+| 操作 | 什么时候做 | 规则 |
+|------|-----------|------|
+| **标记完成** | 子问题有 ≥2 条 findings 且满足完成标准 | `[ ]` → `[x]`，注明 `✅ Round N` |
+| **挂载 follow_up** | 搜索 Agent 返回了 follow_up_questions | 挂到发现的子问题下，编号 `1.1`、`1.2` |
+| **新增子问题** | follow_up 发现全新实体（和已有子问题不相关） | 新编号接在最后，注明来源 |
+| **合并子问题** | follow_up 的实体和已有子问题领域类似 | 合并编号，注明合并来源 |
+| **标记 follow_up 解决** | findings 覆盖了 follow_up 的问题 | 子节点 `[ ]` → `[x]`，follow_ups.json `resolved: true` |
 
 ## 第 3 步：派搜索 Agent（每轮）
 
@@ -162,6 +182,16 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 
 每派一个搜索 Agent，把方向追加到 `<outputDir>/directions.json`（格式见「状态文件 schema」段）。
 
+### 3.5 更新 task_spec 状态（每轮必做）
+
+收完 findings + 提取 follow_ups 后，**更新 task_spec.md 的状态标记**：
+
+1. **标完成**：对每个 `- [ ]` 子问题，检查 findings 是否满足完成标准（≥2 条 findings + 覆盖关键字段）→ 改 `- [x]` + 注明 `✅ Round N`
+2. **挂载 follow_ups**：把 follow_up_questions 挂到发现它的子问题下作为子节点（`1.1`、`1.2`）
+3. **新增/合并**：全新实体 → 新编号接最后；和已有类似 → 合并编号
+4. **标 follow_up 解决**：已解决的 follow_up 子节点 `- [ ]` → `- [x]` + follow_ups.json `resolved: true`
+
+**这步在派边界 Agent 之前做**——边界 Agent 读更新后的 task_spec 判断完成度。
 ## 第 4 步：派边界 Agent
 
 每轮搜索 Agent 收齐后，派一个边界 Agent 评估覆盖度：
@@ -177,22 +207,36 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 
 ## 第 5 步：检查终止信号
 
-1. **软终止**：`terminate_recommended: true` → 进第 7 步
-2. **硬终止**：连续 2 轮 findings 的 `claim_id` 集合无新增（`Set Round N − Set Round N-1 = ∅`）→ 进第 7 步
+**前置条件**：task_spec 所有子问题（含子节点）必须标 `[x]`。有 `- [ ]` 的子问题 → 直接回第 6 步，不检查其他终止条件。
+
+前置条件满足后，检查：
+1. **软终止**：`terminate_recommended: true` + 无 entity_mismatch + follow_ups_unresolved = 0 → 进第 7 步
+2. **硬终止**：连续 2 轮 findings 的 `claim_id` 集合无新增 → 进第 7 步
 3. **用户终止**：CHECKPOINT → 停
 
 不终止 → 第 6 步。
 
-## 第 6 步：写新方向 + 下一轮
+## 第 6 步：混合派发 + 下一轮
 
-1. 综合三个来源设计新搜索方向：
-   - 边界 Agent 的 `uncovered_dimensions`
-   - `follow_ups.json` 里 `resolved: false` 的问题
-   - 边界 Agent 的 `direction_drift`
-2. **查 directions.json 避免重复**：新方向的 `direction + source_type` 组合不能已在列表里
-3. 追加新方向到 directions.json
-4. 把未解决的 follow-up 问题作为新搜索 Agent 的 `--known-clue` 传入
-5. 回第 3 步（派搜索 Agent，`--round` 递增）
+按优先级分配 ≤5 个 Agent 名额：
+
+| 优先级 | 类型 | 名额 | 来源 |
+|--------|------|------|------|
+| **P1 垂直深挖** | 解决 follow_ups | 1-2 个 | follow_ups.json 里 `resolved: false` 的子节点 |
+| **P2 广度推进** | 覆盖未完成子问题 | 3-4 个 | task_spec 里还是 `- [ ]` 的子问题 |
+
+**分配规则**：
+- 有未解决 follow_ups：P1 拿 1-2 个，P2 拿剩余
+- 无未解决 follow_ups：全部给 P2（广度推进）
+- task_spec 全 `[x]` 但 boundary 说 coverage 不够：全部给 P1（深挖新来源类型）
+
+**派发步骤**：
+1. 确定本轮 P1/P2 分配（上面规则）
+2. P1 Agent 的 `--known-clue` 带入 follow_up 问题原文
+3. P2 Agent 的 `--known-clue` 带入 scout 的 source_hints 对应实体 URL
+4. **查 directions.json 避免重复**
+5. 追加新方向到 directions.json
+6. 回第 3 步（派搜索 Agent，`--round` 递增）
 
 **loop 持续迭代，直到终止信号触发——不是固定轮次。**
 

@@ -1,11 +1,17 @@
 # 边界评估
 
-评估已有 findings 的覆盖度 + 方向有效性 + 实体准确性，输出终止建议 + 未覆盖维度 + 问题清单。
+评估已有 findings 的 task_spec 完成度 + 覆盖质量 + 方向有效性 + 实体准确性，输出终止建议 + 未覆盖项 + 问题清单。
 
-读 `task_spec.md`（子问题 + 完成标准）+ `findings.jsonl`（已验证事实 + dimensions_seen）+ `follow_ups.json`（未解决的追踪问题），输出以下 schema。
+读 `task_spec.md`（子问题 + **状态标记 `[ ]`/`[x]`** + 完成标准）+ `findings.jsonl`（已验证事实 + dimensions_seen）+ `follow_ups.json`（未解决的追踪问题），输出以下 schema。
 
 ## 检查维度
 
+
+### 0. task_spec 完成度（Task Spec Completion）
+
+读 task_spec 的 `- [ ]` / `- [x]` 状态标记（含子节点 `1.1`、`1.2`）。
+- 有 `- [ ]` 的子问题 → **task_spec 未全覆盖，强制不终止**
+- 输出 `uncovered_subquestions`：列出所有还是 `[ ]` 的子问题编号和标题
 ### 1. 覆盖度（Coverage）
 
 | 维度 | 问什么 |
@@ -44,8 +50,12 @@ findings 里 claim 提到的实体名和 URL 域名是否匹配？
 
 ```yaml
 terminate_recommended: <bool>
+uncovered_subquestions:
+  - id: <子问题编号，如 "3" 或 "1.1">
+    title: <子问题标题>
+    reason: <为什么没覆盖>
 uncovered_dimensions:
-  - dimension: <维度名，必须 4 固定维度或已声明扩展名>
+  - dimension: <维度名>
     priority: high | medium | low
     rationale: <为什么这个维度对回答用户问题重要>
     suggested_direction: <下一波搜索该往哪搜>
@@ -63,11 +73,12 @@ follow_ups_unresolved: <int>
 
 ## terminate_recommended 判定规则
 
+- 有 uncovered_subquestions（task_spec 有 `[ ]`）→ **强制不终止**
 - 有 entity_mismatch → **强制不终止**（必须修实体再走）
 - follow_ups_unresolved > 0 → **不终止**（有未解决问题）
 - 任一 uncovered priority 为 `high` → `terminate_recommended: false`
-- 所有 uncovered priority 均为 `low` 且 ≤ 2 且无 mismatch 且无 unresolved follow_ups → `terminate_recommended: true`
-- 其他情况（混合 low/medium 或数量 > 2）→ 自行判断并给 rationale
+- task_spec 全 `[x]` + 无 mismatch + 无 drift + follow_ups = 0 + 所有 uncovered priority 均为 `low` 且 ≤ 2 → `terminate_recommended: true`
+- 其他情况 → 自行判断并给 rationale
 
 ## 不做
 
