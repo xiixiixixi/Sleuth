@@ -76,7 +76,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs \
   --task-dir <outputDir>
 ```
 
-侦察 Agent 做 3 类搜索（实体发现 / 结构对比 / 技术维度），返回 landscape.json（entities / perspectives / source_hints）。不做深度研究、不提取 claim。
+侦察 Agent 做广度扫描（具体策略看 scout.md），返回 landscape.json（entities / perspectives / source_hints）。不做深度研究、不提取 claim。
 
 **拿到 landscape.json 后**：基于它写 task_spec——子问题按 entities 和 perspectives 拆，不是凭你脑子里的知识猜。侦察发现的实体和来源是你拆题的依据。
 
