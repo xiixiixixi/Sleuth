@@ -165,7 +165,7 @@ function buildBoundaryContract(v) {
 **环境变量**（主 Agent 已设置）：
 - \`CLAUDE_SKILL_DIR\`：skill 根目录——文档在 \`\${CLAUDE_SKILL_DIR}/references/\`
 
-**必读文档**：\`\${CLAUDE_SKILL_DIR}/references/boundary.md\`（4 固定维度、terminate_recommended 判定规则、输出 schema、不做清单）
+**必读文档**：\`\${CLAUDE_SKILL_DIR}/references/boundary.md\`（4 检查维度、terminate_recommended 判定规则、输出 schema、不做清单）
 
 **安全边界**：只读已有 findings，不产生任何浏览器操作或网络请求。
 
@@ -173,7 +173,7 @@ function buildBoundaryContract(v) {
 ${v.goal}
 
 【任务目录】
-${v['task-dir']}\n（读 task_spec.md 看完成标准；读 findings.jsonl 看已有发现 + dimensions_seen）
+${v['task-dir']}\n（读 task_spec.md 看完成标准；读 findings.jsonl 看已有发现 + dimensions_seen；读 follow_ups.json 看未解决的追踪问题）
 
 【返回格式】
 按 boundary.md 定义的 YAML schema 返回。
@@ -220,9 +220,9 @@ function buildScoutContract(v) {
 
 **环境变量**（主 Agent 已设置）：
 - \`CLAUDE_SKILL_DIR\`：skill 根目录——文档在 \`\${CLAUDE_SKILL_DIR}/references/\`
-- \`SLEUTH_CDP_PORT\`：Chrome 调试端口——agent-browser 命令带 \`--cdp $SLEUTH_CDP_PORT\`
+- \`SLEUTH_CDP_PORT\`：Chrome 调试端口（侦察阶段不需要，但已设置）
 
-**必读文档**：\`\${CLAUDE_SKILL_DIR}/references/search.md\` §2（查询规则）+ §3（工具选择）
+**必读文档**：\`\${CLAUDE_SKILL_DIR}/references/scout.md\`（广度扫描策略、工具选择、landscape.json 返回格式）
 
 **安全边界**（必须遵守）：
 - 不提取 cookie / 密码 / 敏感凭据

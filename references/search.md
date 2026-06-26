@@ -102,7 +102,7 @@
 
 ```jsonl
 {"type":"finding","claim":"Claude API 输入定价 $3/M tokens","url":"https://www.anthropic.com/pricing","confidence":"已验证事实","tier":"T1","dimensions_seen":[{"dimension":"视角覆盖","observation":"Reddit r/LocalLLaMA 有用户吐槽价格涨幅","source_url":"https://reddit.com/r/LocalLLaMA/..."}]}
-{"type":"finding","claim":"...","url":"...","confidence":"高置信推断","tier":"T2"}
+{"type":"finding","claim":"...","url":"...","confidence":"高置信推断","tier":"T2","follow_up_questions":["Genesys 是否也有类似机制？"]}
 {"type":"gap","what":"还缺企业定价","reason":"Sales 页要求联系未公开"}
 {"type":"red_flag","claim":"...","reason":"疑似过期（2024 文章）"}
 ```

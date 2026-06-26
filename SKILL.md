@@ -10,10 +10,20 @@ description: >-
 | 文档 | 内容 |
 |---|---|
 | **SKILL.md** | 操作步骤 / loop / 状态文件 / 合成 / 证据分层 / 交付 / 运行边界 |
-| **search.md** | 搜索执行：查询 / 工具选择 / 失败兜底 / 搜索循环 / JSONL 返回 / directions.json |
-| **boundary.md** | 边界评估：4 固定维度 / terminate_recommended / 输出 schema |
-| **review.md** | 证据链审计：4 项审计 / 分层抽样 / Tier 分级 / 输出 schema |
+| **scout.md** | 侦察执行：广度扫描策略 / 工具选择 / landscape.json 返回格式 |
+| **search.md** | 搜索执行：自迭代循环 / 查询 / 工具选择 / 失败兜底 / JSONL 返回 / follow_ups |
+| **boundary.md** | 边界评估：覆盖度 + 方向偏移 + 实体准确 + follow-ups 状态 / 输出 schema |
+| **review.md** | 证据链审计：4 项审计 / critical-non_critical 分级 / 输出 schema |
 | **tool-guide.md** | agent-browser 命令速查 / 反爬降级 / 特殊内容 |
+
+## 输入输出格式约定（I/O Contract）
+
+| 角色 | 输入 | 读什么文档 | 用什么工具 | 输出格式 |
+|------|------|-----------|-----------|---------|
+| 侦察 Scout | `--goal`（用户问题领域） | scout.md | WebSearch + WebFetch | landscape.json（JSON 对象） |
+| 搜索 Searcher | `--goal` + `--must-verify` + `--task-dir` + `--round` | search.md | WebSearch + WebFetch + agent-browser + extract-subtitles | JSONL（findings + gaps + red_flags + follow_ups） |
+| 边界 Boundary | `--task-dir`（读 task_spec + findings + follow_ups） | boundary.md | 无（只读文件） | YAML（terminate + uncovered + drift + mismatch） |
+| 审计 Reviewer | `--task-dir` + `--draft-path` | review.md | WebFetch（仅验证 URL） | YAML（critical + non_critical + stats） |
 
 ## 角色边界
 
@@ -144,8 +154,9 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
    - `dimensions_seen` 是字符串数组（如 `["amount","date"]`）→ 转成对象数组 `[{"dimension":"<原值>","observation":""}]`
 3. 给每条 finding 补充字段：`ts`（当前 ISO 时间戳）、`round`（当前轮次）、`agent`（你给的 agent 名）、`claim_id`（`sha1(normalized_claim + url_domain)` 前 12 位；`normalized_claim` = lowercase + 去标点 + 折叠空白）
 4. 用 Write 工具 append 到 `<outputDir>/findings.jsonl`
+5. **提取 follow_up_questions**：从 findings 里提取所有 follow_up_questions，写入 `<outputDir>/follow_ups.json`（格式见「状态文件 schema」段）。下一轮派发时用作新方向依据。
 
-**只有你写 findings.jsonl。** 子 Agent 不写文件——避免并发写撕行。
+**只有你写 findings.jsonl 和 follow_ups.json。** 子 Agent 不写文件——避免并发写撕行。
 
 ### 3.4 写 directions.json
 
@@ -162,7 +173,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
   --task-dir <outputDir>
 ```
 
-边界 Agent 读 `task_spec.md` + `findings.jsonl`，返回 `terminate_recommended` + `uncovered_dimensions`（判定规则和输出格式见 `${CLAUDE_SKILL_DIR}/references/boundary.md`）。
+边界 Agent 读 `task_spec.md` + `findings.jsonl` + `follow_ups.json`，返回 `terminate_recommended` + `uncovered_dimensions` + `direction_drift` + `entity_mismatch` + `follow_ups_unresolved`（判定规则和输出格式见 `${CLAUDE_SKILL_DIR}/references/boundary.md`）。
 
 ## 第 5 步：检查终止信号
 
@@ -174,10 +185,14 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 
 ## 第 6 步：写新方向 + 下一轮
 
-1. 基于边界 Agent 的 `uncovered_dimensions`，设计新搜索方向
+1. 综合三个来源设计新搜索方向：
+   - 边界 Agent 的 `uncovered_dimensions`
+   - `follow_ups.json` 里 `resolved: false` 的问题
+   - 边界 Agent 的 `direction_drift`
 2. **查 directions.json 避免重复**：新方向的 `direction + source_type` 组合不能已在列表里
 3. 追加新方向到 directions.json
-4. 回第 3 步（派搜索 Agent，`--round` 递增）
+4. 把未解决的 follow-up 问题作为新搜索 Agent 的 `--known-clue` 传入
+5. 回第 3 步（派搜索 Agent，`--round` 递增）
 
 **loop 持续迭代，直到终止信号触发——不是固定轮次。**
 
@@ -260,9 +275,17 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 
 审查 Agent 返回 `audit_findings` + `sampled_stats`（审计规则看 `${CLAUDE_SKILL_DIR}/references/review.md`）。
 
-### 7.8 修 + 交付
+### 7.8 审计结果处理
 
-修审查报告指出的问题。审查未通过的草稿不算交付完成。**不停下来问“是否提交”**——就绪即执行。
+审计 Agent 返回 critical + non_critical + sampled_stats（审计规则看 `${CLAUDE_SKILL_DIR}/references/review.md`）。
+
+- non_critical 非空 → 你修 draft（补 URL、改分级、标冲突）
+- critical 非空 → **回 LOOP**（第 3 步），带 `suggested_search` 作为新方向
+  - revision 硬上限：critical 回 loop 最多 3 次
+  - 第 3 次仍 critical → 标记为「已知限制」写入报告，交付
+- 都为空 → 交付
+
+**不停下来问"是否提交"**——就绪即执行。
 
 输出按优先级：
 1. 用户指定输出形式 → 严格按用户要求
@@ -280,6 +303,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 <outputDir>/
 ├── task_spec.md       # 你写 / 你 + 边界 Agent + 搜索 Agent 读
 ├── findings.jsonl     # 你代写 / 你 + 边界 Agent + 审查 Agent 读
+├── follow_ups.json    # 你写 / 你 + 边界 Agent 读（搜索 Agent 返回的追踪问题）
 ├── directions.json    # 你写 / 你 + 搜索 Agent 读
 └── draft.md           # 你写 / 你 + 审查 Agent 读
 ```
@@ -288,6 +312,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 |---|---|---|---|
 | `task_spec.md` | 你 | 你 + 边界 Agent + 搜索 Agent（`--task-dir`） | Markdown（见第 2.1 步） |
 | `findings.jsonl` | 你（代写，子 Agent stdout 返回） | 你 + 边界 Agent + 审查 Agent | JSONL（见下文） |
+| `follow_ups.json` | 你（从 findings 提取） | 你 + 边界 Agent | JSON 数组（见下文） |
 | `directions.json` | 你 | 你 + 搜索 Agent（`--task-dir`） | JSON 数组（见下文） |
 | `draft.md` | 你 | 你 + 审查 Agent（`--draft-path`） | Markdown |
 
@@ -306,6 +331,23 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
   - `url_domain` = URL 的 host
 - `claim` / `url` / `confidence` / `tier`: 见 §7.3 证据分层
 
+
+### follow_ups.json 格式
+
+```json
+[
+  {"round":1,"from_agent":"search-3","question":"Genesys 是否也有 AOP 机制？","resolved":false},
+  {"round":2,"from_agent":"search-1","question":"Twilio Flex 的规则引擎如何工作？","resolved":false}
+]
+```
+
+字段：
+- `round`: 哪一轮的搜索 Agent 返回的
+- `from_agent`: agent 名
+- `question`: 追踪问题（搜索中发现的新实体/概念/方向）
+- `resolved`: 主 Agent 标记——某轮搜索覆盖了这个问题时改 `true`
+
+边界 Agent 读这个文件判断 follow_ups_unresolved。主 Agent 在第 6 步用它作为新方向依据。
 ### directions.json 格式
 
 ```json

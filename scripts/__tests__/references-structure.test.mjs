@@ -29,8 +29,8 @@ function readRel(rel) {
 test('references/ has exactly AGENTS.md + boundary.md + review.md + search.md + tool-guide.md', () => {
   const files = readdirSync(REFERENCES).filter(f => !f.startsWith('.'));
   files.sort();
-  assert.deepEqual(files, ['AGENTS.md', 'boundary.md', 'review.md', 'search.md', 'tool-guide.md'],
-    `references/ must contain only AGENTS.md + boundary.md + review.md + search.md + tool-guide.md, got: ${files.join(', ')}`);
+  assert.deepEqual(files, ['AGENTS.md', 'boundary.md', 'review.md', 'scout.md', 'search.md', 'tool-guide.md'],
+    `references/ must contain only AGENTS.md + boundary.md + review.md + scout.md + search.md + tool-guide.md, got: ${files.join(', ')}`);
 });
 
 test('old references files are gone (no rollback)', () => {
@@ -121,7 +121,7 @@ test('boundary.md has 4 fixed dimensions + terminate_recommended + output schema
   assert.match(boundary, /地域\/语境覆盖/);
   assert.match(boundary, /terminate_recommended/);
   assert.match(boundary, /uncovered_dimensions/);
-  assert.match(boundary, /priority 均为.*low.*数量 ≤ 2.*terminate_recommended: true/);
+  assert.match(boundary, /所有 uncovered priority 均为.*low/, 'must have low-priority termination rule');
 });
 
 // ===== review.md 内容 =====
@@ -318,4 +318,59 @@ test('search.md §4.5 has cleanup step with follow_up_questions', () => {
   assert.match(search, /### 4\.5 返回前 cleanup/, 'must have §4.5 cleanup section');
   assert.match(search, /follow_up_questions/, 'must mention follow_up_questions');
   assert.match(search, /不返回 raw HTML/, 'must prohibit returning raw content');
+});
+
+// ===== M3: follow_ups 机制 =====
+
+test('search.md §4.3 JSONL has follow_up_questions field', () => {
+  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
+  assert.match(search, /follow_up_questions.*Genesys/, 'JSONL example must have follow_up_questions');
+});
+
+test('SKILL.md has follow_ups.json in state schema', () => {
+  const skill = readRel('SKILL.md');
+  assert.match(skill, /follow_ups\.json/, 'must list follow_ups.json in state files');
+  assert.match(skill, /resolved.*false/, 'must define resolved field');
+});
+
+test('SKILL.md §6 references follow_ups as direction source', () => {
+  const skill = readRel('SKILL.md');
+  assert.match(skill, /follow_ups\.json.*resolved.*false/, 'must reference follow_ups.json with resolved');
+});
+
+// ===== M5: 边界重定义 =====
+
+test('boundary.md has 4 check dimensions', () => {
+  const boundary = readFileSync(join(REFERENCES, 'boundary.md'), 'utf8');
+  assert.match(boundary, /覆盖度.*Coverage/);
+  assert.match(boundary, /方向偏移.*Direction Drift/);
+  assert.match(boundary, /实体准确.*Entity Accuracy/);
+  assert.match(boundary, /Follow-ups 状态/);
+});
+
+test('boundary.md output schema has direction_drift + entity_mismatch + follow_ups_unresolved', () => {
+  const boundary = readFileSync(join(REFERENCES, 'boundary.md'), 'utf8');
+  assert.match(boundary, /direction_drift:/);
+  assert.match(boundary, /entity_mismatch:/);
+  assert.match(boundary, /follow_ups_unresolved:/);
+});
+
+test('boundary.md entity_mismatch forces no-terminate', () => {
+  const boundary = readFileSync(join(REFERENCES, 'boundary.md'), 'utf8');
+  assert.match(boundary, /entity_mismatch.*强制不终止/);
+});
+
+// ===== M8: 审计分级 =====
+
+test('review.md has critical / non_critical grading', () => {
+  const review = readFileSync(join(REFERENCES, 'review.md'), 'utf8');
+  assert.match(review, /critical/);
+  assert.match(review, /non_critical/);
+  assert.match(review, /回 LOOP/);
+});
+
+test('SKILL.md §7.8 has re-loop trigger with hard cap 3', () => {
+  const skill = readRel('SKILL.md');
+  assert.match(skill, /critical.*回 LOOP/);
+  assert.match(skill, /最多 3 次/);
 });
