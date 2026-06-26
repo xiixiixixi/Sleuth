@@ -301,20 +301,26 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 
 ```
 <outputDir>/
+├── landscape.json      # 侦察 Agent 产出（Phase 1.5）
 ├── task_spec.md       # 你写 / 你 + 边界 Agent + 搜索 Agent 读
 ├── findings.jsonl     # 你代写 / 你 + 边界 Agent + 审查 Agent 读
 ├── follow_ups.json    # 你写 / 你 + 边界 Agent 读（搜索 Agent 返回的追踪问题）
 ├── directions.json    # 你写 / 你 + 搜索 Agent 读
-└── draft.md           # 你写 / 你 + 审查 Agent 读
+├── draft.md           # 你写 / 你 + 审查 Agent 读
+├── screenshots/       # 搜索 Agent 截图存这里（agent-browser 截图搬到这里）
+└── audit_report.yaml  # 审查 Agent 产出（Phase 8，YAML schema）
 ```
 
 | 文件 | 写者 | 读者 | 格式 |
 |---|---|---|---|
+| `landscape.json` | 侦察 Agent | 你（写 task_spec 用） | JSON 对象（见 scout.md） |
 | `task_spec.md` | 你 | 你 + 边界 Agent + 搜索 Agent（`--task-dir`） | Markdown（见第 2.1 步） |
 | `findings.jsonl` | 你（代写，子 Agent stdout 返回） | 你 + 边界 Agent + 审查 Agent | JSONL（见下文） |
 | `follow_ups.json` | 你（从 findings 提取） | 你 + 边界 Agent | JSON 数组（见下文） |
 | `directions.json` | 你 | 你 + 搜索 Agent（`--task-dir`） | JSON 数组（见下文） |
 | `draft.md` | 你 | 你 + 审查 Agent（`--draft-path`） | Markdown |
+| `screenshots/` | 搜索 Agent（截图后搬到这里） | 你（嵌 draft） | PNG 文件 |
+| `audit_report.yaml` | 审查 Agent | 你（修 draft 用） | YAML（critical/non_critical） |
 
 ### findings.jsonl 行格式
 
