@@ -7,7 +7,7 @@ CLI 工具集。agent 通过 SKILL.md 调用这些脚本完成环境检查、子
 ```
 scripts/
 ├── check-deps.mjs          薄 CLI shim（~78 行）→ lib/check-deps-core.mjs；支持 --task-name
-├── spawn-subagent.mjs      子 Agent prompt 生成器（220 行，3 种 role：search/boundary/review；search 加 --task-dir/--round，输出 JSONL）
+├── spawn-subagent.mjs      子 Agent prompt 生成器（~280 行，4 种 role：scout/search/boundary/review；search 加 --task-dir/--round，输出 JSONL）
 ├── find-url.mjs            本地 Chrome 书签/历史检索（341 行，单体无 lib，未测试）
 ├── extract-subtitles.sh    YouTube 字幕抓取（bash + yt-dlp）
 ├── srt_to_transcript.py    SRT → transcript 转换（Python）
@@ -17,7 +17,7 @@ scripts/
 │   └── output.mjs           ~/.sleuth/output/<task-name>/ 或 YYYY-MM-DD/ 解析（63 行，带 sanitizeTaskName）
 └── __tests__/
     ├── browser-discovery.test.mjs      Unit 风格（直接 import）
-    ├── spawn-subagent.test.mjs         Integration 风格（3 种 role + 新参数）
+    ├── spawn-subagent.test.mjs         Integration 风格（4 种 role + 新参数）
     ├── output.test.mjs                 Unit + Integration（task-name / 路径注入 / CLI flag）
     └── references-structure.test.mjs   防回潮：references/ + SKILL.md 结构
 ```
@@ -49,7 +49,7 @@ scripts/
 - **不要再加 session/deliver/research-index 系统**：已全部砍掉（见根 AGENTS.md）
 - **不要在 `lib/` 加新的"模式常量"**：曾经有 `BROWSER_MODE_APPLESCRIPT` / `BROWSER_MODE_MANAGED` / `BROWSER_MODE_APPROVAL`，砍到只剩 approval 一种后所有模式常量都删了
 - **`check-deps-core.mjs` 不再支持 managed browser**：toggle 没开就报错，不自起 Chrome
-- **`spawn-subagent.mjs` 输出的 prompt 里禁止预先替换 `${CLAUDE_SKILL_DIR}`**：必须字面量输出，子 Agent 自己展开
+- **`spawn-subagent.mjs` 通过 `import.meta.url` 自感知 skill 根目录**：在输出前将 `${CLAUDE_SKILL_DIR}` 替换为绝对路径——子 Agent 不依赖运行时变量
 - **`find-url.mjs` 必须复制 History SQLite 到 /tmp 再查**：Chrome 运行时锁数据库，直接 open 会失败（参见 `find-url.mjs` 的 `copyFile` + `finally` 清理）
 - **WebKit 时间戳转换**：Chrome history 用微秒（1601 起算），公式 `unix = (webkit_us - 11644473600000000) / 1000000`
 - **禁止删除 `spawn-subagent.test.mjs` 里的 `doesNotMatch` 断言**：这些是防止 session 系统回潮的回归测试
@@ -63,5 +63,5 @@ scripts/
 - **agent-browser 0.27.1 bug**：`--cdp "ws://..."` 有 HTTP 预检 403，必须 0.28+；`tool-guide.md` 已写明
 - **`extract-subtitles.sh` 和 `srt_to_transcript.py` 是辅助工具**：混语言存在，没有 README 解释何时用哪个——SKILL.md / references/ 里也几乎没引用
 - **`output.mjs` 的 task-name 模式（2026-06-19）**：默认行为不变（按 YYYY-MM-DD，向后兼容）；`--task-name <name>` 模式按任务名创建子目录，用于多 Agent 协作的独立 task 目录。`sanitizeTaskName` 拒绝路径分隔符 / `..` / 特殊字符（只允许 `[a-zA-Z0-9-_.]`），防注入。空字符串视为"已传入但非法"会抛错（`if (taskName !== undefined)` 而不是 truthy 检查）。
-- **`spawn-subagent.mjs` 的 3 role 模板**：`search`（搜索执行，默认）/ `boundary`（边界评估，列未覆盖维度 + terminate_recommended）/ `review`（证据链审计，按 Tier 分层抽样）。子 Agent 不读 SKILL.md——prompt 内联安全边界 + 指定要读的 references/X.md。返回格式：search→JSONL（findings/gaps/red_flags/dimensions_seen）；boundary→terminate_recommended + uncovered_dimensions；review→audit_findings + sampled_stats。
+- **`spawn-subagent.mjs` 的 4 role 模板**：`scout`（侦察，广度扫描） / `search`（搜索执行，默认）/ `boundary`（边界评估）/ `review`（证据链审计）。子 Agent 不读 SKILL.md——prompt 内联安全边界 + 指定要读的 references/X.md。返回格式：scout→landscape.json；search→JSONL（findings/gaps/red_flags/dimensions_seen）；boundary→YAML（terminate_recommended + uncovered_subquestions + uncovered_dimensions + ...）；review→YAML（critical/non_critical + sampled_stats）。
 - **`spawn-subagent.mjs` 5 个新参数**：`--role`、`--deliverable`、`--stop-criteria`、`--task-dir`（boundary/review 必填）、`--draft-path`（review 必填）。原 4 个（goal/must-verify/known-clue/help）保留。

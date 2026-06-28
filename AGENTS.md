@@ -93,12 +93,12 @@ sleuth/
 ## UNIQUE STYLES
 
 - **3 套参数解析风格并存**（**tech debt**，未统一）：`check-deps.mjs` 手撸 flag、`spawn-subagent.mjs` 用 `util.parseArgs`、`find-url.mjs` 手撸位置参数
-- **`${CLAUDE_SKILL_DIR}` 硬绑定 Claude Code**：所有 SKILL.md 命令用此变量；README 宣称支持 50+ agent 但实际需要 Claude Code 兼容的 skill loader
-- **`spawn-subagent.mjs` 输出的 prompt 里 `${CLAUDE_SKILL_DIR}` 必须字面量**：由子 Agent 自己展开，主 Agent 不能预先替换（`spawn-subagent.mjs:56` 注释明确）
+- **SKILL.md 全部用相对路径**：`scripts/check-deps.mjs`、`references/search.md`——所有路径从 SKILL.md 所在目录（skill 根目录）解析。Agent 正在读这份文档就知道根目录在哪。子 Agent 的 prompt 由 `spawn-subagent.mjs` 在运行时解析为绝对路径。
+- **`spawn-subagent.mjs` 在 Node.js 运行时自感知 skill 根目录**：通过 `import.meta.url` 解析绝对路径，将 `${CLAUDE_SKILL_DIR}` 替换为绝对路径后输出——消除子 Agent 对运行时变量替换的依赖
 - **output 目录按 task-name 不按日期**：`~/.sleuth/output/<task-name>/`（多 Agent 协作需独立 task 目录；旧 `lib/output.mjs` 按日期，与新 loop 模式不兼容——见 SKILL.md「状态文件 schema」）
 - **`check-deps-core.mjs` 行 128-134 有死 re-export**：`main as ensureCDP` 是旧名遗留；`resolveOutputDir`/`ensureOutputDir` 现在在 core 内部被消费（行 94-100），外部 CLI 不直接 import output.mjs
 - **`output.mjs` task-name 模式（2026-06-19）**：`resolveOutputDir(taskName?)` 支持两种模式——传 taskName 则按 `~/.sleuth/output/<task-name>/`（多 Agent 协作需独立 task 目录），不传则按 `YYYY-MM-DD/`（向后兼容）。`sanitizeTaskName` 拒路径分隔符 / `..` / 特殊字符（只允许 `[a-zA-Z0-9-_.]`），防注入。空字符串视为「已传入但非法」会抛错（`if (taskName !== undefined)` 不是 truthy 检查）。check-deps CLI 通过 `--task-name <name>` 传入。
-- **`spawn-subagent.mjs` 的 3 role 模板**：`search`（Pattern A，默认）/ `boundary`（Pattern B，列未覆盖维度）/ `review`（Pattern D，证据链审计）。三个 builder 函数 `buildSearchContract` / `buildBoundaryContract` / `buildReviewContract` 分别生成不同 prompt。返回格式：search→findings+gaps+red_flags+dimensions_seen；boundary→uncovered_dimensions；review→audit_findings。
+- **`spawn-subagent.mjs` 的 4 role 模板**：`scout`（侦察，广度扫描）/ `search`（搜索执行，默认）/ `boundary`（边界评估，列未覆盖维度）/ `review`（证据链审计）。四个 builder 函数 `buildScoutContract` / `buildSearchContract` / `buildBoundaryContract` / `buildReviewContract` 分别生成不同 prompt。返回格式：scout→landscape.json；search→JSONL（findings/gaps/red_flags/dimensions_seen）；boundary→YAML（terminate_recommended + uncovered_dimensions + ...）；review→YAML（critical/non_critical + sampled_stats）。
 
 ## COMMANDS
 

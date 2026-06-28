@@ -31,10 +31,12 @@ description: >-
 
 ## 第 0 步：环境检查
 
+**以下所有路径相对于本 SKILL.md 所在目录（即 skill 根目录）。** 你是正在读这份文档的 Agent——你知道它在哪。Bash 命令和文件引用都从 skill 根目录解析。
+
 每次触发后第一件事，不跳过：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
+node scripts/check-deps.mjs
 ```
 
 输出当前浏览器连接模式和环境变量（`SLEUTH_CDP_PORT` / `SLEUTH_CDP_WS`）。后续所有 agent-browser 命令带上这些变量。
@@ -42,7 +44,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 **如果 check-deps 输出 “chrome: 未发现可连的浏览器”**——Chrome 没开 CDP 调试。跑 launch-chrome 脚本启动带调试端口的 Chrome（保留你的登录态）：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/launch-chrome.mjs"
+node scripts/launch-chrome.mjs
 ```
 
 脚本做的事：杀 Chrome → 把日常 profile 符号链接到 `~/.sleuth/chrome-live/` → 用 `--remote-debugging-port=9222 --user-data-dir=~/.sleuth/chrome-live/` 重启（骗过 Chrome 136+ 的安全检查，保留登录态）→ 写 DevToolsActivePort → 输出 `SLEUTH_CDP_PORT` / `SLEUTH_CDP_WS`。
@@ -55,7 +57,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/launch-chrome.mjs"
 - 1-2 次搜索能答完
 - 问题边界清晰、单一来源即可
 
-→ 直接答 + 必要时一次 WebFetch 验证一手来源（不拿搜索摘要当证据）。搜索策略、工具选择、失败兜底看 `${CLAUDE_SKILL_DIR}/references/search.md` §2-5。
+→ 直接答 + 必要时一次 WebFetch 验证一手来源（不拿搜索摘要当证据）。搜索策略、工具选择、失败兜底看 `references/search.md` §2-5。
 
 **并行调研**（走 loop，满足任一）：
 - 问题需要多源交叉验证（对比 / 调研 / 争议性话题 / 高风险领域）
@@ -70,7 +72,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/launch-chrome.mjs"
 并行调研任务在写 task_spec 之前，先派 1 个侦察 Agent 做全局广度扫描：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs \
+node scripts/spawn-subagent.mjs \
   --role scout \
   --goal "<用户问题领域>" \
   --task-dir <outputDir>
@@ -138,7 +140,7 @@ task_spec 不是写一次就不动——**每轮搜索 Agent 收齐后，主 Age
 ### 3.1 生成 prompt
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
+node scripts/spawn-subagent.mjs \
   --role search \
   --goal "验证该产品当前公开定价与计费单位" \
   --must-verify "价格数字" \
@@ -160,11 +162,11 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 
 **派发前必须设置子 Agent 的环境变量**：把第 0 步 check-deps 输出的 `SLEUTH_CDP_PORT`（和 `SLEUTH_CDP_WS` 如果有）作为环境变量传给子 Agent——子 Agent 的所有 agent-browser 命令依赖这个变量连浏览器。
 
-搜索 Agent 会读 `${CLAUDE_SKILL_DIR}/references/search.md`（搜索逻辑 + 工具选择 + 失败兜底 + JSONL 返回格式）+ 通过 `--task-dir` 读已有 findings/directions 避免重复。
+搜索 Agent 会读 `references/search.md`（搜索逻辑 + 工具选择 + 失败兜底 + JSONL 返回格式）+ 通过 `--task-dir` 读已有 findings/directions 避免重复。
 
 ### 3.3 收 stdout → 写 findings.jsonl
 
-每个搜索 Agent 通过 stdout 返回 **JSONL**（每行一个 JSON 对象，格式见 `${CLAUDE_SKILL_DIR}/references/search.md` §4.3）。收齐后：
+每个搜索 Agent 通过 stdout 返回 **JSONL**（每行一个 JSON 对象，格式见 `references/search.md` §4.3）。收齐后：
 
 1. `JSON.parse` 逐行解析
 2. **校验 + 归一化**（子 Agent 可能不严格遵守 §4.3 枚举，必须清洗后再写）：
@@ -197,13 +199,13 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 每轮搜索 Agent 收齐后，派一个边界 Agent 评估覆盖度：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
+node scripts/spawn-subagent.mjs \
   --role boundary \
   --goal "评估覆盖度" \
   --task-dir <outputDir>
 ```
 
-边界 Agent 读 `task_spec.md` + `findings.jsonl` + `follow_ups.json`，返回 `terminate_recommended` + `uncovered_dimensions` + `direction_drift` + `entity_mismatch` + `follow_ups_unresolved`（判定规则和输出格式见 `${CLAUDE_SKILL_DIR}/references/boundary.md`）。
+边界 Agent 读 `task_spec.md` + `findings.jsonl` + `follow_ups.json`，返回 `terminate_recommended` + `uncovered_dimensions` + `direction_drift` + `entity_mismatch` + `follow_ups_unresolved`（判定规则和输出格式见 `references/boundary.md`）。
 
 ## 第 5 步：检查终止信号
 
@@ -310,18 +312,18 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 ### 7.7 派审查 Agent
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
+node scripts/spawn-subagent.mjs \
   --role review \
   --goal "审计报告" \
   --task-dir <outputDir> \
   --draft-path <outputDir>/draft.md
 ```
 
-审查 Agent 返回 `audit_findings` + `sampled_stats`（审计规则看 `${CLAUDE_SKILL_DIR}/references/review.md`）。
+审查 Agent 返回 `audit_findings` + `sampled_stats`（审计规则看 `references/review.md`）。
 
 ### 7.8 审计结果处理
 
-审计 Agent 返回 critical + non_critical + sampled_stats（审计规则看 `${CLAUDE_SKILL_DIR}/references/review.md`）。
+审计 Agent 返回 critical + non_critical + sampled_stats（审计规则看 `references/review.md`）。
 
 - non_critical 非空 → 你修 draft（补 URL、改分级、标冲突）
 - critical 非空 → **回 LOOP**（第 3 步），带 `suggested_search` 作为新方向
@@ -337,7 +339,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 3. 复杂问题 → Markdown 报告写到用户 cwd 或 `<outputDir>/`
 4. 并行调研 → 合成一份最终报告，不生成多个“final / merged / summary”版本
 
-**图文并茂（按 query 类型）**：产品对比 / 设计 / 图表解读 / 评测类报告，必须图文并茂——呈现型图片按 `${CLAUDE_SKILL_DIR}/references/search.md` §6.2 流程归档并内嵌。纯事实 / 政策类不强求。证据型图片只附 URL + 标注“视觉分析”。
+**图文并茂（按 query 类型）**：产品对比 / 设计 / 图表解读 / 评测类报告，必须图文并茂——呈现型图片按 `references/search.md` §6.2 流程归档并内嵌。纯事实 / 政策类不强求。证据型图片只附 URL + 标注“视觉分析”。
 
 ## 状态文件 schema
 
@@ -426,7 +428,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/spawn-subagent.mjs" \
 
 Chrome 136+ 不允许 `--remote-debugging-port` 配合默认 profile（安全限制）。sleuth 用 symlink profile 方案绕过：把日常 profile 符号链接到 `~/.sleuth/chrome-live/`，用 `--user-data-dir=~/.sleuth/chrome-live/ --remote-debugging-port=9222` 启动——路径字符串不同骗过检查，实际读写同一份 profile 数据，登录态 / 书签 / 历史全保留。
 
-`node \"${CLAUDE_SKILL_DIR}/scripts/launch-chrome.mjs\"` 一键完成：杀 Chrome → 建 symlink → 重启 → 写 DevToolsActivePort → 输出连接变量。
+`node scripts/launch-chrome.mjs` 一键完成：杀 Chrome → 建 symlink → 重启 → 写 DevToolsActivePort → 输出连接变量。
 
 check-deps 跑一遍检查环境。
 

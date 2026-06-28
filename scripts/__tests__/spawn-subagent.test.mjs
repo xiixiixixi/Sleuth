@@ -18,9 +18,8 @@ test('search role: has environment variables + absolute doc path + safety + task
     '--must-verify', '计费单位',
     '--known-clue', '域名: example.com',
   ]);
-  assert.match(out, /CLAUDE_SKILL_DIR/);
-  assert.match(out, /SLEUTH_CDP_PORT/);
-  assert.match(out, /\$\{CLAUDE_SKILL_DIR\}\/references\/search\.md/);
+  assert.match(out, /references\/search\.md/);
+  assert.match(out, /Chrome 调试端口/);
   assert.match(out, /不提取 cookie/);
   assert.match(out, /不绕付费墙/);
   assert.match(out, /产生状态变更.*先停下问/);
@@ -81,8 +80,7 @@ test('boundary role: has env var + absolute doc path + safety + task context', (
     '--task-dir', '/tmp/test/',
   ]);
   assert.match(out, /边界评估/);
-  assert.match(out, /CLAUDE_SKILL_DIR/);
-  assert.match(out, /\$\{CLAUDE_SKILL_DIR\}\/references\/boundary\.md/);
+  assert.match(out, /references\/boundary\.md/);
   assert.match(out, /只读已有 findings/);
   assert.match(out, /评估覆盖度/);
   assert.match(out, /\/tmp\/test\//);
@@ -108,8 +106,7 @@ test('review role: has env var + absolute doc path + safety + draft path', () =>
     '--draft-path', '/tmp/test/draft.md',
   ]);
   assert.match(out, /证据链审计/);
-  assert.match(out, /CLAUDE_SKILL_DIR/);
-  assert.match(out, /\$\{CLAUDE_SKILL_DIR\}\/references\/review\.md/);
+  assert.match(out, /references\/review\.md/);
   assert.match(out, /允许 WebFetch 验证已有 URL/);
   assert.match(out, /审计报告/);
   assert.match(out, /\/tmp\/test\//);

@@ -27,6 +27,13 @@
  */
 
 import { parseArgs } from 'node:util';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// 在 Node.js 运行时自感知 skill 根目录，生成子 Agent prompt 时将
+// ${CLAUDE_SKILL_DIR} 替换为绝对路径——消除对运行时变量替换的依赖。
+const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const CDP_PORT = process.env.SLEUTH_CDP_PORT || '';
 
 const VALID_ROLES = new Set(['scout', 'search', 'boundary', 'review']);
 
@@ -80,7 +87,7 @@ if (values.help) {
 
 const role = values.role;
 if (!VALID_ROLES.has(role)) {
-  fail(`Invalid --role: ${role}. Valid: search, boundary, review`);
+  fail(`Invalid --role: ${role}. Valid: scout, search, boundary, review`);
 }
 
 // --- search role ---
@@ -115,9 +122,11 @@ function buildSearchContract(v) {
 
   return `你是 sleuth 研究子 Agent（搜索执行）。
 
-**环境变量**（主 Agent 已设置）：
-- \`CLAUDE_SKILL_DIR\`：skill 根目录——文档在 \`\${CLAUDE_SKILL_DIR}/references/\`
-- \`SLEUTH_CDP_PORT\`：Chrome 调试端口——agent-browser 命令带 \`--cdp $SLEUTH_CDP_PORT\`
+**本 skill 根目录**：
+- \`${SKILL_ROOT}\`
+- 文档在 \`${SKILL_ROOT}/references/\` 子目录下
+${CDP_PORT ? `- Chrome 调试端口：\`${CDP_PORT}\`（agent-browser 命令带 \`--cdp ${CDP_PORT}\`）` : '- Chrome 调试端口：**未设置**——agent-browser 命令不可用'}
+- 文档里的相对路径（如 \`references/tool-guide.md\`）都相对于本 skill 根目录，用 Read 工具时拼上根目录路径
 
 **必读文档**：\`\${CLAUDE_SKILL_DIR}/references/search.md\`（搜索逻辑、查询规则、工具选择、失败兜底、搜索循环、JSONL 返回格式、dimensions_seen schema、directions.json 格式）
 
@@ -162,8 +171,9 @@ function buildBoundaryContract(v) {
 
   return `你是 sleuth 研究子 Agent（边界评估）。
 
-**环境变量**（主 Agent 已设置）：
-- \`CLAUDE_SKILL_DIR\`：skill 根目录——文档在 \`\${CLAUDE_SKILL_DIR}/references/\`
+**本 skill 根目录**：\`${SKILL_ROOT}\`
+
+- 文档里的相对路径（如 \`references/xxx.md\`）都相对于本 skill 根目录解析
 
 **必读文档**：\`\${CLAUDE_SKILL_DIR}/references/boundary.md\`（4 检查维度、terminate_recommended 判定规则、输出 schema、不做清单）
 
@@ -190,8 +200,9 @@ function buildReviewContract(v) {
 
   return `你是 sleuth 研究子 Agent（证据链审计）。
 
-**环境变量**（主 Agent 已设置）：
-- \`CLAUDE_SKILL_DIR\`：skill 根目录——文档在 \`\${CLAUDE_SKILL_DIR}/references/\`
+**本 skill 根目录**：\`${SKILL_ROOT}\`
+
+- 文档里的相对路径（如 \`references/xxx.md\`）都相对于本 skill 根目录解析
 
 **必读文档**：\`\${CLAUDE_SKILL_DIR}/references/review.md\`（4 项审计、分层抽样策略、Tier 分级、5 级可信度、输出 schema、不做清单）
 
@@ -218,9 +229,10 @@ function buildScoutContract(v) {
 
   return `你是 sleuth 研究子 Agent（侦察 / Scout）。
 
-**环境变量**（主 Agent 已设置）：
-- \`CLAUDE_SKILL_DIR\`：skill 根目录——文档在 \`\${CLAUDE_SKILL_DIR}/references/\`
-- \`SLEUTH_CDP_PORT\`：Chrome 调试端口（侦察阶段不需要，但已设置）
+**本 skill 根目录**：\`${SKILL_ROOT}\`
+- 文档在 \`${SKILL_ROOT}/references/\` 子目录下
+
+- 文档里的相对路径（如 \`references/xxx.md\`）都相对于本 skill 根目录解析
 
 **必读文档**：\`\${CLAUDE_SKILL_DIR}/references/scout.md\`（广度扫描策略、工具选择、landscape.json 返回格式）
 
@@ -269,4 +281,5 @@ const builders = {
   review: buildReviewContract,
 };
 
-console.log(builders[role](values));
+const prompt = builders[role](values);
+console.log(prompt.replaceAll('${CLAUDE_SKILL_DIR}', SKILL_ROOT));

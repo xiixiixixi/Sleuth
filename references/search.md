@@ -54,7 +54,7 @@
 | **agent-browser** | 一手验证、动态渲染、登录、交互 | 适合高价值验证，不适合大范围扫网页 |
 | **本地历史 / 书签** | 找用户曾访问、组织内部入口 | 入口记忆，不等于事实证据 |
 
-工具证据边界见上方表格；失败兜底表见下方「失败兜底」段；具体 agent-browser 命令见 `${CLAUDE_SKILL_DIR}/references/tool-guide.md`。
+工具证据边界见上方表格；失败兜底表见下方「失败兜底」段；具体 agent-browser 命令见 `references/tool-guide.md`。
 
 ---
 
@@ -130,7 +130,7 @@
 **`dimensions_seen` 必须是对象数组**（不是字符串数组）：
 - ✅ `[{"dimension":"视角覆盖","observation":"Reddit 用户吐槽价格涨幅","source_url":"https://reddit.com/..."}]`
 - ❌ `["amount","date"]`（扁平字符串不接受——分类信息放 `dimension` 字段，具体观察放 `observation` 字段）
-- `dimension`：必须是 `${CLAUDE_SKILL_DIR}/references/boundary.md` 的 4 固定维度之一（`来源类型` / `视角` / `时间` / `地域`）或已声明的扩展名（如 `价格` / `安全` / `性能基准` / `法务`）
+- `dimension`：必须是 `references/boundary.md` 的 4 固定维度之一（`来源类型` / `视角` / `时间` / `地域`）或已声明的扩展名（如 `价格` / `安全` / `性能基准` / `法务`）
 - `observation`：该维度的具体观察（一句话，附 URL 最好）
 - `source_url`：观察来源（可选但推荐）
 
@@ -203,7 +203,7 @@ follow_up_questions 规则：
 
 ## 6. 多模态提取策略
 
-策略本身在这里讲，具体 agent-browser 命令看 `${CLAUDE_SKILL_DIR}/references/tool-guide.md`「特殊内容类型」段。
+策略本身在这里讲，具体 agent-browser 命令看 `references/tool-guide.md`「特殊内容类型」段。
 
 ### 6.1 文本
 
@@ -213,7 +213,7 @@ reader 是线索不是证据。核心结论必须回原始来源（浏览器或�
 
 - **证据型**（只为抽事实，如一张定价截图）：用 vision 工具分析 → 结论写报告 → **附原始图片 URL，不存图**
 - **呈现型**（报告本身需要给人看：产品图 / 对比图表 / 官方规格图 / UI / 示意图）：**截图 → 分析 → 内嵌**
-  1. 用 agent-browser 截图（命令看 `${CLAUDE_SKILL_DIR}/references/tool-guide.md`「截图」段）
+  1. 用 agent-browser 截图（命令看 `references/tool-guide.md`「截图」段）
   2. 截图默认存在 `~/.agent-browser/tmp/screenshots/`——搬到 `<outputDir>/screenshots/` 再用
   3. **用 vision 工具分析截图内容**（布局 / 配色 / 交互模式），分析结论写进报告——不是只放图不分析
   4. 报告里内嵌：`![图注](screenshots/文件名.png)`（本地截图）或 `![图注](来源URL)`（网图）
@@ -223,13 +223,13 @@ reader 是线索不是证据。核心结论必须回原始来源（浏览器或�
 
 ### 6.3 视频 / 音频 / PDF
 
-- 视频：字幕优先——用 `${CLAUDE_SKILL_DIR}/scripts/extract-subtitles.sh <URL>` 提取 YouTube 字幕，再用 `${CLAUDE_SKILL_DIR}/scripts/srt_to_transcript.py` 转成文本。无字幕时操控 `<video>` + screenshot 采帧（短视频 5-8 帧，中等 10-15 帧）
+- 视频：字幕优先——用 `scripts/extract-subtitles.sh <URL>` 提取 YouTube 字幕，再用 `scripts/srt_to_transcript.py` 转成文本。无字幕时操控 `<video>` + screenshot 采帧（短视频 5-8 帧，中等 10-15 帧）
 - 音频/播客：优先提取已有字幕和 shownotes，搜 `"播客名" transcript`。均失败告知用户无公开字幕，不伪造转录
 - PDF：eval 找链接 `document.querySelectorAll('a[href$=".pdf"]')`，下载后用 Read 工具读取；arXiv 论文直接访问 `arxiv.org/pdf/<论文ID>`
 
 ### 6.4 DOM 提取
 
-折叠区块、懒加载、Shadow DOM、iframe 的提取技巧见 `${CLAUDE_SKILL_DIR}/references/tool-guide.md`「DOM 技巧」段。
+折叠区块、懒加载、Shadow DOM、iframe 的提取技巧见 `references/tool-guide.md`「DOM 技巧」段。
 
 ---
 
