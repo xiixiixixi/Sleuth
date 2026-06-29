@@ -1,111 +1,325 @@
 #!/usr/bin/env node
 /**
- * launch-chrome.mjs — 用 symlink profile 启动带 CDP 调试的 Chrome
+ * launch-chrome.mjs — 启动带 CDP 调试的 Chrome，用 symlink profile 绕过
+ * Chrome 136+ 对 --remote-debugging-port + 默认 profile 的限制。
  *
- * Chrome 136+ 不允许 --remote-debugging-port 配合默认 profile。
- * 本脚本把默认 profile 符号链接到独立目录，骗过检查，
- * 让 Chrome 既有用户登录态又开启 CDP 调试。
+ * 支持 macOS / Linux / Windows。
  *
  * 用法：node launch-chrome.mjs
  * 输出：SLEUTH_CDP_PORT 和 SLEUTH_CDP_WS（和 check-deps 一致）
  */
 
-import { execSync, execFileSync } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
-const CHROME_BIN = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const DEFAULT_DATA = path.join(os.homedir(), 'Library/Application Support/Google/Chrome');
-const LINK_DIR = path.join(os.homedir(), '.sleuth/chrome-live');
+// ── 平台常量 ────────────────────────────────────────────────
+const PLATFORM = process.platform;        // 'darwin' | 'linux' | 'win32'
+const IS_WSL   = !!process.env.WSL_DISTRO_NAME;
+const HOME     = os.homedir();
+
 const DEBUG_PORT = 9222;
+const LINK_DIR   = path.join(HOME, '.sleuth/chrome-live');
+const PID_FILE   = path.join(HOME, '.sleuth/chrome-debug.pid');
+const KILL_GRACE_MS = 5000;
+const KILL_TERM_MS  = 3000;
+
+// ── 工具函数 ────────────────────────────────────────────────
 
 function log(msg) { console.log(msg); }
 function err(msg) { console.error(msg); }
 
+/** 纯 Node.js 忙等，不依赖 OS 的 sleep 命令。 */
+const sleepSync = (ms) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {}
+};
+
 /**
- * 检查端口是否已有 Chrome 在听 CDP
+ * Node 原生 TCP 发出 HTTP GET，同步阻塞返回响应 body，或 null（超时/失败）。
+ * 不依赖 OS 的 curl——Windows 旧版 / 精简镜像都能跑。
  */
+function httpGetSync(port, path, timeoutMs) {
+  return new Promise((resolve) => {
+    const sock = new net.Socket();
+    let data = '';
+    let resolved = false;
+    const done = (v) => { if (!resolved) { resolved = true; sock.destroy(); resolve(v); } };
+
+    sock.setTimeout(timeoutMs, () => done(null));
+    sock.connect(port, '127.0.0.1', () => {
+      sock.write(`GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`);
+    });
+    sock.on('data', (chunk) => { data += chunk.toString(); });
+    sock.on('close', () => {
+      const body = data.split('\r\n\r\n').slice(1).join('\r\n\r\n');
+      done(body || null);
+    });
+    sock.on('error', () => done(null));
+  });
+}
+
+/**
+ * 同步阻塞版：轮询 Promise 直到完成或超时。
+ * launch-chrome 是启动脚本，整体同步逻辑简单，忙等 ≤2s 可接受。
+ */
+function httpGetSyncBlock(port, path, timeoutMs) {
+  let result = undefined;
+  let done = false;
+  httpGetSync(port, path, timeoutMs).then((r) => { result = r; done = true; });
+  const end = Date.now() + timeoutMs;
+  while (!done && Date.now() < end) { /* busy-wait */ }
+  return result;
+}
+
+/** CDP /json/version 探活。 */
 function isCDPRunning() {
   try {
-    const out = execSync(`curl -s --max-time 2 http://127.0.0.1:${DEBUG_PORT}/json/version`, {
-      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    const info = JSON.parse(out);
-    return info;
+    const body = httpGetSyncBlock(DEBUG_PORT, '/json/version', 2000);
+    return body ? JSON.parse(body) : null;
+  } catch { return null; }
+}
+
+/** 端口是否仍被占用。 */
+function isPortBusy() {
+  return httpGetSyncBlock(DEBUG_PORT, '/json/version', 500) !== null;
+}
+
+/** 等端口释放，最多 attempts 次 ×1s。 */
+function waitForPortFree(attempts) {
+  for (let i = 0; i < attempts; i++) {
+    if (!isPortBusy()) return true;
+    sleepSync(1000);
+  }
+  return false;
+}
+
+/** 给 PID 发信号（跨平台）。 */
+function signal(pid, sig) {
+  try { process.kill(pid, sig); } catch {}
+}
+
+/** 读上次存的 PID。 */
+function readPid() {
+  try {
+    const raw = fs.readFileSync(PID_FILE, 'utf8').trim();
+    return Number(raw) || null;
+  } catch { return null; }
+}
+
+/** 存 PID。 */
+function writePid(pid) {
+  fs.writeFileSync(PID_FILE, String(pid));
+}
+
+/** 删 PID 文件。 */
+function clearPid() { try { fs.unlinkSync(PID_FILE); } catch {} }
+
+/** 检查 PID 是否还活着。 */
+function isAlive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch { return false; }
+}
+
+/** 等进程退出，最多 attempts 次 ×1s。 */
+function waitForExit(pid, attempts) {
+  for (let i = 0; i < attempts; i++) {
+    if (!isAlive(pid)) return true;
+    sleepSync(1000);
+  }
+  return false;
+}
+
+// ── 按 PID 停旧 Chrome ─────────────────────────────────────
+
+/**
+ * 停下一次 launch-chrome 启动的 Chrome 实例（按 PID 文件）。
+ * 不碰用户日常 Chrome，不误伤 Brave/Edge/Opera 等任何其他浏览器。
+ */
+function stopPreviousChrome() {
+  const pid = readPid();
+  if (!pid || !isAlive(pid)) return;
+
+  // A: 先请
+  log('  → 请求上次 sleuth Chrome 退出 (PID ' + pid + ') …');
+  signal(pid, PLATFORM === 'win32' ? void 0 : 'SIGTERM');
+  // Windows 上 process.kill(pid) 不指定信号 → 尝试优雅终止
+  sleepSync(KILL_GRACE_MS);
+  if (!isAlive(pid)) return;
+
+  // B: 强制杀
+  log('  ⚠ 上次 sleuth Chrome 未响应，强制终止 (PID ' + pid + ')。');
+  signal(pid, 'SIGKILL');
+  waitForExit(pid, 5);
+  // 如果还活着，Windows 上再用 taskkill 兜底（但只针对这个 PID）
+  if (isAlive(pid) && PLATFORM === 'win32') {
+    try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'pipe' }); } catch {}
+  }
+  waitForPortFree(5);
+}
+
+// ── Chrome 查找 ─────────────────────────────────────────────
+
+/**
+ * 查找 Chrome 可执行文件。
+ *
+ * SLEUTH_CHROME_BIN 环境变量 > 平台内置搜索
+ */
+function findChrome() {
+  if (process.env.SLEUTH_CHROME_BIN) {
+    if (fs.existsSync(process.env.SLEUTH_CHROME_BIN)) return process.env.SLEUTH_CHROME_BIN;
+    err('SLEUTH_CHROME_BIN is set but file not found: ' + process.env.SLEUTH_CHROME_BIN);
+    process.exit(1);
+  }
+  if (PLATFORM === 'darwin') {
+    // mdfind (Spotlight) 找到 Chrome.app 的位置
+    try {
+      const p = execSync('mdfind "kMDItemCFBundleIdentifier == \'com.google.Chrome\' && kMDItemContentType == \'com.apple.application-bundle\'" 2>/dev/null | head -1', { encoding: 'utf8', stdio: 'pipe', timeout: 3000 }).trim();
+      if (p) return path.join(p, 'Contents/MacOS/Google Chrome');
+    } catch {}
+    const fixed = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    if (fs.existsSync(fixed)) return fixed;
+  }
+  if (PLATFORM === 'linux') {
+    for (const bin of ['google-chrome-stable', 'google-chrome', 'chromium-browser', 'chromium']) {
+      try {
+        const p = execSync(`which ${bin} 2>/dev/null`, { encoding: 'utf8', stdio: 'pipe' }).trim();
+        if (p && fs.existsSync(p)) return p;
+      } catch {}
+    }
+    // Snap / Flatpak
+    for (const p of [
+      '/snap/bin/chromium',
+      '/var/lib/flatpak/exports/bin/com.google.Chrome',
+      path.join(HOME, '.local/share/flatpak/exports/bin/com.google.Chrome'),
+    ]) {
+      if (fs.existsSync(p)) return p;
+    }
+    // WSL：Chrome 在 Windows 宿主上，Linux 侧找不到
+    if (IS_WSL) {
+      err('WSL detected. Chrome runs on the Windows host, not inside WSL.');
+      err('  Set SLEUTH_CHROME_BIN to the Windows path of chrome.exe, e.g.:');
+      err('  export SLEUTH_CHROME_BIN="/mnt/c/Program Files/Google/Chrome/Application/chrome.exe"');
+    }
+  }
+  if (PLATFORM === 'win32') {
+    // 注册表
+    try {
+      const reg = execSync('reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe" /ve 2>nul', { encoding: 'utf8', stdio: 'pipe', timeout: 5000 });
+      const m = reg.match(/REG_SZ\s+(.+)/);
+      if (m?.[1] && fs.existsSync(m[1].trim())) return m[1].trim();
+    } catch {}
+    // 常见路径兜底
+    const d = process.env.LOCALAPPDATA || path.join(HOME, 'AppData/Local');
+    for (const sub of ['Google/Chrome/Application/chrome.exe', 'Google/Chrome Beta/Application/chrome.exe', 'Google/Chrome Dev/Application/chrome.exe']) {
+      if (fs.existsSync(path.join(d, sub))) return path.join(d, sub);
+    }
+  }
+  return null;
+}
+
+const CHROME_BIN = findChrome();
+
+// ── profile 路径 ────────────────────────────────────────────
+
+const DEFAULT_DATA = (() => {
+  switch (PLATFORM) {
+    case 'darwin': return path.join(HOME, 'Library/Application Support/Google/Chrome');
+    case 'linux':  return path.join(HOME, '.config/google-chrome');
+    case 'win32':  return path.join(process.env.LOCALAPPDATA || path.join(HOME, 'AppData/Local'), 'Google/Chrome/User Data');
+    default: throw new Error('Unsupported platform: ' + PLATFORM);
+  }
+})();
+
+// ── symlink / copy profile ─────────────────────────────────
+
+/**
+ * 创建链接：Windows 非管理员降级为拷贝。
+ */
+function createLink(src, dst) {
+  try {
+    fs.symlinkSync(src, dst);
   } catch {
-    return null;
+    // Windows 普通用户无权 symlink → copy 兜底
+    if (fs.statSync(src).isDirectory()) {
+      fs.cpSync(src, dst, { recursive: true });
+    } else {
+      fs.copyFileSync(src, dst);
+    }
   }
 }
 
-/**
- * 创建符号链接 profile
- */
 function setupSymlinks() {
-  // 清理旧目录（保留目录本身）
   if (fs.existsSync(LINK_DIR)) {
-    fs.rmSync(LINK_DIR, { recursive: true });
+    try {
+      const s = fs.lstatSync(LINK_DIR);
+      if (s.isSymbolicLink()) {
+        fs.unlinkSync(LINK_DIR);
+      } else {
+        fs.rmSync(LINK_DIR, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+      }
+    } catch {
+      fs.rmSync(LINK_DIR, { recursive: true, force: true });
+    }
   }
   fs.mkdirSync(LINK_DIR, { recursive: true });
-
-  // 链接核心文件
-  const items = ['Default', 'Local State', 'First Run'];
-  for (const item of items) {
+  for (const item of ['Default', 'Local State', 'First Run']) {
     const src = path.join(DEFAULT_DATA, item);
-    const dst = path.join(LINK_DIR, item);
-    if (fs.existsSync(src)) {
-      fs.symlinkSync(src, dst);
-    }
+    if (fs.existsSync(src)) createLink(src, path.join(LINK_DIR, item));
   }
 }
 
-/**
- * 写 DevToolsActivePort 到默认路径（让 browser-discovery.mjs 能发现）
- */
-function writeDevToolsPort(wsUrl) {
-  const wsPath = wsUrl.split(`:${DEBUG_PORT}`)[1];
-  const filePath = path.join(DEFAULT_DATA, 'DevToolsActivePort');
-  fs.writeFileSync(filePath, `${DEBUG_PORT}\n${wsPath}\n`);
-}
+// ── 锁清理 ─────────────────────────────────────────────────
 
-/**
- * 杀 Chrome 并等待退出
- */
-function killChrome() {
-  try { execSync('pkill -9 -f "Google Chrome"', { stdio: 'pipe' }); } catch {}
-  // 等端口释放
-  for (let i = 0; i < 10; i++) {
-    try {
-      execSync(`curl -s --max-time 1 http://127.0.0.1:${DEBUG_PORT}/json/version`, { stdio: 'pipe' });
-      // 还在响应，等一下
-      execSync('sleep 1');
-    } catch {
-      break; // 端口已释放
-    }
+function cleanLocks() {
+  for (const name of ['SingletonLock', 'SingletonSocket']) {
+    try { fs.unlinkSync(path.join(DEFAULT_DATA, name)); } catch {}
   }
 }
 
-/**
- * 启动 Chrome 并等 CDP 就绪
- */
+// ── 启动 ────────────────────────────────────────────────────
+
 function launchChrome() {
-  execFileSync(CHROME_BIN, [
+  const args = [
     `--remote-debugging-port=${DEBUG_PORT}`,
     `--user-data-dir=${LINK_DIR}`,
-  ], { detached: true, stdio: 'ignore' }).unref();
+    '--restore-last-session',
+  ];
+  // 容器 / CI 环境
+  if (process.env.CI || process.env.SLEUTH_NO_SANDBOX) {
+    args.push('--no-sandbox');
+  }
 
-  // 等 CDP 就绪（最多 15 秒）
+  const child = spawn(CHROME_BIN, args, { detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
+
+  // 存 PID，下次杀掉时只杀这个实例
+  if (child.pid) writePid(child.pid);
+
   for (let i = 0; i < 30; i++) {
-    execSync('sleep 0.5');
+    sleepSync(500);
     const info = isCDPRunning();
     if (info) return info;
   }
   return null;
 }
 
-// === 主流程 ===
+// ── DevToolsActivePort ──────────────────────────────────────
 
-// 1. 已在跑？
+function writeDevToolsPort(wsUrl) {
+  const wsPath = wsUrl.split(`:${DEBUG_PORT}`)[1];
+  const data = `${DEBUG_PORT}\n${wsPath}\n`;
+  // Chrome 将此文件写在 --user-data-dir（即 LINK_DIR）下；
+  // browser-discovery.mjs 读的是 DEFAULT_DATA。两处都写，新旧兼容。
+  fs.writeFileSync(path.join(LINK_DIR, 'DevToolsActivePort'), data);
+  try { fs.writeFileSync(path.join(DEFAULT_DATA, 'DevToolsActivePort'), data); } catch {}
+}
+
+// ═══ 主流程 ════════════════════════════════════════════════
+
+// 1. CDP 已在跑？
 let info = isCDPRunning();
 if (info) {
   log(`chrome-cdp: already running (port ${DEBUG_PORT}, ${info.Browser})`);
@@ -115,26 +329,26 @@ if (info) {
 }
 
 // 2. 检查 Chrome 二进制
-if (!fs.existsSync(CHROME_BIN)) {
-  err(`Chrome not found at ${CHROME_BIN}`);
+if (!CHROME_BIN) {
+  err('Chrome not found. Set SLEUTH_CHROME_BIN to the full path of your Chrome executable.');
   process.exit(1);
 }
 
-// 3. 杀 Chrome → 建 symlink → 重启
-log('chrome-cdp: not running. Setting up symlink profile + relaunch...');
-log('  (Chrome will restart with your login state intact)');
-killChrome();
+// 3. 停上次 sleuth Chrome → 链接 profile → 清锁 → 启动
+log('chrome-cdp: not running. Setting up profile + relaunch...');
+log('  (Chrome 重启后标签页 URL 自动恢复；登录态视站点而定)');
+stopPreviousChrome();
 setupSymlinks();
+cleanLocks();
 
 info = launchChrome();
 if (!info) {
-  err('chrome-cdp: failed to start. Check if Chrome is installed correctly.');
+  err('chrome-cdp: failed to start. If a non-Chrome process is using port 9222, free it first.');
+  clearPid();
   process.exit(1);
 }
 
-// 4. 写 DevToolsActivePort 让 browser-discovery 发现
 writeDevToolsPort(info.webSocketDebuggerUrl);
-
 log(`chrome-cdp: ok (${info.Browser}, port ${DEBUG_PORT})`);
 log(`SLEUTH_CDP_PORT=${DEBUG_PORT}`);
 log(`SLEUTH_CDP_WS=${info.webSocketDebuggerUrl}`);
