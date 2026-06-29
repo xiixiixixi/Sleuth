@@ -27,7 +27,7 @@ description: >-
 
 ## 角色边界
 
-主 Agent 只做 **调度 + 合成**——派子 Agent 做研究、收 findings、写报告、派审查。**不亲手做研究**：不自己搜、不自己开浏览器、不自己截图。你脑子里的 URL 可能是错的（如把 Windsurf 的官网记成 devin.ai），搜索子 Agent 的搜索结果比你的记忆可靠。研究由子 Agent 完成，主 Agent 用子 Agent 返回的 URL 和 findings 合成报告。
+主 Agent 只做 **调度 + 合成**——派子 Agent 做研究、收 findings、写报告、派审查。**不亲手做研究**：不自己搜、不自己开浏览器、不自己截图。你脑子里的 URL 可能是错的（如记错某产品的官网域名），搜索子 Agent 的搜索结果比你的记忆可靠。研究由子 Agent 完成，主 Agent 用子 Agent 返回的 URL 和 findings 合成报告。
 
 ## 第 0 步：环境检查
 
@@ -102,12 +102,20 @@ node scripts/spawn-subagent.mjs \
 
 - [ ] 1. <子问题 1>
   - 来源类型：<官方/学术/新闻/...>
-  - 完成标准：<什么叫答完，如"找到 2+ 个独立源确认 X">
+  - 完成标准：
+    - min_sources: 2
+    - min_t1: 1
+    - required_fields: ["字段1", "字段2"]
+    - max_age_days: 365
   - [ ] 1.1 <Round N follow_up 问题>（来自 search-X Round N）
   - [ ] 1.2 <Round N follow_up 问题>
 - [ ] 2. <子问题 2>
   - 来源类型：<...>
-  - 完成标准：<...>
+  - 完成标准：
+    - min_sources: <int>
+    - min_t1: <int>
+    - required_fields: ["..."]
+    - max_age_days: <int>
 - [ ] N. <后续新增的子问题>（来自 Round N follow_up 新增）
 - [ ] N+1. <合并的子问题>（A + B 合并，来自 Round N follow_up）
 
@@ -115,6 +123,21 @@ node scripts/spawn-subagent.mjs \
 - 时间覆盖：<如"包含 2026 年内至少 2 个时间点">
 - 反方视角：<如"至少 1 个批评性来源">
 - 来源多样性：<如"至少 3 种来源类型">
+
+## 完成标准说明
+
+**子问题级（机械可判定）**：每个子问题的完成标准包含 4 个可计数字段，边界 Agent 和主 Agent 可自动判定该子问题是否完成：
+
+| 字段 | 含义 | 默认值 |
+|------|------|--------|
+| `min_sources` | 最少独立来源数（按 URL 去重） | 2 |
+| `min_t1` | 最少 T1 来源数（官方文档 / 监管文件 / 同行评议） | 1 |
+| `required_fields` | 必须覆盖的具体字段列表（如 `["触发方式", "优先级规则", "冲突解决"]`），每个字段需被至少 1 条 finding 的 claim 或 dimensions_seen 覆盖 | []（无强制字段） |
+| `max_age_days` | 来源最大天数（时效性要求——从当前日期往前算，所有 sources 的发布时间必须在此窗口内；无法确定发布时间则宽松处理，不因缺时间戳而判失败） | 365 |
+
+**全局级（视野广度）**：边界 Agent 的 4 个维度（来源类型多样性 / 视角覆盖 / 时间覆盖 / 地域覆盖）+ 反方视角——回答"视野够不够"，与子问题级的"细节够不够"互补。
+
+**默认完成标准**：如果主 Agent 不为某个子问题写具体字段，使用默认值（min_sources=2, min_t1=1, required_fields=[], max_age_days=365）。简单问题不需要重标准——默认值已经足够覆盖大多数场景。
 ````
 
 **完成标准是终止判断的依据**——你在第 5 步对照它判断是否够。
@@ -127,7 +150,7 @@ task_spec 不是写一次就不动——**每轮搜索 Agent 收齐后，主 Age
 
 | 操作 | 什么时候做 | 规则 |
 |------|-----------|------|
-| **标记完成** | 子问题有 ≥2 条 findings 且满足完成标准 | `[ ]` → `[x]`，注明 `✅ Round N` |
+| **标记完成** | 子问题的 sources / T1 / required_fields / 时效性全部满足完成标准（见 §3.5 自动判定规则） | `[ ]` → `[x]`，注明 `✅ Round N` |
 | **挂载 follow_up** | 搜索 Agent 返回了 follow_up_questions | 挂到发现的子问题下，编号 `1.1`、`1.2` |
 | **新增子问题** | follow_up 发现全新实体（和已有子问题不相关） | 新编号接在最后，注明来源 |
 | **合并子问题** | follow_up 的实体和已有子问题领域类似 | 合并编号，注明合并来源 |
@@ -174,7 +197,7 @@ node scripts/spawn-subagent.mjs \
    - `confidence` 不在 5 级枚举（`已验证事实` / `高置信推断` / `未确认线索` / `冲突信息` / `覆盖缺口`）里 → 按 tier 推断：T1/T2 → `高置信推断`，T3 → `未确认线索`
    - `tier` 是整数（`1`/`2`/`3`）或英文（`primary`/`secondary`/`tertiary`）→ 映射成 `"T1"` / `"T2"` / `"T3"`
    - `dimensions_seen` 是字符串数组（如 `["amount","date"]`）→ 转成对象数组 `[{"dimension":"<原值>","observation":""}]`
-3. 给每条 finding 补充字段：`ts`（当前 ISO 时间戳）、`round`（当前轮次）、`agent`（你给的 agent 名）、`claim_id`（`sha1(normalized_claim + url_domain)` 前 12 位；`normalized_claim` = lowercase + 去标点 + 折叠空白）
+3. 给每条 finding 补充字段：`ts`（当前 ISO 时间戳）、`round`（当前轮次）、`agent`（你给的 agent 名）、`claim_id`（`sha1(normalized_claim)` 前 12 位；`normalized_claim` = lowercase + 去标点 + 折叠空白 + 移除结尾标点 `. ! ? ; :`）
 4. 用 Write 工具 append 到 `<outputDir>/findings.jsonl`
 5. **提取 follow_up_questions**：从 findings 里提取所有 follow_up_questions，写入 `<outputDir>/follow_ups.json`（格式见「状态文件 schema」段）。下一轮派发时用作新方向依据。
 
@@ -188,7 +211,15 @@ node scripts/spawn-subagent.mjs \
 
 收完 findings + 提取 follow_ups 后，**更新 task_spec.md 的状态标记**：
 
-1. **标完成**：对每个 `- [ ]` 子问题，检查 findings 是否满足完成标准（≥2 条 findings + 覆盖关键字段）→ 改 `- [x]` + 注明 `✅ Round N`
+1. **标完成**：对每个 `- [ ]` 子问题，对照其结构化完成标准（min_sources / min_t1 / required_fields / max_age_days）做 4 项判定：
+
+   **判定步骤**（数学化，不靠直觉）：
+   a. **来源数**：统计 findings.jsonl 中与该子问题相关的独立 URL 数 → ≥ min_sources？
+   b. **T1 来源数**：其中 tier="T1" 的有几条 → ≥ min_t1？
+   c. **required_fields 覆盖**：required_fields 里的每个字段，是否被至少 1 条 finding 的 claim 文本或 dimensions_seen 覆盖？**用 LLM 语义判断**——看 finding 实际讨论了什么，不是字符串匹配。例：required_field 是「定价模型」，finding claim 写「按请求量阶梯计费，超出免费额度后 $0.01/1K tokens」→ 语义上覆盖了「定价模型」，即便这四个字没出现在 claim 里。**不做纯关键词 grep**。
+   d. **时效性**：所有相关 finding 的 ts 字段是否在 max_age_days 窗口内？（无法确定 ts 的 finding 不因时效性被判失败——宽松处理）
+
+   4 项全部通过 → 改 `- [x]` + 注明 `✅ Round N`。任一项未通过 → 保持 `- [ ]`，记录未达标项（如 `sources: 1/2, T1: 0/1`）以便第 6 步派发时作为新方向依据。
 2. **挂载 follow_ups**：把 follow_up_questions 挂到发现它的子问题下作为子节点（`1.1`、`1.2`）
 3. **新增/合并**：全新实体 → 新编号接最后；和已有类似 → 合并编号
 4. **标 follow_up 解决**：已解决的 follow_up 子节点 `- [ ]` → `- [x]` + follow_ups.json `resolved: true`
@@ -209,12 +240,27 @@ node scripts/spawn-subagent.mjs \
 
 ## 第 5 步：检查终止信号
 
-**前置条件**：task_spec 所有子问题（含子节点）必须标 `[x]`。有 `- [ ]` 的子问题 → 直接回第 6 步，不检查其他终止条件。
+**前置条件**：task_spec 所有子问题（含子节点）必须标 `[x]`——即每个子问题的 4 项结构化完成标准（min_sources / min_t1 / required_fields / max_age_days）已全部满足。有 `- [ ]` 的子问题 → 直接回第 6 步，不检查其他终止条件。
 
 前置条件满足后，检查：
-1. **软终止**：`terminate_recommended: true` + 无 entity_mismatch + follow_ups_unresolved = 0 → 进第 7 步
-2. **硬终止**：连续 2 轮 findings 的 `claim_id` 集合无新增 → 进第 7 步
-3. **用户终止**：CHECKPOINT → 停
+
+**1. 收敛检查（信息增益信号）**— 从 findings.jsonl 按 round 分组提取 claim_id 集合，计算：
+- `C_r` = 本轮所有 claim_id
+- `N_r` = `|C_r \ 前几轮的并集|`（本轮纯新增数）
+- `novelty_r` = `N_r / |C_r|`（本轮新颖比）
+- 累积集 `H_r` = 本轮及之前所有 claim_id 的并集
+
+满足以下任一收敛条件即进第 7 步：
+- **硬饱和（Rule A）**：连续 2 轮 `N_r = 0`，且总轮数 ≥ 3
+- **递减收益（Rule B）**：总轮数 ≥ 5，且最近 3 轮 `N_r` 非递增，且当前轮 `N_r ≤ 2`，且 `novelty_r < 0.20`
+
+Rule A 或 Rule B 触发时，输出可解释的终止消息——"连续 2 轮无新增事实"或"发现速率已连续 3 轮衰减（X→Y→Z），当前轮仅发现 N 个新事实（新颖比 P%），信息空间接近穷尽"。**收敛检查是安全网——正常任务 3-5 轮由软终止退出，不会触发。**
+
+**1b. 硬兜底（Panic Stop）**：总轮数达 `SLEUTH_MAX_ROUNDS`（默认 20）→ 强制进第 7 步，合成时标注 "WARNING: 轮次硬上限已达（N 轮），以下维度可能未充分覆盖" + 未覆盖子问题清单。**这是最后的降落伞——收敛检查失效时才触发，正常任务永远碰不到。** `SLEUTH_MAX_ROUNDS` 环境变量允许用户按需调整。
+
+**2. 软终止（边界 Agent）**：`terminate_recommended: true` + 无 entity_mismatch + follow_ups_unresolved = 0 → 进第 7 步
+
+**3. 用户终止**：CHECKPOINT → 停
 
 不终止 → 第 6 步。
 
@@ -240,7 +286,7 @@ node scripts/spawn-subagent.mjs \
 5. 追加新方向到 directions.json
 6. 回第 3 步（派搜索 Agent，`--round` 递增）
 
-**loop 持续迭代，直到终止信号触发——不是固定轮次。**
+**loop 持续迭代直到终止信号触发。** 正常任务 3-5 轮边界 Agent 软终止自然收敛；当软终止持续未触发但信息增益已枯竭时，收敛检查（Rule A / Rule B）作为安全网兜底终止。
 
 ## 第 7 步：合成 + 审查 + 交付
 
@@ -378,9 +424,8 @@ node scripts/spawn-subagent.mjs \
 - `ts`: ISO 时间戳（你代写时注入）
 - `round`: loop 轮次（你派发时传入；用于第 5 步硬终止判定）
 - `agent`: 你给的 agent 名（如 `search-2`）
-- `claim_id`: `sha1(normalized_claim + url_domain)` 前 12 位——你用 claim_id 集合 diff 判新增
-  - `normalized_claim` = lowercase + 去标点 + 折叠空白
-  - `url_domain` = URL 的 host
+- `claim_id`: `sha1(normalized_claim)` 前 12 位——不含 url_domain。同一事实被不同网站报道产生相同 claim_id，用 claim_id 集合 diff 判是否仍有新事实发现
+  - `normalized_claim` = lowercase + 去标点 + 折叠空白 + 移除结尾标点 `. ! ? ; :`
 - `claim` / `url` / `confidence` / `tier`: 见 §7.3 证据分层
 
 
@@ -388,8 +433,8 @@ node scripts/spawn-subagent.mjs \
 
 ```json
 [
-  {"round":1,"from_agent":"search-3","question":"Genesys 是否也有 AOP 机制？","resolved":false},
-  {"round":2,"from_agent":"search-1","question":"Twilio Flex 的规则引擎如何工作？","resolved":false}
+  {"round":1,"from_agent":"search-3","question":"竞品 X 是否也有类似机制？","resolved":false},
+  {"round":2,"from_agent":"search-1","question":"该平台的规则引擎如何与外部系统集成？","resolved":false}
 ]
 ```
 

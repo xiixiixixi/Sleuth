@@ -9,9 +9,29 @@
 
 ### 0. task_spec 完成度（Task Spec Completion）
 
-读 task_spec 的 `- [ ]` / `- [x]` 状态标记（含子节点 `1.1`、`1.2`）。
+读 task_spec 的状态标记 `- [ ]` / `- [x]` + **每个子问题的结构化完成标准**——完成标准包含 4 个可计数字段：
+
+| 字段 | 含义 | 默认值 |
+|------|------|--------|
+| `min_sources` | 最少独立 URL 数 | 2 |
+| `min_t1` | 最少 T1 来源（官方/监管/同行评议） | 1 |
+| `required_fields` | 必须覆盖的字段列表 | [] |
+| `max_age_days` | 来源最大天数 | 365 |
+
+如果子问题未显式声明完成标准，使用默认值。
+
+**自动判定每个子问题**（按以下规则逐一检查）：
+- **来源数**：统计 findings.jsonl 中与该子问题相关的独立 URL 数 → ≥ min_sources？
+- **T1 来源数**：其中 tier="T1" 的有几条 → ≥ min_t1？
+- **required_fields 覆盖**：每个 required_field 是否被至少 1 条 finding 的 claim 或 dimensions_seen 覆盖？**用 LLM 语义判断**——看 finding 实际讨论了什么，不是字符串匹配。例：required_field「定价模型」，finding claim「按请求量阶梯计费，超出免费额度后 $0.01/1K tokens」→ 语义覆盖 ✓，即便「定价模型」四字没出现在 claim 里。
+- **时效性**：所有相关 finding 的 ts 是否在 max_age_days 窗口内？（缺 ts 宽松处理，不判失败）
+
+4 项全过 → 该子问题可标 `[x]`。任一项未过 → 子问题未完成。
+
 - 有 `- [ ]` 的子问题 → **task_spec 未全覆盖，强制不终止**
-- 输出 `uncovered_subquestions`：列出所有还是 `[ ]` 的子问题编号和标题
+- 输出 `uncovered_subquestions`：列出所有还是 `[ ]` 的子问题编号和标题，**注明具体哪个标准未达标**（如 `"sources: 1/2, T1: 0/1, required_fields: [触发方式] 未覆盖"`）
+
+**子问题归属判定**：如何将一个 finding 归属到某个子问题？按 finding 的 claim 文本与子问题标题/required_fields 的关键词匹配度——匹配度最高的子问题即为归属。一条 finding 可以归属多个子问题。
 ### 1. 覆盖度（Coverage）
 
 | 维度 | 问什么 |
@@ -31,7 +51,7 @@
 ### 3. 实体准确（Entity Accuracy）
 
 findings 里 claim 提到的实体名和 URL 域名是否匹配？
-- claim 说 "Windsurf 界面" 但 URL 是 devin.ai → entity_mismatch
+- claim 提到产品 A 的功能但 URL 却是产品 B 的官网 → entity_mismatch
 - 这是防止搜索 Agent 开错门的最后防线
 
 ### 4. Follow-ups 状态

@@ -177,7 +177,7 @@ test('SKILL.md has claim_id + round schema + directions.json schema', () => {
   const skill = readRel('SKILL.md');
   assert.match(skill, /claim_id.*sha1/);
   assert.match(skill, /round.*loop 轮次/);
-  assert.match(skill, /claim_id.{0,5}集合无新增/, 'must have hard termination check');
+  assert.match(skill, /收敛检查/, 'must have convergence-based termination check');
   assert.match(skill, /directions\.json 格式/);
   assert.match(skill, /"direction".*"source_type".*"agent".*"ts"/);
   assert.match(skill, /direction.*source_type.*重复.*换路/);
