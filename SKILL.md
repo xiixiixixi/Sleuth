@@ -211,7 +211,7 @@ node scripts/spawn-subagent.mjs \
    - `dimensions_seen` 是字符串数组（如 `["amount","date"]`）→ 转成对象数组 `[{"dimension":"<原值>","observation":""}]`
 3. 给每行补充公共字段：`ts`（当前 ISO 时间戳）、`round`（当前轮次）、`agent`（你给的 agent 名）。`type=finding` 的行额外补充 `claim_id`（直接将 claim 文本归一化——lowercase + 去除所有标点 + 连续空白折叠为单空格 + 移除首尾空白。归一化后的字符串即为 claim_id，用于跨轮集合 diff 判断是否有新事实发现）。`type=gap` 和 `type=red_flag` 不生成 claim_id
 4. 读取现有 `<outputDir>/findings.jsonl`，拼接本批新行，用 Write 工具覆盖写入完整文件
-5. **提取 follow_up_questions**：从 findings 里提取所有 follow_up_questions，写入 `<outputDir>/follow_ups.json`（格式见「状态文件 schema」段）。下一轮派发时用作新方向依据。
+5. **提取 follow_up_questions**：从 findings 里提取所有 follow_up_questions，为每个分配 `id`（对应 task_spec 中的子节点编号如 `1.1`）和 `parent_id`（所属父问题编号），写入 `<outputDir>/follow_ups.json`（格式见「状态文件 schema」段）。resolved 时用 id 直接定位——不靠问题文本模糊匹配。下一轮派发时用作新方向依据。
 
 **收后校验**：写入前逐字段核对——每条 finding 是否含 `claim` + `url` + `tier`，gap 是否含 `what` + `reason`，red_flag 是否含 `claim` + `reason`。缺必填字段或类型不对 → 标记该行写入 `<outputDir>/parse_errors.log`，不入 findings.jsonl。若某 Agent 超半数行被拒 → 按 §3.2 健康监控重派。
 
@@ -463,12 +463,14 @@ node scripts/spawn-subagent.mjs \
 
 ```json
 [
-  {"round":1,"from_agent":"search-3","question":"竞品 X 是否也有类似机制？","resolved":false},
-  {"round":2,"from_agent":"search-1","question":"该平台的规则引擎如何与外部系统集成？","resolved":false}
+  {"id":"1.1","parent_id":"1","round":1,"from_agent":"search-3","question":"竞品 X 是否也有类似机制？","resolved":false},
+  {"id":"2.1","parent_id":"2","round":2,"from_agent":"search-1","question":"该平台的规则引擎如何与外部系统集成？","resolved":false}
 ]
 ```
 
 字段：
+- `id`: task_spec 中的子节点编号（如 `1.1`、`2.1`），与 task_spec.md 的层次序号一一对应——用于 resolved 时机械定位，不靠文本模糊匹配
+- `parent_id`: 所属父问题的编号（如 `1`、`2`）
 - `round`: 哪一轮的搜索 Agent 返回的
 - `from_agent`: agent 名
 - `question`: 追踪问题（搜索中发现的新实体/概念/方向）
