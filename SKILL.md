@@ -477,7 +477,7 @@ node scripts/spawn-subagent.mjs \
 
 **重复判定规则**：
 - `direction` + `source_type` 组合已在列表 → **重复，必须换路**
-- `direction` 相似但 `source_type` 不同 → **不算重复**（同主题换来源类型是合法探索）
+- `direction` 相似 → 判断实质是否重复——两次搜索是否大概率产出重叠结果。若高度重叠，即使 `source_type` 不同也视为重复，换角度而非换标签
 
 **state 写文件，不靠对话记忆**——上下文压缩后或换 session 时能从文件重建状态。恢复流程见下方「Session Recovery」段。
 
