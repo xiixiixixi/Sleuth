@@ -211,7 +211,7 @@ node scripts/spawn-subagent.mjs \
    - `tier` 是整数（`1`/`2`/`3`）或英文（`primary`/`secondary`/`tertiary`）→ 映射成 `"T1"` / `"T2"` / `"T3"`
    - `dimensions_seen` 是字符串数组（如 `["amount","date"]`）→ 转成对象数组 `[{"dimension":"<原值>","observation":""}]`
 3. 给每行补充公共字段：`ts`（当前 ISO 时间戳）、`round`（当前轮次）、`agent`（你给的 agent 名）。`type=finding` 的行额外补充 `claim_id`（直接将 claim 文本归一化——lowercase + 去除所有标点 + 连续空白折叠为单空格 + 移除首尾空白。归一化后的字符串即为 claim_id，用于跨轮集合 diff 判断是否有新事实发现）。`type=gap` 和 `type=red_flag` 不生成 claim_id
-4. 所有行（finding / gap / red_flag）统一用 Write 工具 append 到 `<outputDir>/findings.jsonl`
+4. 读取现有 `<outputDir>/findings.jsonl`，拼接本批新行，用 Write 工具覆盖写入完整文件
 5. **提取 follow_up_questions**：从 findings 里提取所有 follow_up_questions，写入 `<outputDir>/follow_ups.json`（格式见「状态文件 schema」段）。下一轮派发时用作新方向依据。
 
 **收后校验**：写入前逐字段核对——每条 finding 是否含 `claim` + `url` + `tier`，gap 是否含 `what` + `reason`，red_flag 是否含 `claim` + `reason`。缺必填字段或类型不对 → 标记该行写入 `<outputDir>/parse_errors.log`，不入 findings.jsonl。若某 Agent 超半数行被拒 → 按 §3.2 健康监控重派。
