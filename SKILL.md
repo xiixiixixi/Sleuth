@@ -391,7 +391,7 @@ node scripts/spawn-subagent.mjs \
 审计 Agent 返回 critical + non_critical + sampled_stats（审计规则看 `references/review.md`）。
 
 - non_critical 非空 → 你修 draft（补 URL、改分级、标冲突）
-- critical 非空 → **回 LOOP**（第 3 步），带 `suggested_search` 作为新方向
+- critical 非空 → **回 LOOP**（第 3 步），带 `suggested_search` 作为新方向。回 LOOP 前重读原始 `findings.jsonl`——压缩后的 draft 可能丢失划定重搜范围所需的具体 URL 和细节
   - revision 硬上限：critical 回 loop 最多 3 次
   - 第 3 次仍 critical → 标记为「已知限制」写入报告，交付
 - 都为空 → 交付
