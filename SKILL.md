@@ -202,7 +202,7 @@ node scripts/spawn-subagent.mjs \
 
 **收前先确认状态**：收集结果前，扫一遍所有派发的子 Agent——已完成的直接收结果；仍在正常运行中的继续等；已死亡/无响应的按上述规则终止重派。其他 Agent 的结果先处理，不被个别死 Agent 阻塞。
 
-每个搜索 Agent 通过 stdout 返回 **JSONL**（每行一个 JSON 对象，格式见 `references/search.md` §4.3）。收齐后：
+每个搜索 Agent 通过运行时 task 工具返回 **JSONL**（每行一个 JSON 对象，格式见 `references/search.md` §4.3）。收齐后：
 
 1. **逐行 parse（防截断）**：`try/catch` 逐行 `JSON.parse`。parse 成功的行进入归一化；parse 失败的行（截断 JSONL / 非 JSON 文本）写入 `<outputDir>/parse_errors.log` 后跳过，不阻塞整批处理。若某 Agent 超过 50% 的行 parse 失败 → 整个 Agent 结果丢弃，按 §3.2 健康监控规则重派。
 2. **校验 + 归一化**（子 Agent 可能不严格遵守 §4.3 枚举，必须清洗后再写）：
@@ -420,7 +420,7 @@ node scripts/spawn-subagent.mjs \
 |---|---|---|---|
 | `landscape.json` | 侦察 Agent | 你（写 task_spec 用） | JSON 对象（见 scout.md） |
 | `task_spec.md` | 你 | 你 + 边界 Agent + 搜索 Agent（`--task-dir`） | Markdown（见第 2.1 步） |
-| `findings.jsonl` | 你（代写，子 Agent stdout 返回） | 你 + 边界 Agent + 审查 Agent | JSONL（见下文） |
+| `findings.jsonl` | 你（代写，子 Agent 通过 task 工具返回） | 你 + 边界 Agent + 审查 Agent | JSONL（见下文） |
 | `follow_ups.json` | 你（从 findings 提取） | 你 + 边界 Agent | JSON 数组（见下文） |
 | `directions.json` | 你 | 你 + 搜索 Agent（`--task-dir`） | JSON 数组（见下文） |
 | `draft.md` | 你 | 你 + 审查 Agent（`--draft-path`） | Markdown |

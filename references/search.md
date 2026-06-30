@@ -96,7 +96,7 @@
 
 ### 4.3 中间记录格式（JSONL，返回给主 Agent）
 
-搜索 Agent 通过 stdout 返回 **每行一个 JSON 对象**，主 Agent parse 后 append 到 findings.jsonl。**子 Agent 不直接写文件**。
+搜索 Agent 通过运行时 task 工具返回 **每行一个 JSON 对象**（对话文本），主 Agent parse 后 append 到 findings.jsonl。**子 Agent 不直接写文件**。
 
 返回格式（**硬约束——字段值只允许以下枚举，不允许自创**）：
 
