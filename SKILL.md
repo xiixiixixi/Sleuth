@@ -210,7 +210,7 @@ node scripts/spawn-subagent.mjs \
    - `confidence` 不在 5 级枚举（`已验证事实` / `高置信推断` / `未确认线索` / `冲突信息` / `覆盖缺口`）里 → 按 tier 推断：T1/T2 → `高置信推断`，T3 → `未确认线索`
    - `tier` 是整数（`1`/`2`/`3`）或英文（`primary`/`secondary`/`tertiary`）→ 映射成 `"T1"` / `"T2"` / `"T3"`
    - `dimensions_seen` 是字符串数组（如 `["amount","date"]`）→ 转成对象数组 `[{"dimension":"<原值>","observation":""}]`
-3. 给每条 finding 补充字段：`ts`（当前 ISO 时间戳）、`round`（当前轮次）、`agent`（你给的 agent 名）、`claim_id`（`sha1(normalized_claim)` 前 12 位；`normalized_claim` = lowercase + 去标点 + 折叠空白 + 移除结尾标点 `. ! ? ; :`）
+3. 给每条 finding 补充字段：`ts`（当前 ISO 时间戳）、`round`（当前轮次）、`agent`（你给的 agent 名）、`claim_id`（直接将 claim 文本归一化——lowercase + 去除所有标点 + 连续空白折叠为单空格 + 移除首尾空白。归一化后的字符串即为 claim_id，用于跨轮集合 diff 判断是否有新事实发现）
 4. 用 Write 工具 append 到 `<outputDir>/findings.jsonl`
 5. **提取 follow_up_questions**：从 findings 里提取所有 follow_up_questions，写入 `<outputDir>/follow_ups.json`（格式见「状态文件 schema」段）。下一轮派发时用作新方向依据。
 
@@ -430,15 +430,14 @@ node scripts/spawn-subagent.mjs \
 ### findings.jsonl 行格式
 
 ```jsonl
-{"ts":"2026-06-19T12:34:56Z","round":1,"agent":"search-2","claim_id":"a3f9c2e1b8d7","claim":"Anthropic Claude API 输入定价 $3/M tokens","url":"https://www.anthropic.com/pricing","confidence":"已验证事实","tier":"T1"}
+{"ts":"2026-06-19T12:34:56Z","round":1,"agent":"search-2","claim_id":"anthropic claude api input pricing $3/m tokens","claim":"Anthropic Claude API 输入定价 $3/M tokens","url":"https://www.anthropic.com/pricing","confidence":"已验证事实","tier":"T1"}
 ```
 
 字段：
 - `ts`: ISO 时间戳（你代写时注入）
 - `round`: loop 轮次（你派发时传入；用于第 5 步硬终止判定）
 - `agent`: 你给的 agent 名（如 `search-2`）
-- `claim_id`: `sha1(normalized_claim)` 前 12 位——不含 url_domain。同一事实被不同网站报道产生相同 claim_id，用 claim_id 集合 diff 判是否仍有新事实发现
-  - `normalized_claim` = lowercase + 去标点 + 折叠空白 + 移除结尾标点 `. ! ? ; :`
+- `claim_id`: claim 文本归一化后的字符串——lowercase + 去除标点 + 连续空白折叠为单空格 + 移除首尾空白。不含 url_domain。同一事实被不同网站报道产生相同 claim_id，用 claim_id 集合 diff 判是否仍有新事实发现
 - `claim` / `url` / `confidence` / `tier`: 见 §7.3 证据分层
 
 

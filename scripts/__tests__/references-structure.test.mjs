@@ -175,7 +175,7 @@ test('SKILL.md has synthesis rules inlined (Tier + 5-level + conflict + citation
 
 test('SKILL.md has claim_id + round schema + directions.json schema', () => {
   const skill = readRel('SKILL.md');
-  assert.match(skill, /claim_id.*sha1/);
+  assert.match(skill, /claim_id.*归一化/);
   assert.match(skill, /round.*loop 轮次/);
   assert.match(skill, /收敛检查/, 'must have convergence-based termination check');
   assert.match(skill, /directions\.json 格式/);
