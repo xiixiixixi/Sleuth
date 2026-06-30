@@ -139,6 +139,7 @@ function buildSearchContract(v) {
 - 文档在 \`${SKILL_ROOT}/references/\` 子目录下
 ${CDP_PORT ? `- Chrome 调试端口：\`${CDP_PORT}\`（agent-browser 命令带 \`--cdp ${CDP_PORT}\`）` : '- Chrome 调试端口：**未设置**——agent-browser 命令不可用'}
 - 文档里的相对路径（如 \`references/tool-guide.md\`）都相对于本 skill 根目录，用 Read 工具时拼上根目录路径
+- 文档中的工具名是**能力描述**——使用你运行时对应的工具。浏览器操控命令参考见 \`references/tool-guide.md\`
 
 **必读文档**：\`\${CLAUDE_SKILL_DIR}/references/search.md\`（搜索逻辑、查询规则、工具选择、失败兜底、搜索循环、JSONL 返回格式、dimensions_seen schema、directions.json 格式）
 
@@ -196,7 +197,7 @@ function buildBoundaryContract(v) {
 
 **本 skill 根目录**：\`${SKILL_ROOT}\`
 
-- 文档里的相对路径（如 \`references/xxx.md\`）都相对于本 skill 根目录解析
+- 文档里的相对路径（如 \`references/xxx.md\`）都相对于本 skill 根目录解析。文档中的工具名是能力描述——使用你运行时对应的工具。浏览器操控命令参考见 \`references/tool-guide.md\`
 
 **必读文档**：\`\${CLAUDE_SKILL_DIR}/references/boundary.md\`（4 检查维度、terminate_recommended 判定规则、输出 schema、不做清单）
 
@@ -230,7 +231,7 @@ function buildReviewContract(v) {
 
 **本 skill 根目录**：\`${SKILL_ROOT}\`
 
-- 文档里的相对路径（如 \`references/xxx.md\`）都相对于本 skill 根目录解析
+- 文档里的相对路径（如 \`references/xxx.md\`）都相对于本 skill 根目录解析。文档中的工具名是能力描述——使用你运行时对应的工具。浏览器操控命令参考见 \`references/tool-guide.md\`
 
 **必读文档**：\`\${CLAUDE_SKILL_DIR}/references/review.md\`（4 项审计、分层抽样策略、Tier 分级、5 级可信度、输出 schema、不做清单）
 
@@ -266,7 +267,7 @@ function buildScoutContract(v) {
 **本 skill 根目录**：\`${SKILL_ROOT}\`
 - 文档在 \`${SKILL_ROOT}/references/\` 子目录下
 
-- 文档里的相对路径（如 \`references/xxx.md\`）都相对于本 skill 根目录解析
+- 文档里的相对路径（如 \`references/xxx.md\`）都相对于本 skill 根目录解析。文档中的工具名是能力描述——使用你运行时对应的工具。浏览器操控命令参考见 \`references/tool-guide.md\`
 
 **必读文档**：\`\${CLAUDE_SKILL_DIR}/references/scout.md\`（广度扫描策略、工具选择、landscape.json 返回格式）
 

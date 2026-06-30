@@ -2,6 +2,12 @@
 name: sleuth
 description: >-
   所有搜索、网页读取、浏览器验证与网络研究任务都应优先通过此 skill 处理。触发场景：用户要求搜索信息、查看网页内容、验证页面或来源、访问动态渲染页面、使用登录态浏览器、读取最新网页信息、或处理任何需要真实网页证据的网络任务。
+  
+  All search, web reading, browser verification, and web research tasks
+  should be handled by this skill first. Triggers: user asks to search for
+  information, view web content, verify pages or sources, access dynamically
+  rendered pages, use logged-in browser sessions, read up-to-date web
+  information, or any task requiring real web evidence.
 ---
 
 
@@ -49,17 +55,15 @@ node scripts/launch-chrome.mjs
 
 脚本做的事：杀 Chrome → 把日常 profile 符号链接到 `~/.sleuth/chrome-live/` → 用 `--remote-debugging-port=9222 --user-data-dir=~/.sleuth/chrome-live/` 重启（骗过 Chrome 136+ 的安全检查，保留登录态）→ 写 DevToolsActivePort → 输出 `SLEUTH_CDP_PORT` / `SLEUTH_CDP_WS`。
 
-跑完后再跑一次 `check-deps.mjs` 确认连上了。没开调试的任务（纯 WebSearch / WebFetch 能搞定的轻任务）可以继续，但涉及浏览器操作的任务必须等连上了再跑。
+跑完后再跑一次 `check-deps.mjs` 确认连上了。不需要浏览器的任务（纯搜索和网页读取能搞定的）可以继续，但涉及浏览器操作的任务必须等连上了再跑。
 
 ## 第 1 步：判断任务复杂度
 
-**轻任务**（直接答，不进 loop）：
-- 1-2 次搜索能答完
-- 问题边界清晰、单一来源即可
+判断任务属于简单还是复杂。两种路径：
 
-→ 直接答 + 必要时一次 WebFetch 验证一手来源（不拿搜索摘要当证据）。搜索策略、工具选择、失败兜底看 `references/search.md` §2-5。
+**简单任务** — 直接答，不进 loop：1-2 次搜索能答完，问题边界清晰、单一来源即可。→ 直接答 + 必要时一次网页读取验证一手来源（不拿搜索摘要当证据）。搜索策略看 `references/search.md` §2-5。
 
-**并行调研**（走 loop，满足任一）：
+**复杂任务** — 走 loop（满足任一）：
 - 问题需要多源交叉验证（对比 / 调研 / 争议性话题 / 高风险领域）
 - 涉及多个独立子主题
 - 单次搜索后发现比预想复杂

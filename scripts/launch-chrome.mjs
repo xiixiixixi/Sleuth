@@ -11,7 +11,6 @@
 
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
-import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -37,54 +36,22 @@ const sleepSync = (ms) => {
   while (Date.now() < end) {}
 };
 
-/**
- * Node 原生 TCP 发出 HTTP GET，同步阻塞返回响应 body，或 null（超时/失败）。
- * 不依赖 OS 的 curl——Windows 旧版 / 精简镜像都能跑。
- */
-function httpGetSync(port, path, timeoutMs) {
-  return new Promise((resolve) => {
-    const sock = new net.Socket();
-    let data = '';
-    let resolved = false;
-    const done = (v) => { if (!resolved) { resolved = true; sock.destroy(); resolve(v); } };
-
-    sock.setTimeout(timeoutMs, () => done(null));
-    sock.connect(port, '127.0.0.1', () => {
-      sock.write(`GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`);
-    });
-    sock.on('data', (chunk) => { data += chunk.toString(); });
-    sock.on('close', () => {
-      const body = data.split('\r\n\r\n').slice(1).join('\r\n\r\n');
-      done(body || null);
-    });
-    sock.on('error', () => done(null));
-  });
-}
-
-/**
- * 同步阻塞版：轮询 Promise 直到完成或超时。
- * launch-chrome 是启动脚本，整体同步逻辑简单，忙等 ≤2s 可接受。
- */
-function httpGetSyncBlock(port, path, timeoutMs) {
-  let result = undefined;
-  let done = false;
-  httpGetSync(port, path, timeoutMs).then((r) => { result = r; done = true; });
-  const end = Date.now() + timeoutMs;
-  while (!done && Date.now() < end) { /* busy-wait */ }
-  return result;
-}
-
 /** CDP /json/version 探活。 */
 function isCDPRunning() {
   try {
-    const body = httpGetSyncBlock(DEBUG_PORT, '/json/version', 2000);
-    return body ? JSON.parse(body) : null;
+    const out = execSync(`curl -s --max-time 2 http://127.0.0.1:${DEBUG_PORT}/json/version`, {
+      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return JSON.parse(out);
   } catch { return null; }
 }
 
 /** 端口是否仍被占用。 */
 function isPortBusy() {
-  return httpGetSyncBlock(DEBUG_PORT, '/json/version', 500) !== null;
+  try {
+    execSync(`curl -s --max-time 0.5 http://127.0.0.1:${DEBUG_PORT}/json/version`, { stdio: 'pipe' });
+    return true;
+  } catch { return false; }
 }
 
 /** 等端口释放，最多 attempts 次 ×1s。 */
@@ -135,29 +102,46 @@ function waitForExit(pid, attempts) {
 // ── 按 PID 停旧 Chrome ─────────────────────────────────────
 
 /**
- * 停下一次 launch-chrome 启动的 Chrome 实例（按 PID 文件）。
- * 不碰用户日常 Chrome，不误伤 Brave/Edge/Opera 等任何其他浏览器。
+ * 关闭正在运行的 Chrome。
+ *
+ * 有 PID 文件 → 只杀那个 PID（上次 sleuth 启动的实例）。
+ * 无 PID 文件 → macOS 上 osascript 优雅退出用户日常 Chrome。
+ *   必须先关——symlink profile 会和日常 Chrome 抢同一份数据文件。
  */
 function stopPreviousChrome() {
   const pid = readPid();
-  if (!pid || !isAlive(pid)) return;
 
-  // A: 先请
-  log('  → 请求上次 sleuth Chrome 退出 (PID ' + pid + ') …');
-  signal(pid, PLATFORM === 'win32' ? void 0 : 'SIGTERM');
-  // Windows 上 process.kill(pid) 不指定信号 → 尝试优雅终止
-  sleepSync(KILL_GRACE_MS);
-  if (!isAlive(pid)) return;
-
-  // B: 强制杀
-  log('  ⚠ 上次 sleuth Chrome 未响应，强制终止 (PID ' + pid + ')。');
-  signal(pid, 'SIGKILL');
-  waitForExit(pid, 5);
-  // 如果还活着，Windows 上再用 taskkill 兜底（但只针对这个 PID）
-  if (isAlive(pid) && PLATFORM === 'win32') {
-    try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'pipe' }); } catch {}
+  // 有 PID 文件：只杀上次 sleuth 的实例
+  if (pid && isAlive(pid)) {
+    log('  → 请求上次 sleuth Chrome 退出 (PID ' + pid + ') …');
+    signal(pid, PLATFORM === 'win32' ? void 0 : 'SIGTERM');
+    sleepSync(KILL_GRACE_MS);
+    if (!isAlive(pid)) return;
+    log('  ⚠ 上次 sleuth Chrome 未响应，强制终止 (PID ' + pid + ')。');
+    signal(pid, 'SIGKILL');
+    waitForExit(pid, 5);
+    if (isAlive(pid) && PLATFORM === 'win32') {
+      try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'pipe' }); } catch {}
+    }
+    waitForPortFree(5);
+    return;
   }
-  waitForPortFree(5);
+
+  // 无 PID 文件（首次运行或 PID 文件丢失）：
+  // symlink profile 必须独占数据文件——需要先关掉日常 Chrome
+  if (PLATFORM === 'darwin') {
+    log('  → 首次运行：请求 Chrome 退出以释放 profile …');
+    try {
+      execSync('osascript -e \'tell application "Google Chrome" to quit\'', {
+        stdio: 'pipe', timeout: KILL_GRACE_MS,
+      });
+    } catch {}
+    sleepSync(KILL_GRACE_MS);
+    if (waitForPortFree(5)) return;
+    log('  ⚠ Chrome 未响应退出请求，将强制终止。未保存的浏览器状态可能丢失。');
+    try { execSync('pkill -9 -f "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"', { stdio: 'pipe' }); } catch {}
+    waitForPortFree(5);
+  }
 }
 
 // ── Chrome 查找 ─────────────────────────────────────────────
@@ -284,6 +268,7 @@ function cleanLocks() {
 function launchChrome() {
   const args = [
     `--remote-debugging-port=${DEBUG_PORT}`,
+    '--remote-allow-origins=*',
     `--user-data-dir=${LINK_DIR}`,
     '--restore-last-session',
   ];
@@ -298,7 +283,7 @@ function launchChrome() {
   // 存 PID，下次杀掉时只杀这个实例
   if (child.pid) writePid(child.pid);
 
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 60; i++) {
     sleepSync(500);
     const info = isCDPRunning();
     if (info) return info;
