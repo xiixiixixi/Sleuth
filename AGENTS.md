@@ -56,7 +56,7 @@ sleuth/
 ### 测试
 
 - `node:test` + `node:assert`（**禁止引入 jest/vitest/mocha**）
-- 跑测命令：`node --test scripts/__tests__/`
+- 跑测命令：`node --test scripts/__tests__/*.mjs`
 - 两种风格并存：
   - **Unit**（参考 `browser-discovery.test.mjs`）：`import { fn } from '../lib/...'` 直接调用
   - **Integration**（参考 `spawn-subagent.test.mjs`）：`execFileSync('node', [SCRIPT, ...args])` 子进程黑盒
@@ -107,7 +107,7 @@ sleuth/
 node scripts/check-deps.mjs --check-only
 
 # 跑全部测试
-node --test scripts/__tests__/
+node --test scripts/__tests__/*.mjs
 
 # 生成子 Agent prompt 文本
 # 生成子 Agent prompt 文本（默认 search role）
