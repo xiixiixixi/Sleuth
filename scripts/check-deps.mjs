@@ -11,7 +11,6 @@ const HELP = `用法: node check-deps.mjs [选项]
 
 选项:
   --check-only              非破坏性诊断（不写运行目录）
-  --output-dir              仅输出目录路径
   --task-name <name>        按任务名创建/解析输出目录（多 Agent 协作需独立目录）
   --json                    输出机器可读 JSON
   --help, -h                显示此帮助
@@ -21,7 +20,7 @@ task-name 允许字符：字母/数字/-/_/.（拒路径分隔符）
   node check-deps.mjs --task-name openai-2026-06-19 --check-only`;
 
 const KNOWN_FLAGS = new Set([
-  '--output-dir', '--check-only', '--json', '--help', '-h',
+  '--check-only', '--json', '--help', '-h',
 ]);
 
 const VALUE_FLAGS = new Set([
@@ -74,7 +73,6 @@ if (unknown.length > 0) {
 }
 
 const options = {
-  outputDirOnly: booleans.has('outputDir'),
   checkOnly: booleans.has('checkOnly'),
   json: booleans.has('json'),
   taskName: values.taskName,
