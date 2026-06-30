@@ -250,7 +250,7 @@ node scripts/spawn-subagent.mjs \
   --task-dir <outputDir>
 ```
 
-边界 Agent 读 `task_spec.md` + `findings.jsonl` + `follow_ups.json`，返回 `terminate_recommended` + `uncovered_dimensions` + `direction_drift` + `entity_mismatch` + `follow_ups_unresolved`（判定规则和输出格式见 `references/boundary.md`）。
+边界 Agent 读 `task_spec.md` + `findings.jsonl` + `follow_ups.json`，返回 `terminate_recommended` + `uncovered_subquestions` + `uncovered_dimensions` + `direction_drift` + `entity_mismatch` + `follow_ups_unresolved`（判定规则和输出格式见 `references/boundary.md`）。
 
 收到返回后校验必填字段：`terminate_recommended` 缺或不是 bool → 要求边界 Agent 重试一次。重试仍失败 → 默认 `terminate_recommended: false`（保守假设：覆盖不足），继续 LOOP。
 
