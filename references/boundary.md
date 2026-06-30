@@ -26,6 +26,8 @@
 - **required_fields 覆盖**：每个 required_field 是否被至少 1 条 finding 的 claim 或 dimensions_seen 覆盖？**用 LLM 语义判断**——看 finding 实际讨论了什么，不是字符串匹配。例：required_field「定价模型」，finding claim「按请求量阶梯计费，超出免费额度后 $0.01/1K tokens」→ 语义覆盖 ✓，即便「定价模型」四字没出现在 claim 里。
 - **时效性**：所有相关 finding 的 ts 是否在 max_age_days 窗口内？（缺 ts 宽松处理，不判失败）
 
+对已标 `[x]` 的子问题同样做 4 项检查——`[x]` 不代表跳过，边界 Agent 独立验证每项完成标准是否被 findings 证据支撑。若 `[x]` 与 evidence 不一致，列入 `uncovered_subquestions`。
+
 4 项全过 → 该子问题可标 `[x]`。任一项未过 → 子问题未完成。
 
 - 有 `- [ ]` 的子问题 → **task_spec 未全覆盖，强制不终止**
