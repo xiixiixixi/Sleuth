@@ -183,6 +183,20 @@ test('SKILL.md has claim_id + round schema + directions.json schema', () => {
   assert.match(skill, /direction.*source_type.*重复.*换路/);
 });
 
+// ===== M4: findings.jsonl schema completeness =====
+
+test('findings.jsonl schema documents all three types and field applicability', () => {
+  const skill = readRel('SKILL.md');
+  // type 字段必填，枚举 finding/gap/red_flag
+  assert.match(skill, /type.*finding.*gap.*red_flag/);
+  // claim_id 仅 finding 需要
+  assert.match(skill, /claim_id.*finding.*gap.*red_flag.*不需要/);
+  // what 字段仅 gap 使用
+  assert.match(skill, /\`what\` \| gap/);
+  // reason 字段 gap 和 red_flag 都使用
+  assert.match(skill, /\`reason\` \| gap \/ red_flag/);
+});
+
 test('SKILL.md has goal-oriented prompt principle', () => {
   const skill = readRel('SKILL.md');
   assert.match(skill, /说要什么，不说怎么做/);
