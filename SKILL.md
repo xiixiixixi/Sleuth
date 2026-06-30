@@ -480,7 +480,33 @@ node scripts/spawn-subagent.mjs \
 - `direction` + `source_type` 组合已在列表 → **重复，必须换路**
 - `direction` 相似但 `source_type` 不同 → **不算重复**（同主题换来源类型是合法探索）
 
-**state 写文件，不靠对话记忆**——上下文压缩后或换 session 时能从文件重建状态。
+**state 写文件，不靠对话记忆**——上下文压缩后或换 session 时能从文件重建状态。恢复流程见下方「Session Recovery」段。
+
+## Session Recovery（从文件重建研究进度）
+
+上下文压缩后或换 session 重新进入时，如果 `<outputDir>/task_spec.md` 存在但你没有任何记忆——按以下步骤恢复进度，不重头来：
+
+**1. 找到任务目录**：最新修改过的 `~/.sleuth/output/<name>/task_spec.md` 即为上次任务。读 task_spec.md 获取子问题完成状态。
+
+**2. 推断轮次**：
+- 读 `findings.jsonl` → 取 `max(round)` = **最后完成的轮**
+- 读 `directions.json` → 取 `max(round)` = **最后派出的轮**
+- 如果 `directions.max > findings.max`：存在"已派未收"的飞行 Agent → 找不到原 Agent（新 session 无旧 task 句柄），**整轮重派**
+- 如果 `directions.max == findings.max`：该轮已收齐 → 按 task_spec 的 `[ ]` 状态正常推进
+
+**3. 恢复 Phase**：
+- 有 `draft.md` → 进入或已完成 Phase 7（合成）
+- 有 `audit_report.yaml` → 检查 `passed`。`true` → 进 Phase 9（交付）；`false` + critical 非空 → 进 Phase 3（重搜），审计计数 +1
+- 无 draft.md 但有 task_spec → 检查边界条件（Phase 5），不满足则进 Phase 3/6
+
+**4. 审计计数**：从 `audit_report.yaml` 存在的份数推断。若缺失 → 默认 0。审计回 LOOP 上限 3 次，溢出由 panic stop 兜底。
+
+**5. 已知限制**：
+- **飞行中的 findings 永久丢失**——Agent 返回了但没写入文件时，那批结果在新 session 中不可恢复。这是设计取舍（子 Agent 不写文件以防止并行撕裂）。重派可复现大部分证据。
+- **revision 计数偏差**——若恰在审计判定后、写入前中断，可能多/少一轮。后果不超过 1 轮浪费，由 `SLEUTH_MAX_ROUNDS` 兜底。
+- **需要用户主动恢复**——新 session 主 Agent 不知道曾经有 sleuth 任务。用户说"继续上次的研究"即可触发此流程。
+
+恢复的总原则：**宁可多搜一轮，不遗漏。** 状态不确定时按保守策略——`[ ]` 覆盖 `[x]`。
 
 ## 浏览器连接
 
