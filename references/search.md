@@ -130,7 +130,7 @@
 **`dimensions_seen` 必须是对象数组**（不是字符串数组）：
 - ✅ `[{"dimension":"视角覆盖","observation":"Reddit 用户吐槽价格涨幅","source_url":"https://reddit.com/..."}]`
 - ❌ `["amount","date"]`（扁平字符串不接受——分类信息放 `dimension` 字段，具体观察放 `observation` 字段）
-- `dimension`：必须是 `references/boundary.md` 的 4 固定维度之一（`来源类型` / `视角` / `时间` / `地域`）或已声明的扩展名（如 `价格` / `安全` / `性能基准` / `法务`）
+- `dimension`：必须是 `references/boundary.md` 的 4 固定维度之一（`来源类型多样性` / `视角覆盖` / `时间覆盖` / `地域/语境覆盖`）或已声明的扩展名（`价格/合同条款` / `安全/合规` / `性能基准` / `法务/监管` / `可信度/权威性` / `可重现性/方法学` / `集成/互操作` / `社区生态/采用度`）
 - `observation`：该维度的具体观察（一句话，附 URL 最好）
 - `source_url`：观察来源（可选但推荐）
 
