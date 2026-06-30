@@ -357,7 +357,7 @@ Rule A 或 Rule B 触发时，输出可解释的终止消息——"连续 2 轮�
 - 同一事实 2+ 源冲突 → **再搜一次**确认，不要凭印象选边
 - 争议性话题 → 刻意找各方立场
 - 时效冲突 → 优先取最近 30 天内的源，但明示旧源说什么
-- 合成前 cross-source validation：每个 claim 的 support count，support < 2 的标 confidence low
+- 合成前 cross-source validation：每个 claim 的 support count，support < 2 的标为 `未确认线索`
 - **冲突无法解决时**：明确告诉用户“源之间存在分歧”，列出各方说法，**不为了给答案而强行采信某一方**
 
 ### 7.5 引用纪律
