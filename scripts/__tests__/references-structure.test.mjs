@@ -138,7 +138,7 @@ test('review.md has 4 audit items + Tier grading + layered sampling + 5-level co
   assert.match(review, /已验证事实/);
   assert.match(review, /高置信推断/);
   assert.match(review, /sampled_stats/);
-  assert.match(review, /允许 WebFetch 验证已有 URL/);
+  assert.match(review, /允许网页读取工具验证已有 URL/);
 });
 
 // ===== SKILL.md 结构 =====

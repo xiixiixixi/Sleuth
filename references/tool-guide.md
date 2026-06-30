@@ -1,4 +1,4 @@
-# agent-browser 命令速查
+# 浏览器操控工具命令速查（Claude Code: `agent-browser`）
 
 ## 连接
 
