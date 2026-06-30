@@ -179,7 +179,16 @@ node scripts/spawn-subagent.mjs \
 
 ### 3.2 派发
 
-把上一步输出的**整段 prompt 文本**作为子 Agent 的 prompt，用你的运行时子 Agent 派发工具（如 Claude Code 的 `task` 工具）派发。
+把上一步输出的**整段 prompt 文本**作为子 Agent 的 prompt，用你的运行时子 Agent 派发工具派发。prompt 已自包含——绝对路径 + 安全边界 + 返回格式 + 启动检查清单一应俱全，不依赖运行时环境变量或 skill loader。
+
+**运行时兼容性**：sleuth 子 Agent 通过纯文本 prompt 派发——子 Agent prompt 已自包含（绝对路径 + 安全边界 + 返回格式），理论上不绑定特定运行时。但**以下兼容性声明未经跨运行时实测，仅 Claude Code 已验证通过**。
+
+| 运行时 | 就绪度 | 说明 |
+|--------|--------|------|
+| **Claude Code** | ✅ 已验证 | `task` 工具运行；21 项自动化测试通过 |
+| **其他运行时** | ⚠️ 未实测 | prompt 文本可手动粘贴到子 Agent 对话；并行派发、env 继承、返回值格式均未在非 Claude Code 环境下验证 |
+
+**如果你在非 Claude Code 运行时使用 sleuth**：子 Agent prompt 中的路径是绝对路径、CDP 端口已写为字面值——这是你能在新运行时快速验证的最小可用条件。欢迎反馈实测结果。
 
 **每轮最多并行 5 个搜索 Agent。** 子问题 > 5 个时分两批：第一批先派 5 个，收齐 findings 后再派剩余的。不要一次性把 7-8 个全丢出去——模型后台任务系统扛不住，会静默丢 Agent。
 

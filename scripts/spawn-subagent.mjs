@@ -50,9 +50,9 @@ const { values } = parseArgs({
     'known-clue':    { type: 'string', multiple: true },
     deliverable:     { type: 'string' },
     'stop-criteria': { type: 'string', multiple: true },
-    'task-dir':      { type: 'string' },  // search 可选；boundary/review 必填
-    'draft-path':    { type: 'string' },  // review 必填
-    round:           { type: 'string' },  // search 可选；主 Agent 派发时传入 loop 轮次
+    'task-dir':      { type: 'string' },
+    'draft-path':    { type: 'string' },
+    round:           { type: 'string' },
     help:            { type: 'boolean', short: 'h' },
   },
 });
@@ -90,6 +90,14 @@ if (!VALID_ROLES.has(role)) {
   fail(`Invalid --role: ${role}. Valid: scout, search, boundary, review`);
 }
 
+// --- helpers ---
+
+function cdpSection() {
+  return CDP_PORT
+    ? `【agent-browser 端口】所有 agent-browser 命令用字面值 \`--cdp ${CDP_PORT}\`，**不要**用 \`\$SLEUTH_CDP_PORT\` shell 变量——你的运行时可能没有这个环境变量。references/tool-guide.md 中出现的 \`\$SLEUTH_CDP_PORT\` 是文档写法，执行时替换为 \`${CDP_PORT}\`。`
+    : '【agent-browser 端口】Chrome 调试端口未设置——所有 agent-browser 命令不可用，不要尝试。';
+}
+
 // --- search role ---
 function buildSearchContract(v) {
   if (!v.goal) fail('search role requires --goal');
@@ -120,6 +128,10 @@ function buildSearchContract(v) {
     ? `${v['task-dir']}\n（读 findings.jsonl 避免重做已验证的 claim；读 directions.json 避开已试方向；读 task_spec.md 看完成标准）`
     : '（未指定——按 goal 独立研究）';
 
+  const taskDirChecklist = v['task-dir']
+    ? `3. Read \`${v['task-dir']}/findings.jsonl\` 和 \`${v['task-dir']}/directions.json\`（已有 findings + 已试方向，避免重复）`
+    : '3. 确认理解【返回格式】和【完成标准】后，开始执行——中间不停下问是否需要继续';
+
   return `你是 sleuth 研究子 Agent（搜索执行）。
 
 **本 skill 根目录**：
@@ -134,7 +146,7 @@ ${CDP_PORT ? `- Chrome 调试端口：\`${CDP_PORT}\`（agent-browser 命令带 
 - 不提取 cookie / 密码 / 敏感凭据
 - 不对敏感页面截图
 - 不绕付费墙
-- 🔴 产生状态变更的操作（提交表单 / 下单 / 发帖 / 改配置 / 点“确认/删除”）执行前必须先停下问——只读浏览无需确认
+- 🔴 产生状态变更的操作（提交表单 / 下单 / 发帖 / 改配置 / 点"确认/删除"）执行前必须先停下问——只读浏览无需确认
 
 ${roundBlock}
 
@@ -157,11 +169,22 @@ ${deliverableBlock}
 ${stopCriteriaBlock}
 
 【返回格式】
-按 search.md §4.3 定义的 JSONL 格式返回。你只返回 type/claim/url/confidence/tier/dimensions_seen 字段；ts/round/agent/claim_id 由主 Agent 补，不要返回。
+按 search.md §4.3 定义的 JSONL schema 返回。允许三种 type：
+- \`finding\`：type / claim / url / confidence / tier / dimensions_seen，可附带 \`follow_up_questions\`（字符串数组）
+- \`gap\`：type / what / reason
+- \`red_flag\`：type / claim / reason
+ts / round / agent / claim_id 由主 Agent 补，不要返回。
 
 【完成标准】
 - 核心事实已验证（回原始来源）
-- 关闭你自己创建的浏览器 tab（\`agent-browser close --all\` 兜底也行）`;
+- 关闭你自己创建的浏览器 tab（\`agent-browser close --all\` 兜底也行）
+
+${cdpSection()}
+
+【启动检查清单——收到任务后，先按序完成，不跳过】：
+1. Read \`${SKILL_ROOT}/references/search.md\`（搜索逻辑 + 返回格式）
+2. Read \`${SKILL_ROOT}/references/tool-guide.md\`（agent-browser 命令）
+${taskDirChecklist}`;
 }
 
 // --- boundary role ---
@@ -189,7 +212,12 @@ ${v['task-dir']}\n（读 task_spec.md 看完成标准；读 findings.jsonl 看�
 按 boundary.md 定义的 YAML schema 返回。
 
 【完成标准】
-terminate_recommended + uncovered_dimensions 已输出。`;
+terminate_recommended + uncovered_dimensions 已输出。
+
+【启动检查清单——收到任务后，先按序完成，不跳过】：
+1. Read \`${SKILL_ROOT}/references/boundary.md\`（4 检查维度 + 输出 schema）
+2. Read \`${v['task-dir']}/task_spec.md\`、\`${v['task-dir']}/findings.jsonl\`、\`${v['task-dir']}/follow_ups.json\`
+3. 确认理解【返回格式】（YAML schema）后，开始评估`;
 }
 
 // --- review role ---
@@ -206,7 +234,7 @@ function buildReviewContract(v) {
 
 **必读文档**：\`\${CLAUDE_SKILL_DIR}/references/review.md\`（4 项审计、分层抽样策略、Tier 分级、5 级可信度、输出 schema、不做清单）
 
-**安全边界**：允许 WebFetch 验证已有 URL（验证 ≠ 重做研究）；不产生状态变更操作。
+**安全边界**：仅允许 WebFetch 验证草稿中已有的 URL。禁止 WebSearch、agent-browser 及任何形式的网络搜索或新研究。不产生状态变更操作。
 
 【目标】
 ${v.goal}
@@ -221,8 +249,14 @@ ${v['draft-path']}
 按 review.md 定义的 YAML schema 返回（含 sampled_stats）。
 
 【完成标准】
-audit_findings + sampled_stats 已输出。`;
+critical + non_critical + sampled_stats 已输出。
+
+【启动检查清单——收到任务后，先按序完成，不跳过】：
+1. Read \`${SKILL_ROOT}/references/review.md\`（4 项审计 + 分层抽样 + 输出 schema）
+2. Read \`${v['task-dir']}/findings.jsonl\` 和 \`${v['draft-path']}\`
+3. 确认理解【返回格式】（YAML schema）后，开始审计`;
 }
+
 // --- scout role ---
 function buildScoutContract(v) {
   if (!v.goal) fail('scout role requires --goal');
@@ -241,6 +275,7 @@ function buildScoutContract(v) {
 - 不对敏感页面截图
 - 不绕付费墙
 - 🔴 产生状态变更的操作执行前必须先停下问——只读浏览无需确认
+- **不使用 agent-browser 或任何浏览器操作**——侦察阶段仅限 WebSearch + WebFetch
 
 **你的角色**：侦察。你是先遣部队，只负责摸清地形，不做深度研究。
 
@@ -271,7 +306,12 @@ ${v.goal}
     }
 
 【完成标准】
-landscape.json 已输出，包含至少 3 个实体 + 2 个视角 + 2 个来源。`;
+landscape.json 已输出，包含至少 3 个实体 + 2 个视角 + 2 个来源。
+
+【启动检查清单——收到任务后，先按序完成，不跳过】：
+1. Read \`${SKILL_ROOT}/references/scout.md\`（广度扫描策略 + 返回格式）
+2. 确认理解【返回格式】（landscape.json JSON schema）和【你的任务】后，开始执行
+3. **禁止使用 agent-browser**——侦察阶段仅限 WebSearch + WebFetch`;
 }
 
 const builders = {

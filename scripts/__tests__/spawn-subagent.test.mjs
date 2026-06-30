@@ -28,7 +28,7 @@ test('search role: has environment variables + absolute doc path + safety + task
   assert.match(out, /计费单位/);
   assert.match(out, /example\.com/);
   assert.match(out, /按 search\.md §4\.3 定义/);
-  assert.match(out, /ts\/round\/agent\/claim_id 由主 Agent 补/);
+  assert.match(out, /ts .* round .* agent .* claim_id 由主 Agent 补/);
   assert.match(out, /agent-browser close --all/);
 });
 
@@ -107,7 +107,7 @@ test('review role: has env var + absolute doc path + safety + draft path', () =>
   ]);
   assert.match(out, /证据链审计/);
   assert.match(out, /references\/review\.md/);
-  assert.match(out, /允许 WebFetch 验证已有 URL/);
+  assert.match(out, /仅允许 WebFetch 验证/);
   assert.match(out, /审计报告/);
   assert.match(out, /\/tmp\/test\//);
   assert.match(out, /draft\.md/);
