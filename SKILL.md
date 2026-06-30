@@ -383,7 +383,7 @@ node scripts/spawn-subagent.mjs \
 
 审查 Agent 返回 `critical` + `non_critical` + `sampled_stats`（审计规则看 `references/review.md`）。
 
-收到返回后校验必填字段：`critical` 和 `non_critical` 是否为数组，`passed` 是否为 bool。缺字段或类型不对 → 要求审查 Agent 重试一次。重试仍失败 → 默认 `{critical: [], non_critical: [], passed: true, sampled_stats: {}}`，视为审计通过（保守假设：无关键缺陷），进入交付。
+收到返回后校验必填字段：`critical` 和 `non_critical` 是否为数组，`passed` 是否为 bool。缺字段或类型不对 → 要求审查 Agent 重试一次。重试仍失败 → 默认 `{critical: [{issue: "审查 Agent 无响应——审计未完成", action: "人工审查报告", suggested_search: "N/A"}], non_critical: [], passed: false, sampled_stats: {}}`，视为审计未通过——critical 非空触发 §7.8 回 LOOP，revision 次数 +1。
 
 ### 7.8 审计结果处理
 
