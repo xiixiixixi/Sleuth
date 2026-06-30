@@ -74,13 +74,12 @@ node scripts/launch-chrome.mjs
 ```bash
 node scripts/spawn-subagent.mjs \
   --role scout \
-  --goal "<用户问题领域>" \
-  --task-dir <outputDir>
+  --goal "<用户问题领域>"
 ```
 
-侦察 Agent 做广度扫描（具体策略看 scout.md），返回 landscape.json（entities / perspectives / source_hints）。不做深度研究、不提取 claim。
+侦察 Agent 做广度扫描（具体策略看 scout.md），返回 landscape.json（entities / perspectives / source_hints）。不做深度研究、不提取 claim、不写文件。
 
-**拿到 landscape.json 后**：基于它写 task_spec——子问题按 entities 和 perspectives 拆，不是凭你脑子里的知识猜。侦察发现的实体和来源是你拆题的依据。
+**拿到 landscape.json 后**：主 Agent 从 Scout 返回文本中提取 JSON，写入 `<outputDir>/landscape.json`。基于它写 task_spec——子问题按 entities 和 perspectives 拆，不是凭你脑子里的知识猜。侦察发现的实体和来源是你拆题的依据。
 
 ## 第 2 步：初始化任务目录 + 写 task_spec.md
 
