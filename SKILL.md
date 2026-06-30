@@ -196,11 +196,15 @@ node scripts/spawn-subagent.mjs \
 
 搜索 Agent 会读 `references/search.md`（搜索逻辑 + 工具选择 + 失败兜底 + JSONL 返回格式）+ 通过 `--task-dir` 读已有 findings/directions 避免重复。
 
+**子 Agent 健康监控**：派发后不要干等——周期性检查子 Agent 状态。Claude Code 的 task 系统会报告子 Agent 的运行状态。如果某个子 Agent 长时间无 progress 或进入 error 状态，**主动终止并立即用同参数重派一个新 Agent**。重试 2 次仍失败 → 将该子问题标记为 gap，在最终报告中说明"经多次尝试未获取，纳入已知限制"，不再阻滞 LOOP 推进。
+
 ### 3.3 收 stdout → 写 findings.jsonl
+
+**收前先确认状态**：收集结果前，扫一遍所有派发的子 Agent——已完成的直接收结果；仍在正常运行中的继续等；已死亡/无响应的按上述规则终止重派。其他 Agent 的结果先处理，不被个别死 Agent 阻塞。
 
 每个搜索 Agent 通过 stdout 返回 **JSONL**（每行一个 JSON 对象，格式见 `references/search.md` §4.3）。收齐后：
 
-1. `JSON.parse` 逐行解析
+1. **逐行 parse（防截断）**：`try/catch` 逐行 `JSON.parse`。parse 成功的行进入归一化；parse 失败的行（截断 JSONL / 非 JSON 文本）写入 `<outputDir>/parse_errors.log` 后跳过，不阻塞整批处理。若某 Agent 超过 50% 的行 parse 失败 → 整个 Agent 结果丢弃，按 §3.2 健康监控规则重派。
 2. **校验 + 归一化**（子 Agent 可能不严格遵守 §4.3 枚举，必须清洗后再写）：
    - `type` 不在 `finding` / `gap` / `red_flag` 里 → 强制改 `finding`（自定义类型如 `funding_round` / `valuation` 不保留）
    - `confidence` 不在 5 级枚举（`已验证事实` / `高置信推断` / `未确认线索` / `冲突信息` / `覆盖缺口`）里 → 按 tier 推断：T1/T2 → `高置信推断`，T3 → `未确认线索`
