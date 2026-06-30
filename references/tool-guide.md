@@ -8,13 +8,13 @@
 # check-deps 输出的 SLEUTH_CDP_PORT 变量
 
 # 正确用法
-agent-browser --cdp $SLEUTH_CDP_PORT --session ${SID}-main open https://example.com
+agent-browser --cdp $SLEUTH_CDP_PORT open https://example.com
 
 # 错误：启动无登录态的 Chrome for Testing
 agent-browser open https://example.com
 ```
 
-> 以下所有命令省略 `--cdp $SLEUTH_CDP_PORT --session ${SID}-main` 前缀，实际调用时必须带上。不要用 `--profile`（与 `--cdp` 互斥）。
+> 以下所有命令省略 `--cdp $SLEUTH_CDP_PORT` 前缀，实际调用时必须带上（端口号用字面值，不是 shell 变量）。不要用 `--profile`（与 `--cdp` 互斥）。
 
 ## 核心姿势
 
