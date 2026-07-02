@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-06-19
-**Commit:** b1f2f66
+**Generated:** 2026-07-02
+**Commit:** 2d5b524
 **Branch:** main
 
 ## OVERVIEW
@@ -19,9 +19,11 @@ sleuth/
 ├── scripts/            CLI 工具（见 scripts/AGENTS.md）
 │   ├── lib/
 │   └── __tests__/
-├── docs/               # gitignored —— 本地决策/测试文档，不入仓
+├── docs/               # gitignored —— 本地决策/测试文档，不入仓（当前含 DESIGN-v2/v3.md、TESTING.md、AOP-TEST-POSTMORTEM.md）
 └── test/               # gitignored —— 本地测试残留
 ```
+
+> 注：`launch-chrome.mjs`（339 行）放在 `scripts/` 根，不在 `lib/`——它是用户调用的 Chrome 启动器，不是被 import 的库。
 
 ## WHERE TO LOOK
 
@@ -34,11 +36,14 @@ sleuth/
 | 合成 / 证据分层 / 交付 | `SKILL.md` §7 | 主 Agent |
 | 改子 Agent 角色 / 任务分析 / loop / 长程任务行为 | `SKILL.md` 第 1-2 步（任务分析）+ 第 3-7 步（主 Agent loop：搜索/边界/审查）+「状态文件 schema」+「长程任务行为」段 | 4 角色（主/搜索/边界/审查）+ state schema + 零交互 / 就绪即执行 |
 | 改 agent-browser 命令参考 / 反爬降级 / 特殊内容类型 | `references/tool-guide.md` | 完整命令速查 |
+| 启动带 CDP 调试的 Chrome（symlink profile 绕 Chrome 136+ 限制） | `scripts/launch-chrome.mjs` | SKILL.md §check-deps 失败时引导用户跑；输出 `SLEUTH_CDP_PORT` / `SLEUTH_CDP_WS` |
 | 改环境检查 | `scripts/check-deps.mjs` + `scripts/lib/check-deps-core.mjs` | 薄 shim + 核心逻辑 |
 | 改子 Agent prompt 模板 | `scripts/spawn-subagent.mjs` | 单文件，无 lib 依赖 |
 | 改本地 URL 搜索 | `scripts/find-url.mjs` | 341 行单体脚本（注意：未测试） |
 | 加测试 | `scripts/__tests__/<name>.test.mjs` | 用 `node:test`，不要 jest/vitest |
 | 设计决策追溯 | `docs/DECISION.md` | gitignored 本地，记录否决方案 |
+| 测试步骤与检查命令 | `docs/TESTING.md` | 怎么测：case 要求 + 检查清单 |
+| 测试问题追踪 | `docs/TEST-ISSUES.md` | 测出了什么：问题清单 + 解决状态 |
 
 ## CONVENTIONS
 
@@ -67,6 +72,13 @@ sleuth/
 - 中文硬规则用 **必须 / 绝不 / 不要 / 禁止 / 不允许**（不用英文 DO NOT/NEVER）
 - 引用纪律：每个核心结论**必须内联 URL** `[结论](https://来源URL)`，单源最多 15 词直引，默认 paraphrase
 
+### 回复风格（用户不是技术背景，英文也不太好）
+
+- **用大白话讲清楚**：用户看不懂技术术语。解释任何东西时,优先用日常类比或一句话白话,不要堆专业黑话。比如不要只说「走 CDP」,要说「通过调试端口让 agent 能指挥 Chrome 浏览器」。
+- **英文术语必须括号标中文**：任何英文术语（代码标识符、产品名、缩写除外）第一次出现时,在后面加括号写中文意思。例：「profile（用户配置目录）」「fallback（兜底方案）」「snippet（搜索结果的摘要片段）」。**代码里的变量名/函数名/命令行 flag（如 `check-deps.mjs`、`--task-name`）不用翻译**,那是专有名词。
+- **不确定对方懂不懂就主动解释**：宁可多解释一句,也不要默认对方知道。如果某个概念对理解整件事很关键,先花一两句把它讲明白,再往下走。
+- **不要嫌烦**：用户问技术问题时,即使问题很简单,也耐心用他能懂的方式回答,不要甩一句「去查文档」或「这很基础」。
+
 ## ANTI-PATTERNS (THIS PROJECT)
 
 **已砍掉的系统（不要再引入）**：
@@ -79,7 +91,7 @@ sleuth/
 - `cleanup-output.mjs` / `validate.mjs` / `auth-verify.mjs` → 已删
 
 **禁止行为**：
-- 自起 Chrome（**只走 approval mode**，chrome://inspect toggle，没开就报错）
+- 自起 Chrome（**只走 approval mode**，chrome://inspect toggle，没开就报错；唯一例外是用户主动跑 `scripts/launch-chrome.mjs`，那是用户调用的启动器，不是 agent 自起）
 - 用 `--profile`（与 `--cdp` 互斥）
 - 在 `--cdp` 同时传 `ws://` URL（agent-browser 0.27 有 403 bug，必须 0.28+）
 - 替用户按状态变更按钮（CHECKPOINT 硬规则）
@@ -106,6 +118,9 @@ sleuth/
 # 跑环境检查（agent 触发 sleuth 后第一件事）
 node scripts/check-deps.mjs --check-only
 
+# check-deps 报「chrome: 未发现可连的浏览器」时，启动带 CDP 的 Chrome
+node scripts/launch-chrome.mjs   # 输出 SLEUTH_CDP_PORT / SLEUTH_CDP_WS
+
 # 跑全部测试
 node --test scripts/__tests__/*.mjs
 
@@ -130,7 +145,7 @@ npm i -g agent-browser@latest
 
 - **`docs/TESTING.md` 已重写（2026-06-23）**：旧版引用已删的 `finish-gate.test.mjs` / session-logger / deliver 系统；新版按当前架构重写（84 条自动化测试 + 手动 skill 行为测试清单 C1-C16 + 覆盖盲区 + 已知问题）
 - **docs/DECISION.md 与 RESEARCH_AUDIT.md 未在 WHERE TO LOOK 列出**：DECISION 是否决方案追溯，RESEARCH_AUDIT 是 2026-06-19 references 重构的依据文档（5 份→ 3 份的 audit）。两者都是 gitignored 本地文档。
-- **测试覆盖盲区**：`find-url.mjs`（341 行）、`check-deps.mjs`、`check-deps-core.mjs`、`output.mjs` 都 0 测试
+- **测试覆盖盲区**：`find-url.mjs`（341 行）、`check-deps.mjs`、`check-deps-core.mjs`、`launch-chrome.mjs`（339 行）都 0 测试。`output.mjs` 现已被 `__tests__/output.test.mjs` 覆盖（14 条，含 check-deps `--task-name` 集成）。
 - **agent-browser 版本敏感**：0.27.1 的 `--cdp <ws-url>` 有 HTTP 预检 403 bug，必须 0.28+
 - **chrome://inspect toggle 不持久**：Chrome 重启会重置，用户需重新勾选
 - **`extract-subtitles.sh` + `srt_to_transcript.py`** 在 `scripts/` 下，混语言（Node + Bash + Python），无 README 解释边界

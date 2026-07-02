@@ -77,6 +77,19 @@ Based on AOP test failures (see `docs/AOP-TEST-POSTMORTEM.md`):
 - **Design docs are in `docs/`** (gitignored): `DESIGN-v2.md` (v2 architecture), `DESIGN-v3.md` (v3 proposal), `AOP-TEST-POSTMORTEM.md` (test failure analysis), `TESTING.md` (manual test procedures)
 - **AGENTS.md is the project knowledge base** — read it for conventions, anti-patterns, and file location guide.
 
+## Testing
+
+当用户说「测试 sleuth」「跑个测试」「测试一下」时：
+
+1. 先 `cd ~/.agents/skills/sleuth && git pull` 确保 skill 最新
+2. 读 `docs/TESTING.md` — Part A 教你怎么设计 case（≥5 实体、≥3 维度、需对比），Part B 教你怎么跑，Part C 教你怎么检查
+3. 读 `docs/TEST-ISSUES.md` — 了解哪些问题已知，避免复现已知失败后重复建条目
+4. 按 TESTING.md Part A 设计一个新的测试 case（不要复用以前的 case，每次换新题）
+5. 跑测试
+6. 测试结果**只写到 `docs/TEST-ISSUES.md`**（索引表加一行 + 对照已有问题清单更新状态），不写回 TESTING.md
+
+不要在测试前手动改代码去规避已知问题 — 测试的目的是暴露缺陷，不是跑通流程。
+
 ## Documentation Style
 
 - 中文硬规则用 **必须 / 绝不 / 不要 / 禁止 / 不允许**（不用英文 DO NOT/NEVER）
