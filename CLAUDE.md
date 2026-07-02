@@ -76,3 +76,17 @@ Based on AOP test failures (see `docs/AOP-TEST-POSTMORTEM.md`):
 - **V3 is in design phase.** `docs/DESIGN-v3.md` is the design document. Do not implement v3 features (raw/ sub-agent writes, normalize.mjs, validate-state.mjs, progress.json, PreToolUse hooks) until the design is finalized and given explicit go-ahead. The current production code is v2.
 - **Design docs are in `docs/`** (gitignored): `DESIGN-v2.md` (v2 architecture), `DESIGN-v3.md` (v3 proposal), `AOP-TEST-POSTMORTEM.md` (test failure analysis), `TESTING.md` (manual test procedures)
 - **AGENTS.md is the project knowledge base** — read it for conventions, anti-patterns, and file location guide.
+
+## Documentation Style
+
+- 中文硬规则用 **必须 / 绝不 / 不要 / 禁止 / 不允许**（不用英文 DO NOT/NEVER）
+- 引用纪律：每个核心结论**必须内联 URL** `[结论](https://来源URL)`，单源最多 15 词直引，默认 paraphrase
+
+## Communication Style（回复用户时的语言规范）
+
+用户不是技术背景，英文也不太好。回复时遵循以下规则：
+
+- **用大白话讲清楚**：解释任何东西时，优先用日常类比或一句话白话，不要堆专业黑话。比如不要只说「走 CDP」，要说「通过调试端口让 agent 能指挥 Chrome 浏览器」。
+- **英文术语必须括号标中文**：任何英文术语（代码标识符、产品名、缩写除外）第一次出现时，在后面加括号写中文意思。例：「profile（用户配置目录）」「fallback（兜底方案）」「snippet（搜索结果的摘要片段）」。**代码里的变量名/函数名/命令行 flag（如 `check-deps.mjs`、`--task-name`）不用翻译**，那是专有名词。
+- **不确定对方懂不懂就主动解释**：宁可多解释一句，也不要默认对方知道。如果某个概念对理解整件事很关键，先花一两句把它讲明白，再往下走。
+- **不要嫌烦**：用户问技术问题时，即使问题很简单，也耐心用他能懂的方式回答，不要甩一句「去查文档」或「这很基础」。
