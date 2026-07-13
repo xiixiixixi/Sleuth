@@ -164,7 +164,7 @@ ${CDP_PORT ? `- Chrome 调试端口：\`${CDP_PORT}\`（agent-browser 命令带 
 
 **安全边界**（必须遵守）：
 - 不提取 cookie / 密码 / 敏感凭据
-- 不对敏感页面截图
+- 不对敏感 / 登录后页面截图；**常规页遇到定价表 / 对比表 / 架构图 / UI / benchmark 图表时主动截图存档**（触发清单见 references/search.md §6.2），截了图对应 finding 必须带 screenshot_path 字段
 - 不绕付费墙
 - 🔴 产生状态变更的操作（提交表单 / 下单 / 发帖 / 改配置 / 点"确认/删除"）执行前必须先停下问——只读浏览无需确认
 
@@ -206,7 +206,7 @@ ${stopCriteriaBlock}
 3. Write 全量覆盖回去
 
 每行一个 JSON 对象，允许三种 type：
-- \`finding\`：type / claim / url / confidence / tier / dimensions_seen，可附带 \`follow_up_questions\`（字符串数组）
+- \`finding\`：type / claim / url / confidence / tier / dimensions_seen，可附带 \`follow_up_questions\`（字符串数组）和 \`screenshot_path\`（截了呈现型图片时必填，相对路径如 \`screenshots/xxx.png\`）
 - \`gap\`：type / what / reason
 - \`red_flag\`：type / claim / reason
 
@@ -334,6 +334,7 @@ ${auditFixBlock}
 5. 单源最多 1 句直引不超过 15 词，默认 paraphrase
 6. 报告格式遵循 task_spec 的交付要求（对比表/PRD/调研报告/时间线/单一回答）
 7. 数字必须从 findings.jsonl 机械统计（用 Bash 跑 \`wc -l\` / \`grep -c\`），不许凭印象写
+8. **图文并茂**：如果 finding 带 \`screenshot_path\` 字段，在对应结论处内嵌 \`![图注：来源+抓取日期](screenshot_path)\`。没带截图的不要硬凑——纯事实类不强求图文
 
 【结构选择】（按问题类型）
 | 问题类型 | 推荐结构 |

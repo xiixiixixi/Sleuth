@@ -149,6 +149,36 @@ test('normalize: URL normalized (lowercase host, no utm)', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// ===== screenshot_path 透传（图文并茂机制）=====
+
+test('normalize: screenshot_path preserved when present', () => {
+  const dir = setupTaskDir({
+    'search-test.jsonl': JSON.stringify({ type: 'finding', claim: 'llama.cpp 定价免费开源', url: 'https://github.com/ggerganov/llama.cpp', tier: 'T1', confidence: '已验证事实', screenshot_path: 'screenshots/llamacpp-readme.png' }) + '\n' +
+      JSON.stringify({ type: 'agent_done', agent: 'test', lines_written: 1, ts: '2026-07-13T00:00:00Z' }) + '\n',
+  });
+
+  runNormalize(dir);
+  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].screenshot_path, 'screenshots/llamacpp-readme.png', 'screenshot_path must be preserved');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('normalize: screenshot_path absent when not provided (backward compat)', () => {
+  const dir = setupTaskDir({
+    'search-test.jsonl': JSON.stringify({ type: 'finding', claim: 'plain finding no screenshot', url: 'https://a.com', tier: 'T1', confidence: '已验证事实' }) + '\n' +
+      JSON.stringify({ type: 'agent_done', agent: 'test', lines_written: 1, ts: '2026-07-13T00:00:00Z' }) + '\n',
+  });
+
+  runNormalize(dir);
+  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].screenshot_path, undefined, 'screenshot_path key should not exist when not provided');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // ===== gap / red_flag =====
 
 test('normalize: gap and red_flag pass through', () => {

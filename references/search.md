@@ -147,6 +147,12 @@
 - `observation`：该维度的具体观察（一句话，附 URL 最好）
 - `source_url`：观察来源（可选但推荐）
 
+**`screenshot_path`（可选，仅截了呈现型图片时填）**：
+- ✅ `"screenshots/llamacpp-pricing.png"`（相对路径，相对 `<task-dir>/`）
+- 截了图但没回写这个字段 = 合成 Agent 看不到这张图，等于白截
+- 没截图的 finding 不要带这个字段
+- 截图触发条件和存档流程见下方 §6.2
+
 **写 raw 文件前必须去重**：同维度多条观察合并；不允许返回 5 条都是「视角覆盖」的 dimensions_seen。
 
 ### 4.4 已试方向记录（directions.json）
@@ -231,6 +237,19 @@ reader 是线索不是证据。核心结论必须回原始来源（浏览器或�
   3. **用 vision 工具分析截图内容**（布局 / 配色 / 交互模式），分析结论写进报告——不是只放图不分析
   4. 报告里内嵌：`![图注](screenshots/文件名.png)`（本地截图）或 `![图注](来源URL)`（网图）
   5. 图注必带：来源 + 抓取日期 + 视觉分析结论
+
+**什么时候该主动截图（呈现型）**——遇到以下 5 种内容，如果报告需要给人看，就截：
+1. 定价 / 套餐表（数字密集，截图比文字转录准）
+2. 对比表 / 规格表（多列横向对比，文字转录易错）
+3. 架构图 / 流程图 / 示意图（无法用文字还原）
+4. UI 界面 / 产品截图（评测类、选型类报告必需）
+5. 官方 benchmark 图表（性能数据可视化）
+
+**回写 JSONL（关键）**：截了图后，对应 finding 行必须带 `screenshot_path` 字段：
+```jsonl
+{"type":"finding","claim":"llama.cpp 定价免费开源","url":"https://github.com/ggerganov/llama.cpp","confidence":"已验证事实","tier":"T1","screenshot_path":"screenshots/llamacpp-readme.png","dimensions_seen":[...]}
+```
+没有这个字段 = 合成 Agent 看不到这张图，等于没截。
 
 **不做**：不对敏感 / 登录后页面截图；归档仅作研究留证，尊重版权。
 

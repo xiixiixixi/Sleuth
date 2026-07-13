@@ -461,7 +461,7 @@ node scripts/validate-state.mjs <outputDir> --phase 7-post   # 检查门：audit
 3. 复杂问题 → Markdown 报告写到用户 cwd 或 `<outputDir>/`
 4. 并行调研 → 合成一份最终报告，不生成多个”final / merged / summary”版本
 
-**图文并茂（按 query 类型）**：产品对比 / 设计 / 图表解读 / 评测类报告，必须图文并茂——呈现型图片按 `references/search.md` §6.2 流程归档并内嵌。纯事实 / 政策类不强求。证据型图片只附 URL + 标注”视觉分析”。
+**图文并茂（按 query 类型）**：产品对比 / 设计 / 图表解读 / 评测类报告，必须图文并茂——呈现型图片按 `references/search.md` §6.2 流程归档并内嵌。纯事实 / 政策类不强求。证据型图片只附 URL + 标注"视觉分析"。图文并茂通过 `finding.screenshot_path` 字段驱动——搜索 Agent 智能截图存 `screenshots/` 并在 finding 里回写路径，合成 Agent 读到该字段就嵌图。
 
 ## 状态文件 schema
 

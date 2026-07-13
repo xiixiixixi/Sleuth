@@ -135,6 +135,7 @@ function normalizeRow(rawLine, agentName, round) {
         tier,
         dimensions_seen: normalizeDimensions(parsed.dimensions_seen),
         ...(parsed.follow_up_questions ? { follow_up_questions: parsed.follow_up_questions } : {}),
+        ...(parsed.screenshot_path ? { screenshot_path: parsed.screenshot_path } : {}),
       },
       error: null,
     };
