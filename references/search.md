@@ -94,11 +94,16 @@
 - 下一步 query 怎么改：具体的改写方向（不是"再搜一次"，是"换来源类型" / "加时间限定" / "换语言"）
 - **已试方向记录**：本任务已搜过哪些方向（主题角度 / 来源类型 / 工具）。新方向必须与已试不同——这是反认知循环的硬规则。
 
-### 4.3 中间记录格式（JSONL，返回给主 Agent）
+### 4.3 中间记录格式（JSONL，直写 raw/ 文件）
 
-搜索 Agent 通过运行时 task 工具返回 **每行一个 JSON 对象**（对话文本），主 Agent parse 后 append 到 findings.jsonl。**子 Agent 不直接写文件**。
+搜索 Agent **不返回 stdout 给主 Agent**。每搜到一条 finding/gap/red_flag，**立刻用 Write 工具 append 到 `<task-dir>/raw/search-<agent-name>.jsonl`**。
 
-返回格式（**硬约束——字段值只允许以下枚举，不允许自创**）：
+**直写流程**（Write 工具是覆盖不是追加，所以要先 Read 再拼接）：
+1. Read 你的 raw 文件（`<task-dir>/raw/search-<agent-name>.jsonl`，不存在则视为空）
+2. 把新行追加到末尾
+3. Write 全量覆盖回去
+
+每行一个 JSON 对象（**硬约束——字段值只允许以下枚举，不允许自创**）：
 
 ```jsonl
 {"type":"finding","claim":"Claude API 输入定价 $3/M tokens","url":"https://www.anthropic.com/pricing","confidence":"已验证事实","tier":"T1","dimensions_seen":[{"dimension":"视角覆盖","observation":"Reddit r/LocalLLaMA 有用户吐槽价格涨幅","source_url":"https://reddit.com/r/LocalLLaMA/..."}]}
@@ -107,7 +112,15 @@
 {"type":"red_flag","claim":"...","reason":"疑似过期（2024 文章）"}
 ```
 
-**`type` 字段——只允许以下 3 个值**：
+**退出前必写 agent_done sentinel**——用 Write append 最后一行：
+```jsonl
+{"type":"agent_done","agent":"<agent-name>","lines_written":<你写的总行数>,"ts":"<当前 ISO 时间>"}
+```
+不写这行 = 归一化器认为你被杀了，触发重派。
+
+**不要返回 stdout 给主 Agent**——你的所有产出在 raw 文件里。归一化器（`normalize.mjs`）会自动合并 raw/*.jsonl 到 findings.jsonl。
+
+**`type` 字段——只允许以下 3 个值**（加 agent_done sentinel）：
 - `finding`：已验证或已提取的事实（**不允许** `funding_round` / `valuation` / `investor` 等自定义类型——把分类信息放进 `dimensions_seen`）
 - `gap`：还缺什么（字段用 `what` + `reason`，不用 `claim` / `url`）
 - `red_flag`：疑似过期 / 矛盾 / 不可靠（字段用 `claim` + `reason`）
@@ -134,7 +147,7 @@
 - `observation`：该维度的具体观察（一句话，附 URL 最好）
 - `source_url`：观察来源（可选但推荐）
 
-**返回前必须去重**：同维度多条观察合并；不允许返回 5 条都是「视角覆盖」的 dimensions_seen。
+**写 raw 文件前必须去重**：同维度多条观察合并；不允许返回 5 条都是「视角覆盖」的 dimensions_seen。
 
 ### 4.4 已试方向记录（directions.json）
 
@@ -177,11 +190,11 @@ follow_up_questions 规则：
 - 只在发现了**新实体/新概念**时才提（不是“再搜一次”）
 - 每个必须是具体的问题（例：“Genesys 是否也有 AOP 机制？”）
 
-返回的 JSONL 里，finding 类型可以带 follow_up_questions 字段：
+写入 raw 文件的 JSONL 里，finding 类型可以带 follow_up_questions 字段：
 
     {"type":"finding","claim":"...","url":"...","tier":"T1","confidence":"已验证事实","follow_up_questions":["Genesys 是否也有 AOP 机制？"]}
 
-**cleanup 是返回前的最后一道工序——不清理就返回等于把垃圾丢给主 Agent。**
+**cleanup 是写入前的最后一道工序——不清理就写等于把垃圾丢进 raw/。**
 ---
 
 ## 5. 终止信号

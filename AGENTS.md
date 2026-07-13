@@ -37,8 +37,12 @@ sleuth/
 | 改子 Agent 角色 / 任务分析 / loop / 长程任务行为 | `SKILL.md` 第 1-2 步（任务分析）+ 第 3-7 步（主 Agent loop：搜索/边界/审查）+「状态文件 schema」+「长程任务行为」段 | 4 角色（主/搜索/边界/审查）+ state schema + 零交互 / 就绪即执行 |
 | 改 agent-browser 命令参考 / 反爬降级 / 特殊内容类型 | `references/tool-guide.md` | 完整命令速查 |
 | 启动带 CDP 调试的 Chrome（symlink profile 绕 Chrome 136+ 限制） | `scripts/launch-chrome.mjs` | SKILL.md §check-deps 失败时引导用户跑；输出 `SLEUTH_CDP_PORT` / `SLEUTH_CDP_WS` |
+| 压住 Chrome 144+「要允许远程调试吗?」弹窗 | `scripts/fix-chrome-debug-permission.mjs` | 一键装 RemoteDebuggingAllowed 企业策略；跨平台（osascript/pkexec/UAC 弹密码框）；支持 `--check` / `--uninstall` |
 | 改环境检查 | `scripts/check-deps.mjs` + `scripts/lib/check-deps-core.mjs` | 薄 shim + 核心逻辑 |
-| 改子 Agent prompt 模板 | `scripts/spawn-subagent.mjs` | 单文件，无 lib 依赖 |
+| 改子 Agent prompt 模板 | `scripts/spawn-subagent.mjs` | 单文件，无 lib 依赖；5 role：scout/search/boundary/review/synthesize |
+| 改归一化器（raw/ → findings.jsonl + stats-summary.json） | `scripts/normalize.mjs` | v2 核心脚本；14 条测试 |
+| 改反认知循环计算 | `scripts/calc-novelty.mjs` | 算 novelty_ratio + stale_count → 更新 progress.json |
+| 改检查门 | `scripts/validate-state.mjs` | 7 个 phase 检查；不通过 exit(1) |
 | 改本地 URL 搜索 | `scripts/find-url.mjs` | 341 行单体脚本（注意：未测试） |
 | 加测试 | `scripts/__tests__/<name>.test.mjs` | 用 `node:test`，不要 jest/vitest |
 | 设计决策追溯 | `docs/DECISION.md` | gitignored 本地，记录否决方案 |
@@ -121,6 +125,10 @@ node scripts/check-deps.mjs --check-only
 # check-deps 报「chrome: 未发现可连的浏览器」时，启动带 CDP 的 Chrome
 node scripts/launch-chrome.mjs   # 输出 SLEUTH_CDP_PORT / SLEUTH_CDP_WS
 
+# Chrome 144+ 连日常 Chrome 时反复弹「要允许远程调试吗?」→ 装策略压住
+node scripts/fix-chrome-debug-permission.mjs            # 安装（弹系统密码框）
+node scripts/fix-chrome-debug-permission.mjs --check     # 只检测不安装
+
 # 跑全部测试
 node --test scripts/__tests__/*.mjs
 
@@ -133,6 +141,18 @@ node scripts/spawn-subagent.mjs --role boundary --goal "评估覆盖度" --task-
 
 # 生成审查 Agent prompt
 node scripts/spawn-subagent.mjs --role review --goal "审计证据链" --task-dir ~/.sleuth/output/<task-name>/ --draft-path ~/.sleuth/output/<task-name>/draft.md
+
+# 生成合成 Agent prompt（v2：主 Agent 不做合成，派合成 Agent）
+node scripts/spawn-subagent.mjs --role synthesize --task-dir ~/.sleuth/output/<task-name>/
+
+# 归一化 raw/ → findings.jsonl + stats-summary.json（v2 核心）
+node scripts/normalize.mjs ~/.sleuth/output/<task-name>/
+
+# 反认知循环计算（算 novelty_ratio + stale_count → 更新 progress.json）
+node scripts/calc-novelty.mjs ~/.sleuth/output/<task-name>/
+
+# 检查门（7 个 phase，不通过 exit 1）
+node scripts/validate-state.mjs ~/.sleuth/output/<task-name>/ --phase 3-findings
 
 # 找本地浏览器历史/书签 URL
 node scripts/find-url.mjs "关键词" --since 7d

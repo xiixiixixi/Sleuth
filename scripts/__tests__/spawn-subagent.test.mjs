@@ -27,9 +27,12 @@ test('search role: has environment variables + absolute doc path + safety + task
   assert.match(out, /价格数字/);
   assert.match(out, /计费单位/);
   assert.match(out, /example\.com/);
-  assert.match(out, /按 search\.md §4\.3 定义/);
-  assert.match(out, /ts .* round .* agent .* claim_id 由主 Agent 补/);
+  assert.match(out, /raw\/search-/);   // v2: 直写 raw/
+  assert.match(out, /ts .* round .* agent .* claim_id 由归一化器补/);  // v2: 归一化器补，不是主 Agent
   assert.match(out, /agent-browser close --all/);
+  assert.match(out, /agent_done/);  // v2: EOF sentinel
+  assert.match(out, /网络失败处理/);  // v2: 网络失败重试规则
+  assert.match(out, /WebFetch 单 URL 重试上限.*3 次/);  // v2: 重试上限
 });
 
 test('search role: exits non-zero when --goal is missing', () => {
@@ -57,8 +60,14 @@ test('search role: --stop-criteria injects as bullet list', () => {
 test('search role: --task-dir injects simplified task context', () => {
   const out = run(['--goal', 'x', '--task-dir', '/tmp/test-task/']);
   assert.match(out, /\/tmp\/test-task\//);
-  assert.match(out, /读 findings\.jsonl 避免重做/);
   assert.match(out, /读 directions\.json 避开已试方向/);
+  assert.match(out, /不要读 findings\.jsonl/);  // v2: search Agent 不读 findings
+});
+
+test('search role: --agent-name sets raw file name + sentinel agent field', () => {
+  const out = run(['--goal', 'x', '--task-dir', '/tmp/test/', '--agent-name', 'intercom']);
+  assert.match(out, /raw\/search-intercom\.jsonl/, 'file name must use agent-name');
+  assert.match(out, /"agent":"intercom"/, 'sentinel agent field must use agent-name');
 });
 
 test('search role: --round injects loop round', () => {
@@ -121,6 +130,48 @@ test('review role: exits non-zero when --task-dir missing', () => {
 
 test('review role: exits non-zero when --draft-path missing', () => {
   assert.throws(() => run(['--role', 'review', '--goal', 'x', '--task-dir', '/tmp/x/']));
+});
+
+// ===== synthesize role =====
+
+test('synthesize role: generates prompt with findings + task_spec + draft output', () => {
+  const out = run([
+    '--role', 'synthesize',
+    '--task-dir', '/tmp/test/',
+  ]);
+  assert.match(out, /合成子 Agent/);
+  assert.match(out, /findings\.jsonl/);
+  assert.match(out, /task_spec\.md/);
+  assert.match(out, /draft\.md/);
+  assert.match(out, /\/tmp\/test\//);
+});
+
+test('synthesize role: has synthesis rules (tiers, citation, conflict)', () => {
+  const out = run(['--role', 'synthesize', '--task-dir', '/tmp/test/']);
+  assert.match(out, /T1\/T2\/T3/);
+  assert.match(out, /每个核心结论必须内联/);
+  assert.match(out, /冲突.*明示/);
+  assert.match(out, /不许读 raw/);
+  assert.match(out, /不许写 draft\.md 之外/);
+});
+
+test('synthesize role: --audit-fix injects feedback', () => {
+  const out = run([
+    '--role', 'synthesize',
+    '--task-dir', '/tmp/test/',
+    '--audit-fix', '第5章URL失效',
+  ]);
+  assert.match(out, /审计反馈/);
+  assert.match(out, /第5章URL失效/);
+});
+
+test('synthesize role: exits non-zero when --task-dir missing', () => {
+  assert.throws(() => run(['--role', 'synthesize']));
+});
+
+test('synthesize role: does NOT contain session/deliver/sid references', () => {
+  const out = run(['--role', 'synthesize', '--task-dir', '/tmp/x/']);
+  assert.doesNotMatch(out, /--sid|session-logger|deliver|--main-sid|--role subagent|subagent_done/);
 });
 
 // ===== invalid role =====

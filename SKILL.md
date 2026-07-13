@@ -30,10 +30,11 @@ description: >-
 | 搜索 Searcher | `--goal` + `--must-verify` + `--task-dir` + `--round` | search.md | WebSearch + WebFetch + agent-browser + extract-subtitles | JSONL（findings + gaps + red_flags + follow_ups） |
 | 边界 Boundary | `--task-dir`（读 task_spec + findings + follow_ups） | boundary.md | 无（只读文件） | YAML（terminate + uncovered + drift + mismatch） |
 | 审计 Reviewer | `--task-dir` + `--draft-path` | review.md | WebFetch（仅验证 URL） | YAML（critical + non_critical + stats） |
+| 合成 Synthesizer | `--task-dir`（读 findings.jsonl + task_spec.md） | SKILL.md §7（内联，无独立 references） | 无（不联网、不开浏览器） | Markdown（draft.md，直写） |
 
 ## 角色边界
 
-主 Agent 只做 **调度 + 合成**——派子 Agent 做研究、收 findings、写报告、派审查。**不亲手做研究**：不自己搜、不自己开浏览器、不自己截图。你脑子里的 URL 可能是错的（如记错某产品的官网域名），搜索子 Agent 的搜索结果比你的记忆可靠。研究由子 Agent 完成，主 Agent 用子 Agent 返回的 URL 和 findings 合成报告。
+主 Agent 只做 **调度**——派子 Agent 做研究、收 findings、合成报告、派审查。**不亲手做研究**：不自己搜、不自己开浏览器、不自己截图、不自己读 findings.jsonl 全文、不自己做合成（写 draft）。你脑子里的 URL 可能是错的（如记错某产品的官网域名），搜索子 Agent 的搜索结果比你的记忆可靠。研究由子 Agent 完成，合成由合成 Agent 完成——你只管调度，上下文越小越不容易跳步。
 
 ## 第 0 步：环境检查
 
@@ -56,6 +57,15 @@ node scripts/launch-chrome.mjs
 脚本做的事：杀 Chrome → 把日常 profile 符号链接到 `~/.sleuth/chrome-live/` → 用 `--remote-debugging-port=9222 --user-data-dir=~/.sleuth/chrome-live/` 重启（骗过 Chrome 136+ 的安全检查，保留登录态）→ 写 DevToolsActivePort → 输出 `SLEUTH_CDP_PORT` / `SLEUTH_CDP_WS`。
 
 跑完后再跑一次 `check-deps.mjs` 确认连上了。不需要浏览器的任务（纯搜索和网页读取能搞定的）可以继续，但涉及浏览器操作的任务必须等连上了再跑。
+
+**如果 Chrome 144+ 反复弹「要允许远程调试吗?」**——Chrome 新版每次连接都弹许可框。跑一次策略安装脚本压住它（跨平台，弹系统密码框）：
+
+```bash
+node scripts/fix-chrome-debug-permission.mjs            # 安装策略
+node scripts/fix-chrome-debug-permission.mjs --check     # 检测是否已安装
+```
+
+装完后完全重启 Chrome（Cmd+Q 再重开）生效。
 
 ## 第 1 步：判断任务复杂度
 
@@ -84,6 +94,10 @@ node scripts/spawn-subagent.mjs \
 侦察 Agent 做广度扫描（具体策略看 scout.md），返回 landscape.json（entities / perspectives / source_hints）。不做深度研究、不提取 claim、不写文件。
 
 **拿到 landscape.json 后**：主 Agent 从 Scout 返回文本中提取 JSON，写入 `<outputDir>/landscape.json`。基于它写 task_spec——子问题按 entities 和 perspectives 拆，不是凭你脑子里的知识猜。侦察发现的实体和来源是你拆题的依据。
+
+```bash
+node scripts/validate-state.mjs <outputDir> --phase 1.5   # 检查门：landscape.json 存在 + entities 非空 + perspectives >= 3
+```
 
 ## 第 2 步：初始化任务目录 + 写 task_spec.md
 
@@ -145,6 +159,23 @@ node scripts/spawn-subagent.mjs \
 
 **完成标准是终止判断的依据**——你在第 5 步对照它判断是否够。
 
+**同时初始化 progress.json**——用 Write 工具写 `<outputDir>/progress.json`：
+
+```json
+{
+  "started_at": "<当前 ISO 时间>",
+  "current_phase": "loop",
+  "current_round": 1,
+  "last_seen": "<当前 ISO 时间>",
+  "stale_count": 0,
+  "revision_count": 0,
+  "stats": { "total_findings": 0, "total_t1": 0, "rounds_completed": 0 },
+  "termination_reason": null
+}
+```
+
+每轮 LOOP 末更新 `current_round` + `last_seen` + `stats`。`stale_count` 由 calc-novelty.mjs 自动更新。
+
 拆解原则：子问题独立（不依赖彼此）；每个单一目标；数量等于复杂度，不为拆而拆。
 
 ### 2.2 task_spec 操作规则（每轮更新）
@@ -158,6 +189,10 @@ task_spec 不是写一次就不动——**每轮搜索 Agent 收齐后，主 Age
 | **新增子问题** | follow_up 发现全新实体（和已有子问题不相关） | 新编号接在最后，注明来源 |
 | **合并子问题** | follow_up 的实体和已有子问题领域类似 | 合并编号，注明合并来源 |
 | **标记 follow_up 解决** | findings 覆盖了 follow_up 的问题 | 子节点 `[ ]` → `[x]`，follow_ups.json `resolved: true` |
+
+```bash
+node scripts/validate-state.mjs <outputDir> --phase 2   # 检查门：task_spec.md 存在 + 有 [ ] 子问题 + 有完成标准字段
+```
 
 ## 第 3 步：派搜索 Agent（每轮）
 
@@ -201,25 +236,29 @@ node scripts/spawn-subagent.mjs \
 
 **子 Agent 健康监控**：派发后不要干等——周期性检查子 Agent 状态。Claude Code 的 task 系统会报告子 Agent 的运行状态。如果某个子 Agent 长时间无 progress 或进入 error 状态，**主动终止并立即用同参数重派一个新 Agent**。重试 2 次仍失败 → 将该子问题标记为 gap，在最终报告中说明"经多次尝试未获取，纳入已知限制"，不再阻滞 LOOP 推进。
 
-### 3.3 收 stdout → 写 findings.jsonl
+### 3.3 跑归一化器 → findings.jsonl + stats-summary.json
 
-**收前先确认状态**：收集结果前，扫一遍所有派发的子 Agent——已完成的直接收结果；仍在正常运行中的继续等；已死亡/无响应的按上述规则终止重派。其他 Agent 的结果先处理，不被个别死 Agent 阻塞。
+搜索子 Agent 把每条 finding/gap/red_flag **直接 Write append 到 `<outputDir>/raw/search-<agent-name>.jsonl`**——不返回 stdout 给你。所有子 Agent 完成后，你跑归一化器：
 
-每个搜索 Agent 通过运行时 task 工具返回 **JSONL**（每行一个 JSON 对象，格式见 `references/search.md` §4.3）。收齐后：
+```bash
+node scripts/normalize.mjs <outputDir>
+```
 
-1. **逐行 parse（防截断）**：`try/catch` 逐行 `JSON.parse`。parse 成功的行进入归一化；parse 失败的行（截断 JSONL / 非 JSON 文本）写入 `<outputDir>/parse_errors.log` 后跳过，不阻塞整批处理。若某 Agent 超过 50% 的行 parse 失败 → 整个 Agent 结果丢弃，按 §3.2 健康监控规则重派。
-2. **校验 + 归一化**（子 Agent 可能不严格遵守 §4.3 枚举，必须清洗后再写）：
-   - `type` 不在 `finding` / `gap` / `red_flag` 里 → 强制改 `finding`（自定义类型如 `funding_round` / `valuation` 不保留）
-   - `confidence` 不在 5 级枚举（`已验证事实` / `高置信推断` / `未确认线索` / `冲突信息` / `覆盖缺口`）里 → 按 tier 推断：T1/T2 → `高置信推断`，T3 → `未确认线索`
-   - `tier` 是整数（`1`/`2`/`3`）或英文（`primary`/`secondary`/`tertiary`）→ 映射成 `"T1"` / `"T2"` / `"T3"`
-   - `dimensions_seen` 是字符串数组（如 `["amount","date"]`）→ 转成对象数组 `[{"dimension":"<原值>","observation":""}]`
-3. 给每行补充公共字段：`ts`（当前 ISO 时间戳）、`round`（当前轮次）、`agent`（你给的 agent 名）。`type=finding` 的行额外补充 `claim_id`（直接将 claim 文本归一化——lowercase + 去除所有标点 + 连续空白折叠为单空格 + 移除首尾空白。归一化后的字符串即为 claim_id，用于跨轮集合 diff 判断是否有新事实发现）。`type=gap` 和 `type=red_flag` 不生成 claim_id
-4. 读取现有 `<outputDir>/findings.jsonl`，拼接本批新行，用 Write 工具覆盖写入完整文件
-5. **提取 follow_up_questions**：从 findings 里提取所有 follow_up_questions，为每个分配 `id`（对应 task_spec 中的子节点编号如 `1.1`）和 `parent_id`（所属父问题编号），写入 `<outputDir>/follow_ups.json`（格式见「状态文件 schema」段）。resolved 时用 id 直接定位——不靠问题文本模糊匹配。下一轮派发时用作新方向依据。
+归一化器自动做：
+1. 读 `raw/*.jsonl`（所有文件）→ 逐行 parse → 清洗 + 字段校验 → 合并到 `findings.jsonl`（append，不覆盖）
+2. 按子问题分组统计 → 输出 `stats-summary.json`（行数 / T1 数 / URL 数 / meets_criteria / gaps_to_resolve）
+3. parse 失败的行写入 `parse_errors.log`
 
-**收后校验**：写入前逐字段核对——每条 finding 是否含 `claim` + `url` + `tier`，gap 是否含 `what` + `reason`，red_flag 是否含 `claim` + `reason`。缺必填字段或类型不对 → 标记该行写入 `<outputDir>/parse_errors.log`，不入 findings.jsonl。若某 Agent 超半数行被拒 → 按 §3.2 健康监控重派。
+**收前先确认状态**：跑归一化器前，扫一遍所有派发的子 Agent——已完成的直接处理 raw/ 文件；仍在正常运行中的继续等；已死亡/无响应的按上述规则终止重派。某个 raw 文件 > 50% 行被拒 → 按 §3.2 健康监控重派。
 
-**只有你写 findings.jsonl 和 follow_ups.json。** 子 Agent 不写文件——避免并发写撕行。
+**你不读 findings.jsonl 全文**——那是几百行的大文件，读了上下文膨胀。你只读 `stats-summary.json`（小文件，<50 行）来更新 task_spec（§3.5）。
+
+**收后校验**：归一化器输出报告（每个 raw 文件的行数 vs 归一化后行数）。某个 Agent 超半数行被拒 → 按 §3.2 健康监控重派。
+
+```bash
+node scripts/validate-state.mjs <outputDir> --phase 3-raw        # 检查门：raw/ 每个 Agent 有文件 + 有 agent_done sentinel
+node scripts/validate-state.mjs <outputDir> --phase 3-findings    # 检查门：findings.jsonl + stats-summary.json 行数一致 + type 枚举
+```
 
 ### 3.4 写 directions.json
 
@@ -227,18 +266,14 @@ node scripts/spawn-subagent.mjs \
 
 ### 3.5 更新 task_spec 状态（每轮必做）
 
-收完 findings + 提取 follow_ups 后，**更新 task_spec.md 的状态标记**：
+跑完归一化器后，**读 `<outputDir>/stats-summary.json`（不读 findings.jsonl）**，更新 task_spec.md 的状态标记：
 
-1. **标完成**：对每个 `- [ ]` 子问题，对照其结构化完成标准（min_sources / min_t1 / required_fields / max_age_days）做 4 项判定：
+1. **标完成**：对每个 `- [ ]` 子问题，读 stats-summary.json 的 `by_subquestion.<编号>.meets_criteria` 字段：
+   - `meets_criteria = true` → 标 `[x]` + 注 `✅ Round N`
+   - `meets_criteria = false` → 保持 `[ ]`，记录未达标项
 
-   **判定步骤**（数学化，不靠直觉）：
-   a. **来源数**：统计 findings.jsonl 中与该子问题相关的独立 URL 数 → ≥ min_sources？
-   b. **T1 来源数**：其中 tier="T1" 的有几条 → ≥ min_t1？
-   c. **required_fields 覆盖**：required_fields 里的每个字段，是否被至少 1 条 finding 的 claim 文本或 dimensions_seen 覆盖？**用 LLM 语义判断**——看 finding 实际讨论了什么，不是字符串匹配。例：required_field 是「定价模型」，finding claim 写「按请求量阶梯计费，超出免费额度后 $0.01/1K tokens」→ 语义上覆盖了「定价模型」，即便这四个字没出现在 claim 里。**不做纯关键词 grep**。
-   d. **时效性**：所有相关 finding 的 ts 字段是否在 max_age_days 窗口内？（无法确定 ts 的 finding 不因时效性被判失败——宽松处理）
-
-   4 项全部通过 → 改 `- [x]` + 注明 `✅ Round N`。任一项未通过 → 保持 `- [ ]`，记录未达标项（如 `sources: 1/2, T1: 0/1`）以便第 6 步派发时作为新方向依据。
-2. **挂载 follow_ups**：把 follow_up_questions 挂到发现它的子问题下作为子节点（`1.1`、`1.2`）
+   `meets_criteria` 由归一化器自动判定（4 项标准：sources 数 ≥ min_sources / T1 数 ≥ min_t1 / required_fields 覆盖 / 时效性在 max_age_days 内）。你直接读结果，不做 4 项判定——那需要读 findings 全文。
+2. **挂载 follow_ups**：读 stats-summary.json 的 `by_subquestion.<编号>.gaps_to_resolve`，把未解决项挂到对应子问题下作为子节点（`1.1`、`1.2`），同时写入 `follow_ups.json`
 3. **新增/合并**：全新实体 → 新编号接最后；和已有类似 → 合并编号
 4. **标 follow_up 解决**：已解决的 follow_up 子节点 `- [ ]` → `- [x]` + follow_ups.json `resolved: true`
 
@@ -258,25 +293,29 @@ node scripts/spawn-subagent.mjs \
 
 收到返回后校验必填字段：`terminate_recommended` 缺或不是 bool → 要求边界 Agent 重试一次。重试仍失败 → 默认 `terminate_recommended: false`（保守假设：覆盖不足），继续 LOOP。
 
+```bash
+node scripts/validate-state.mjs <outputDir> --phase 4   # 检查门：boundary-report.yaml 存在 + terminate_recommended 是 bool
+```
+
 ## 第 5 步：检查终止信号
 
 **前置条件**：task_spec 所有子问题（含子节点）必须标 `[x]`——即每个子问题的 4 项结构化完成标准（min_sources / min_t1 / required_fields / max_age_days）已全部满足。有 `- [ ]` 的子问题 → 直接回第 6 步，不检查其他终止条件。
 
 前置条件满足后，检查：
 
-**1. 收敛检查（信息增益信号）**— 从 findings.jsonl 按 round 分组提取 claim_id 集合，计算：
-- `C_r` = 本轮所有 claim_id
-- `N_r` = `|C_r \ 前几轮的并集|`（本轮纯新增数）
-- `novelty_r` = `N_r / |C_r|`（本轮新颖比）
-- 累积集 `H_r` = 本轮及之前所有 claim_id 的并集
+**1. 收敛检查（跑脚本，不手动算）**：
+
+```bash
+node scripts/calc-novelty.mjs <outputDir>
+```
+
+脚本读 findings.jsonl → 按 round 分组 → 算 novelty_ratio + stale_count → 输出可审计字符串 + 更新 progress.json。
 
 满足以下任一收敛条件即进第 7 步：
-- **硬饱和（Rule A）**：连续 2 轮 `N_r = 0`，且总轮数 ≥ 3
-- **递减收益（Rule B）**：总轮数 ≥ 5，且最近 3 轮 `N_r` 非递增，且当前轮 `N_r ≤ 2`，且 `novelty_r < 0.20`
+- **硬饱和（Rule A）**：stale_count >= 2（连续 2 轮 0 新事实）
+- **递减收益（Rule B）**：总轮数 ≥ 5，且最近 3 轮新增数非递增，且当前轮 novelty_ratio < 0.20
 
-Rule A 或 Rule B 触发时，输出可解释的终止消息——"连续 2 轮无新增事实"或"发现速率已连续 3 轮衰减（X→Y→Z），当前轮仅发现 N 个新事实（新颖比 P%），信息空间接近穷尽"。**收敛检查是安全网——正常任务 3-5 轮由软终止退出，不会触发。**
-
-**1b. 硬兜底（Panic Stop）**：总轮数达 `SLEUTH_MAX_ROUNDS`（默认 20）→ 强制进第 7 步，合成时标注 "WARNING: 轮次硬上限已达（N 轮），以下维度可能未充分覆盖" + 未覆盖子问题清单。**这是最后的降落伞——收敛检查失效时才触发，正常任务永远碰不到。** `SLEUTH_MAX_ROUNDS` 环境变量允许用户按需调整。
+**1b. 硬兜底（Panic Stop）**：总轮数达 `SLEUTH_MAX_ROUNDS`（默认 20）→ 强制进第 7 步，合成时标注 "WARNING: 轮次硬上限已达（N 轮），以下维度可能未充分覆盖" + 未覆盖子问题清单。
 
 **2. 软终止（边界 Agent）**：`terminate_recommended: true` + 无 entity_mismatch + follow_ups_unresolved = 0 → 进第 7 步
 
@@ -310,35 +349,39 @@ Rule A 或 Rule B 触发时，输出可解释的终止消息——"连续 2 轮�
 
 ## 第 7 步：合成 + 审查 + 交付
 
-⚠️ **合成只由你（主 Agent）一次性完成。** 子 Agent 只做 research，不写报告。不要让子 Agent 各写一段再拼——会产生前后矛盾。你收齐所有 findings，自己一口气写完 draft.md。
-### 7.1 压缩
+⚠️ **你不做合成——派合成 Agent 写 draft.md。** 合成需要读 findings.jsonl 全文（几百行），那会让你的上下文爆炸。你的职责是调度：派合成 Agent → 派审计 Agent → 读审计结果（小文件）→ 决定下一步。
 
-进入合成前先压缩——把多轮搜索的 raw 内容去噪：
+```bash
+node scripts/validate-state.mjs <outputDir> --phase 7-pre   # 检查门：task_spec 全 [x]（或标「已知限制」）
+```
 
-- **去重**：3 个源说同一件事 → 合成一句“3 个源都说 X”，列出 3 个 URL
+### 7.1 派合成 Agent
+
+```bash
+node scripts/spawn-subagent.mjs \
+  --role synthesize \
+  --task-dir <outputDir>
+```
+
+合成 Agent 读 `findings.jsonl` + `task_spec.md`，按以下规则合成 `draft.md`：
+
+**压缩规则**（合成 Agent 必做）：
+- **去重**：3 个源说同一件事 → 合成一句”3 个源都说 X”，列出 3 个 URL
 - **去无关**：明显跑题的内容删掉
 - **标记冲突**：A 源说 X，B 源说 Y → 明确列出冲突，标时间戳，给判断依据
 - **按可信度分层**：T1（官方原始）/ T2（第三方深度）/ T3（聚合摘要）
 
-压缩是去噪不是丢证据。压缩完应该比原文短，但**每个原始 URL 都还在**。
-
-### 7.2 合成
-
-按问题类型选结构：
+**结构选择**（按问题类型）：
 
 | 问题类型 | 推荐结构 |
 |---|---|
 | 对比类（A vs B） | 背景 → A 概览 → B 概览 → 对比表 → 结论 |
-| 清单类（“列出 X”） | 直接列表，每项一段，不需要 intro/outro |
-| 调研类（“全面了解 X”） | 概览 → 关键维度 1 → 关键维度 2 → ... → 结论 |
+| 清单类（”列出 X”） | 直接列表，每项一段，不需要 intro/outro |
+| 调研类（”全面了解 X”） | 概览 → 关键维度 1 → 关键维度 2 → ... → 结论 |
 | 时间线类 | 按时间排序，每事件一段 |
 | 单一问题 | 直接答案 + 支撑证据（最简结构） |
 
-写作纪律：每个核心结论内联来源 URL；不自指（“作为研究员我...”）——直接写报告；用用户问题的语言写。
-
-### 7.3 证据分层
-
-**Tier 分级**：
+**证据分层**（合成 Agent 标注）：
 
 | Tier | 常见来源 | 用法 |
 |---|---|---|
@@ -356,58 +399,55 @@ Rule A 或 Rule B 触发时，输出可解释的终止消息——"连续 2 轮�
 覆盖缺口    ← 所有 gaps 汇总
 ```
 
-### 7.4 冲突处理
+**冲突处理**：
+- 同一事实 2+ 源冲突 → 明确列出冲突，标时间戳，给判断依据
+- **冲突无法解决时**：明确告诉用户”源之间存在分歧”，列出各方说法，**不为了给答案而强行采信某一方**
 
-- 同一事实 2+ 源冲突 → **再搜一次**确认，不要凭印象选边
-- 争议性话题 → 刻意找各方立场
-- 时效冲突 → 优先取最近 30 天内的源，但明示旧源说什么
-- 合成前 cross-source validation：每个 claim 的 support count，support < 2 的标为 `未确认线索`
-- **冲突无法解决时**：明确告诉用户“源之间存在分歧”，列出各方说法，**不为了给答案而强行采信某一方**
-
-### 7.5 引用纪律
-
+**引用纪律**（合成 Agent 强制遵守）：
 - **每个核心结论必须内联来源 URL**：`[结论](https://来源URL)`。没有 URL 的结论视为编造
 - 单源最多 1 句直引，不超过 15 词，默认 paraphrase
 - 不要用 bullet / numbered list 重现原文章结构（版权问题）
-- 涉高风险话题：用“according to X”，不用“权威认证”
+- 涉高风险话题：用”according to X”，不用”权威认证”
 
-### 7.6 写草稿
+合成 Agent 把报告写到 `<outputDir>/draft.md`。
 
-基于 `findings.jsonl` 合成报告草稿，写到 `<outputDir>/draft.md`。
-
-### 7.7 派审查 Agent
+### 7.2 派审计 Agent
 
 ```bash
 node scripts/spawn-subagent.mjs \
   --role review \
-  --goal "审计报告" \
+  --goal “审计报告” \
   --task-dir <outputDir> \
   --draft-path <outputDir>/draft.md
 ```
 
-审查 Agent 返回 `critical` + `non_critical` + `sampled_stats`（审计规则看 `references/review.md`）。
+审计 Agent 读 `draft.md` + `findings.jsonl`，返回 `audit_report.yaml`（`critical` + `non_critical` + `passed` + `sampled_stats`，审计规则看 `references/review.md`）。
 
-收到返回后校验必填字段：`critical` 和 `non_critical` 是否为数组，`passed` 是否为 bool。缺字段或类型不对 → 要求审查 Agent 重试一次。重试仍失败 → 默认 `{critical: [{issue: "审查 Agent 无响应——审计未完成", action: "人工审查报告", suggested_search: "N/A"}], non_critical: [], passed: false, sampled_stats: {}}`，视为审计未通过——critical 非空触发 §7.8 回 LOOP，revision 次数 +1。
+```bash
+node scripts/validate-state.mjs <outputDir> --phase 7-post   # 检查门：audit_report.yaml 存在
+```
 
-### 7.8 审计结果处理
+### 7.3 处理审计结果
 
-审计 Agent 返回 critical + non_critical + sampled_stats（审计规则看 `references/review.md`）。
+你读 `audit_report.yaml`（小文件）——**不读 draft.md 全文**：
 
-- non_critical 非空 → 你修 draft（补 URL、改分级、标冲突）
-- critical 非空 → **回 LOOP**（第 3 步），带 `suggested_search` 作为新方向。回 LOOP 前重读原始 `findings.jsonl`——压缩后的 draft 可能丢失划定重搜范围所需的具体 URL 和细节
+- non_critical 非空 → **重派合成 Agent** 改 draft（`--audit-fix “问题摘要”`）
+- critical 非空 → **回 LOOP**（第 3 步），带 `suggested_search` 作为新方向
   - revision 硬上限：critical 回 loop 最多 3 次
-  - 第 3 次仍 critical → 标记为「已知限制」写入报告，交付
+  - 第 3 次仍 critical → 标记为「已知限制」交付
 - 都为空 → 交付
 
-**不停下来问"是否提交"**——就绪即执行。
+收到审计结果后校验必填字段：`critical` 和 `non_critical` 是否为数组，`passed` 是否为 bool。缺字段或类型不对 → 重派审计 Agent。重试仍失败 → 默认 `{critical: [{issue: “审查 Agent 无响应——审计未完成”, action: “人工审查报告”, suggested_search: “N/A”}], non_critical: [], passed: false, sampled_stats: {}}`，视为审计未通过。
+
+**不停下来问”是否提交”**——就绪即执行。
 
 输出按优先级：
 1. 用户指定输出形式 → 严格按用户要求
 2. 简单问题 → 内联回复 + URL
 3. 复杂问题 → Markdown 报告写到用户 cwd 或 `<outputDir>/`
-4. 并行调研 → 合成一份最终报告，不生成多个“final / merged / summary”版本
+4. 并行调研 → 合成一份最终报告，不生成多个”final / merged / summary”版本
 
-**图文并茂（按 query 类型）**：产品对比 / 设计 / 图表解读 / 评测类报告，必须图文并茂——呈现型图片按 `references/search.md` §6.2 流程归档并内嵌。纯事实 / 政策类不强求。证据型图片只附 URL + 标注“视觉分析”。
+**图文并茂（按 query 类型）**：产品对比 / 设计 / 图表解读 / 评测类报告，必须图文并茂——呈现型图片按 `references/search.md` §6.2 流程归档并内嵌。纯事实 / 政策类不强求。证据型图片只附 URL + 标注”视觉分析”。
 
 ## 状态文件 schema
 
@@ -416,25 +456,34 @@ node scripts/spawn-subagent.mjs \
 ```
 <outputDir>/
 ├── landscape.json      # 侦察 Agent 产出（Phase 1.5）
-├── task_spec.md       # 你写 / 你 + 边界 Agent + 搜索 Agent 读
-├── findings.jsonl     # 你代写 / 你 + 边界 Agent + 审查 Agent 读
-├── follow_ups.json    # 你写 / 你 + 边界 Agent 读（搜索 Agent 返回的追踪问题）
+├── task_spec.md       # 你写 / 你 + 边界 Agent + 搜索 Agent + 合成 Agent 读
+├── raw/               # 搜索 Agent 直写（v2：不返回 stdout）——归一化器读
+│   └── search-*.jsonl
+├── findings.jsonl     # 归一化器写 / 边界 Agent + 审查 Agent + 合成 Agent 读（你不读全文）
+├── stats-summary.json # 归一化器写 / 你读（更新 task_spec 用——这是你唯一看 findings 数据的方式）
+├── parse_errors.log   # 归一化器写（parse 失败的行）
+├── follow_ups.json    # 你写 / 你 + 边界 Agent 读
 ├── directions.json    # 你写 / 你 + 搜索 Agent 读
-├── draft.md           # 你写 / 你 + 审查 Agent 读
-├── screenshots/       # 搜索 Agent 截图存这里（agent-browser 截图搬到这里）
-└── audit_report.yaml  # 审查 Agent 产出（Phase 8，YAML schema）
+├── draft.md           # 合成 Agent 写（v2：不是你写）/ 审查 Agent 读
+├── audit_report.yaml  # 审查 Agent 产出 / 你读（决定下一步）
+├── progress.json      # 你写 + calc-novelty.mjs 更新 / 你读
+└── screenshots/       # 搜索 Agent 截图存这里
 ```
 
 | 文件 | 写者 | 读者 | 格式 |
 |---|---|---|---|
 | `landscape.json` | 侦察 Agent | 你（写 task_spec 用） | JSON 对象（见 scout.md） |
-| `task_spec.md` | 你 | 你 + 边界 Agent + 搜索 Agent（`--task-dir`） | Markdown（见第 2.1 步） |
-| `findings.jsonl` | 你（代写，子 Agent 通过 task 工具返回） | 你 + 边界 Agent + 审查 Agent | JSONL（见下文） |
-| `follow_ups.json` | 你（从 findings 提取） | 你 + 边界 Agent | JSON 数组（见下文） |
+| `task_spec.md` | 你 | 你 + 边界 Agent + 搜索 Agent + 合成 Agent | Markdown（见第 2.1 步） |
+| `raw/search-*.jsonl` | 搜索 Agent（直写） | 归一化器 | JSONL（每行一个 finding/gap/red_flag + agent_done sentinel） |
+| `findings.jsonl` | 归一化器（normalize.mjs） | 边界 Agent + 审查 Agent + 合成 Agent（**你不读全文**） | JSONL（见下文） |
+| `stats-summary.json` | 归一化器（normalize.mjs） | **你**（更新 task_spec 用） | JSON（见下文） |
+| `parse_errors.log` | 归一化器 | 你（诊断用） | 纯文本 |
+| `follow_ups.json` | 你（从 stats-summary.json 提取） | 你 + 边界 Agent | JSON 数组（见下文） |
 | `directions.json` | 你 | 你 + 搜索 Agent（`--task-dir`） | JSON 数组（见下文） |
-| `draft.md` | 你 | 你 + 审查 Agent（`--draft-path`） | Markdown |
-| `screenshots/` | 搜索 Agent（截图后搬到这里） | 你（嵌 draft） | PNG 文件 |
-| `audit_report.yaml` | 审查 Agent | 你（修 draft 用） | YAML（critical/non_critical） |
+| `draft.md` | **合成 Agent**（不是你） | 审查 Agent（`--draft-path`） | Markdown |
+| `audit_report.yaml` | 审查 Agent | 你（决定下一步） | YAML（critical/non_critical） |
+| `progress.json` | 你 + calc-novelty.mjs | 你 | JSON（round/stale_count/stats） |
+| `screenshots/` | 搜索 Agent（截图后搬到这里） | 合成 Agent（嵌 draft） | PNG 文件 |
 
 ### findings.jsonl 行格式
 
@@ -525,7 +574,7 @@ node scripts/spawn-subagent.mjs \
 **4. 审计计数**：从 `audit_report.yaml` 存在的份数推断。若缺失 → 默认 0。审计回 LOOP 上限 3 次，溢出由 panic stop 兜底。
 
 **5. 已知限制**：
-- **飞行中的 findings 永久丢失**——Agent 返回了但没写入文件时，那批结果在新 session 中不可恢复。这是设计取舍（子 Agent 不写文件以防止并行撕裂）。重派可复现大部分证据。
+- **飞行中的 findings 永久丢失**——子 Agent 直写 raw/ 后此问题消失（数据落盘就持久）。未归一化的 raw 文件在 Session Recovery 时由 `node scripts/normalize.mjs <outputDir>` 补跑处理。
 - **revision 计数偏差**——若恰在审计判定后、写入前中断，可能多/少一轮。后果不超过 1 轮浪费，由 `SLEUTH_MAX_ROUNDS` 兜底。
 - **需要用户主动恢复**——新 session 主 Agent 不知道曾经有 sleuth 任务。用户说"继续上次的研究"即可触发此流程。
 
@@ -560,4 +609,21 @@ check-deps 跑一遍检查环境。
 - 不在同一条失败路径上盲目重试；没有新信息就换路。
 
 🔴 **CHECKPOINT · 执行前确认**：任何会产生记录或状态变更的动作——提交表单、发帖/留言、下单付款、改后台配置、点"确认/删除"——**执行前必须先获用户明确同意**。只读浏览（打开、滚动、读取、对非敏感页截图）无需确认。拿不准会不会改状态时，先停下来问，不要替用户按下按钮。
-替用户按下按钮。
+
+🔴 **CHECKPOINT · 任务范围变更**：用户在问题中明确列出的实体（公司名 / 产品名 / 概念名），主 Agent **不许单方面放弃**。如果搜索 Agent 返回某实体无数据，必须 CHECKPOINT 告知用户「X 经搜索未获取到数据，是否放弃或换方向」，而不是擅自从报告中删掉。用户列了 12 家 → 报告必须覆盖 12 家，缺数据的标「数据缺口」，不静默删除。
+
+### 主 Agent 不许做的事（明文禁止清单）
+
+| # | 禁止操作 | 为什么 |
+|---|---|---|
+| 1 | 不许手拼子 Agent prompt（必须用 spawn-subagent.mjs） | 手拼就漏完成标准 / 安全边界 / 返回格式 |
+| 2 | 不许自己做合成（写 draft）——必须派合成 Agent | 上下文爆炸 → 跳步（AOP 病根） |
+| 3 | 不许读 findings.jsonl 全文——只看 stats-summary.json | findings 几百行，读了上下文膨胀 |
+| 4 | 不许跳过检查门（每个 Phase 衔接跑 validate-state.mjs） | 跳了等于没有质量关卡 |
+| 5 | 不许单方面放弃用户列出的实体（必须 CHECKPOINT） | 用户列 12 家，主 Agent 自己放弃 3 家 |
+| 6 | 不许编辑 boundary-report.yaml / audit_report.yaml | 那是子 Agent 产出 |
+| 7 | 不许编造数字（"150+ 来源"必须由脚本算） | findings.jsonl 实际只有 100 行 |
+| 8 | 不许凭印象标 task_spec `[x]`（必须基于 stats-summary.json 的 meets_criteria） | task_spec 与实际证据撕裂 |
+| 9 | 不许删除 findings.jsonl / directions.json / follow_ups.json 的历史行 | append-only 是审计基础 |
+| 10 | 不许跳过 normalize.mjs 直接从 raw/ 读 | 字段没归一化，schema 不一致 |
+| 11 | 不许在同一轮内重派同方向的 search Agent | 反认知循环硬规则 |

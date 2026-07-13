@@ -213,14 +213,30 @@ test('SKILL.md has "长程任务行为" section with 3 behavioral constraints', 
   assert.match(skill, /认知循环/);
 });
 
-test('SKILL.md does NOT contain system-layer framework details', () => {
+test('SKILL.md does NOT contain system-layer framework details (v2: progress.json/stale_count now allowed)', () => {
   const skill = readRel('SKILL.md');
+  // v2 引入了 progress.json + stale_count（calc-novelty.mjs 输出），这些是允许的
   assert.doesNotMatch(skill, /心跳看门狗|heartbeat watchdog/);
-  assert.doesNotMatch(skill, /stale_count/);
-  assert.doesNotMatch(skill, /progress\.json/);
   assert.doesNotMatch(skill, /iteration_log/);
   assert.doesNotMatch(skill, /L0.*L1.*L2|三层相互校验/);
   assert.doesNotMatch(skill, /\/loop 2h|cron|resident shell|hourly patrol/);
+});
+
+test('SKILL.md has CHECKPOINT for entity abandonment (v2: AOP fix)', () => {
+  const skill = readRel('SKILL.md');
+  assert.match(skill, /任务范围变更/, 'must have entity abandonment CHECKPOINT rule');
+  assert.match(skill, /不许单方面放弃/, 'must prohibit unilateral entity abandonment');
+});
+
+test('SKILL.md has main agent prohibition list (v2: §16)', () => {
+  const skill = readRel('SKILL.md');
+  assert.match(skill, /主 Agent 不许做的事/, 'must have prohibition list');
+  assert.match(skill, /不许手拼子 Agent/, 'must prohibit hand-built prompts');
+  assert.match(skill, /不许自己做合成/, 'must prohibit main agent synthesis');
+  assert.match(skill, /不许编造数字/, 'must prohibit fabricated numbers');
+  assert.match(skill, /不许凭印象标 task_spec/, 'must prohibit guessing [x] status');
+  assert.match(skill, /不许跳过 normalize/, 'must prohibit skipping normalizer');
+  assert.match(skill, /不许在同一轮内重派同方向/, 'must prohibit same-direction redispatch');
 });
 
 test('boundary.md and review.md do NOT duplicate tool-guide.md commands', () => {
@@ -260,11 +276,12 @@ test('search.md §4.3 has hard constraint language for type/confidence/tier', ()
   assert.match(search, /整数不接受/, 'must reject integer tier values');
 });
 
-test('SKILL.md §3.3 has normalization step', () => {
+test('SKILL.md §3.3 has normalization step (v2: calls normalize.mjs)', () => {
   const skill = readRel('SKILL.md');
-  assert.match(skill, /校验.*归一化/, 'must have normalization step');
-  assert.match(skill, /type.*不在.*强制改.*finding/, 'must force non-standard type to finding');
-  assert.match(skill, /tier.*整数.*映射/, 'must map integer tier to string');
+  // v2: 归一化逻辑移到 normalize.mjs 脚本，SKILL.md 只说「跑 normalize.mjs」
+  assert.match(skill, /normalize\.mjs/, 'must call normalize.mjs');
+  assert.match(skill, /stats-summary\.json/, 'must output stats-summary.json');
+  assert.match(skill, /不读 findings\.jsonl 全文/, 'must state main agent does not read findings full text');
 });
 
 // ===== M6: 并发控制 =====
@@ -275,12 +292,14 @@ test('SKILL.md has concurrency cap of 5', () => {
   assert.match(skill, /分两批/, 'must have batching strategy');
 });
 
-// ===== M7: One-shot 合成 =====
+// ===== M7: 合成（v2: 由合成 Agent 做，不是主 Agent）=====
 
-test('SKILL.md §7 has one-shot synthesis rule', () => {
+test('SKILL.md §7 delegates synthesis to synthesize Agent (v2)', () => {
   const skill = readRel('SKILL.md');
-  assert.match(skill, /一次性完成/, 'must have one-shot synthesis rule');
-  assert.match(skill, /不要让.*Agent.*写/, 'must prohibit sub-agents from writing report');
+  // v2: 主 Agent 不做合成，派合成 Agent
+  assert.match(skill, /synthesize/, 'must reference synthesize role');
+  assert.match(skill, /你不做合成.*派合成 Agent/, 'must state main agent delegates synthesis');
+  assert.match(skill, /--role synthesize/, 'must show synthesize dispatch command');
 });
 
 // ===== M9: 截图/视频工作流 =====
@@ -393,8 +412,8 @@ test('SKILL.md §7.8 has re-loop trigger with hard cap 3', () => {
 
 test('SKILL.md §2 has task_spec with status tracking + hierarchy', () => {
   const skill = readRel('SKILL.md');
-  assert.match(skill, /- \[ \].*子问题/, 'task_spec must use [ ] status prefix');
-  assert.match(skill, /- \[x\].*✅/, 'task_spec must show [x] done format');
+  assert.match(skill, /\[ \].*子问题/, 'task_spec must use [ ] status prefix');
+  assert.match(skill, /\[x\].*✅/, 'task_spec must show [x] done format');
   assert.match(skill, /1\.1.*follow_up/, 'task_spec must support hierarchical sub-nodes');
 });
 
