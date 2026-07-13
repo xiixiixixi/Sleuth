@@ -294,8 +294,10 @@ node scripts/spawn-subagent.mjs \
 收到返回后校验必填字段：`terminate_recommended` 缺或不是 bool → 要求边界 Agent 重试一次。重试仍失败 → 默认 `terminate_recommended: false`（保守假设：覆盖不足），继续 LOOP。
 
 ```bash
-node scripts/validate-state.mjs <outputDir> --phase 4   # 检查门：boundary-report.yaml 存在 + terminate_recommended 是 bool
+node scripts/validate-state.mjs <outputDir> --phase 4   # 检查门：boundary-report.yaml + terminate_recommended 是 bool + 【硬拦截】terminate_recommended: false → exit 1（强制回第 6 步）
 ```
+
+⚠️ **phase 4 是硬关卡**：`terminate_recommended: false` 时检查门会 `exit 1`——boundary 认为不该终止（有未覆盖维度或 follow_up 未解决），**必须回第 6 步补搜**，不许往第 5 步/第 7 步走。唯一例外：Rule A（stale_count>=2）或 Rule B（>=5 轮）已强制收敛。检查门报错时，照它说的回第 6 步，不要绕过。
 
 ## 第 5 步：检查终止信号
 
@@ -380,6 +382,18 @@ node scripts/spawn-subagent.mjs \
 | 调研类（”全面了解 X”） | 概览 → 关键维度 1 → 关键维度 2 → ... → 结论 |
 | 时间线类 | 按时间排序，每事件一段 |
 | 单一问题 | 直接答案 + 支撑证据（最简结构） |
+| **PRD 类**（产品需求文档） | 见下方 PRD 标准结构——**不要写成技术架构文档** |
+
+**PRD 标准结构**（用户要 PRD 时合成 Agent 必须按此组织，不许写成技术选型/架构文档）：
+
+1. **背景与目标**：为谁解决什么问题（不写技术方案）
+2. **用户故事**：「As a <角色>, I want <能力>, so that <价值>」格式
+3. **功能需求**：每条带编号 + 描述 + **验收标准**（Acceptance Criteria，可测试的「当 X 则 Y」）
+4. **非功能需求**：性能 / 安全 / 合规 / 可用性
+5. **优先级排序**：P0 必做 / P1 应做 / P2 可做
+6. **不在范围内**（Out of Scope）：明确排除什么
+
+**PRD 禁止内容**（这些属于架构文档，不是 PRD）：技术选型（Kafka/Redis/数据库）、系统架构图、API schema、部署方案、开发路线图。如果用户同时要 PRD 和架构，分两份文档交付。
 
 **证据分层**（合成 Agent 标注）：
 

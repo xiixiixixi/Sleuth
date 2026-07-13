@@ -176,6 +176,28 @@ function checkPhase4() {
   // 简单检查 terminate_recommended 存在
   if (!/terminate_recommended/.test(report)) {
     errors.push('boundary-report.yaml 缺 terminate_recommended 字段');
+    return;
+  }
+
+  // 硬拦截 #009：terminate_recommended: false → boundary 认为不该终止，
+  // 主 Agent 必须回第 6 步补搜，不许往合成走。
+  // 唯一例外：Rule A/B 已强制收敛（progress.json 标了 stale 终止）。
+  const terminateMatch = report.match(/^terminate_recommended:\s*(\w+)/m);
+  const terminateVal = terminateMatch ? terminateMatch[1] : null;
+  if (terminateVal === 'false') {
+    // 检查是否 Rule A/B 已兜底（看 progress.json）
+    const progress = readJson(path.join(dir, 'progress.json'));
+    const staleCount = progress?.stale_count ?? 0;
+    const roundsCompleted = progress?.stats?.rounds_completed ?? 0;
+    const ruleA = staleCount >= 2;             // 连续 2 轮 0 新事实
+    const ruleB = roundsCompleted >= 5;         // 简化判定：≥5 轮（精确 Rule B 见 calc-novelty.mjs）
+    if (ruleA || ruleB) {
+      // Rule A/B 已兜底——允许进入合成，但提示主 Agent 标注「信息增益枯竭」
+      // 不报错，继续（不 exit）
+    } else {
+      errors.push('boundary-report.yaml 标 terminate_recommended: false——boundary 认为不该终止（有未覆盖维度或 follow_up 未解决）。回第 6 步补搜，不要进合成。');
+      errors.push('  例外：只有 Rule A（stale_count>=2）或 Rule B（>=5 轮）触发时才允许强制终止。当前 stale_count=' + staleCount + ', rounds_completed=' + roundsCompleted);
+    }
   }
 }
 
