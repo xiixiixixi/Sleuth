@@ -340,10 +340,10 @@ test('search.md §4 has hard loop constraint — no single-round return', () => 
   assert.match(search, /硬约束/, 'must be labeled as hard constraint');
 });
 
-test('search.md §4 has explicit exit conditions with tool call cap', () => {
+test('search.md §4 has explicit exit conditions with depth requirement', () => {
   const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
   assert.match(search, /退出条件/, 'must have exit conditions');
-  assert.match(search, /10 次 tool call/, 'must have 10-call hard cap');
+  assert.match(search, /200 字符/, 'must have finding depth requirement (≥200 chars)');
 });
 
 test('search.md §4.5 has cleanup step with follow_up_questions', () => {

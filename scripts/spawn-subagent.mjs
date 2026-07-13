@@ -172,10 +172,12 @@ ${CDP_PORT ? `- Chrome 调试端口：\`${CDP_PORT}\`（agent-browser 命令带 
 - WebFetch 单 URL 重试上限：3 次（间隔 2s / 5s / 10s）。3 次都失败 → 写 gap 到 raw/，不阻塞
 - WebSearch 连续 2 次返回空 → 换关键词或换工具（agent-browser）
 - agent-browser 超时 → 写 red_flag 到 raw/，明示"该来源未能验证"，不伪装成已验证
-- 整体退出条件（满足任一即可退出）：
-  1. 所有 must-verify 项已验证
-  2. 连续 2 次搜索返回类似信息
-  3. 已产出 ≥ min_sources 个独立 URL（部分接受——即使 must-verify 没全过也可退出，但必须在 raw/ 写 gap 说明未验证项）
+- 整体退出条件（必须满足第 1 条，或第 2+3 条同时成立）：
+  1. 所有 must-verify 项已验证（回原始来源确认，不是 WebSearch snippet）
+  2. 连续 2 次搜索返回类似信息（无新 claim 产出）
+  3. **每个 must-verify 维度至少有 2 条 ≥200 字符的 finding**（深度要求——浅断言不算数）
+
+⚠️ **深度优先于数量**：宁可 5 条深度 finding（每条 300-600 字符，含上下文+限定条件+场景影响），不要 15 条浅断言（每条 100 字只有结论）。每条 finding 要回答"是什么 + 为什么 + 有什么限制 + 对比/场景影响"，不是只写一个结论。
 
 ${roundBlock}
 

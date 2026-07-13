@@ -70,10 +70,10 @@
 
 **循环条件**：gap analysis 显示还有未验证的 must-verify 项 → 继续搜
 
-**退出条件**（满足任一即可返回）：
+**退出条件**（必须满足第 1 条，或第 2+3 条同时成立）：
 1. 所有 must-verify 项已验证（回原始来源确认）
 2. 连续 2 次搜索返回类似信息（无新 claim 产出）
-3. 已做 10 次 tool call（硬上限）
+3. **每个 must-verify 维度至少有 2 条 ≥200 字符的 finding**（浅断言不算数——见下方 finding 密度要求）
 
 **绝对不允许**搜一轮就返回——那是浪费主 Agent 的派发。
 ### 4.1 gap 反哺（硬规则）
@@ -105,12 +105,16 @@
 
 每行一个 JSON 对象（**硬约束——字段值只允许以下枚举，不允许自创**）：
 
+**finding 密度要求**（硬规则）：每条 finding 的 claim ≥ 200 字符（约 100 汉字），要回答"是什么 + 为什么 + 有什么限制 + 场景影响"，不是只甩一个结论。浅断言（< 200 字符）会被深度门（`scripts/check-depth.mjs`）拦下重派。
+
 ```jsonl
-{"type":"finding","claim":"Claude API 输入定价 $3/M tokens","url":"https://www.anthropic.com/pricing","confidence":"已验证事实","tier":"T1","dimensions_seen":[{"dimension":"视角覆盖","observation":"Reddit r/LocalLLaMA 有用户吐槽价格涨幅","source_url":"https://reddit.com/r/LocalLLaMA/..."}]}
+{"type":"finding","claim":"Claude API 输入定价 $3/M tokens、输出 $15/M tokens（2026 年 7 月调价后）。对比 GPT-4o 的 $5/$15，Claude 输入侧便宜 40% 但输出侧持平。对高吞吐场景（如客服机器人，输入远多于输出），Claude 成本优势明显；对长生成场景（如代码生成），成本与 GPT-4o 接近。100K context window 加价 +100%，200K 加价 +200%，长上下文场景成本翻倍。","url":"https://www.anthropic.com/pricing","confidence":"已验证事实","tier":"T1","dimensions_seen":[{"dimension":"价格/合同条款","observation":"Reddit r/LocalLLaMA 有用户吐槽价格涨幅，但官方定价页未提历史调价记录","source_url":"https://reddit.com/r/LocalLLaMA/..."}]}
 {"type":"finding","claim":"...","url":"...","confidence":"高置信推断","tier":"T2","follow_up_questions":["Genesys 是否也有类似机制？"]}
 {"type":"gap","what":"还缺企业定价","reason":"Sales 页要求联系未公开"}
 {"type":"red_flag","claim":"...","reason":"疑似过期（2024 文章）"}
 ```
+
+❌ **反面教材**（不要这样写）：`"claim":"Claude API 定价 $3/M"`——只有结论，没有上下文、对比、限制、场景影响。这种浅断言浪费一次搜索。
 
 **退出前必写 agent_done sentinel**——用 Write append 最后一行：
 ```jsonl

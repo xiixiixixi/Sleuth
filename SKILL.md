@@ -257,8 +257,11 @@ node scripts/normalize.mjs <outputDir>
 
 ```bash
 node scripts/validate-state.mjs <outputDir> --phase 3-raw        # 检查门：raw/ 每个 Agent 有文件 + 有 agent_done sentinel
+node scripts/check-depth.mjs <outputDir>                          # 深度门：每 agent finding 字符 ≥2000 / URL ≥5 / 短断言 ≤30%
 node scripts/validate-state.mjs <outputDir> --phase 3-findings    # 检查门：findings.jsonl + stats-summary.json 行数一致 + type 枚举
 ```
+
+⚠️ **深度门是硬关卡**：`check-depth.mjs` 报 `exit 1` 时，被点名的 agent 深度不足（finding 太少/太短/URL 不够），**必须重派这些 agent**——不是跳过。重派时用 `--round` 递增，`--must-verify` 聚焦该 agent 的浅项。深度门和归一化配合：归一化后，如果重派了，再跑一次归一化（append 模式会合并新 raw）。
 
 ### 3.4 写 directions.json
 
