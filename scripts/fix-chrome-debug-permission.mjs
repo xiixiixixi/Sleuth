@@ -1,19 +1,23 @@
 #!/usr/bin/env node
 /**
- * fix-chrome-debug-permission.mjs — 一键安装 Chrome 企业策略
- * RemoteDebuggingAllowed = true，压住 Chrome 144+ 的「要允许远程调试吗?」弹窗。
+ * fix-chrome-debug-permission.mjs — 压住 Chrome 144+ 的「要允许远程调试吗?」弹窗。
  *
  * Chrome 144+ 每次有程序通过调试端口连日常 Chrome 都会弹许可框。
  * sleuth 需要带着用户登录态操作浏览器，必须连日常 Chrome，
- * 所以每个 Chrome 144+ 用户都需要安装这个策略。
+ * 所以每个 Chrome 144+ 用户都需要设置这个授权。
  *
- * 支持 macOS / Linux / Windows。
- * 零 npm 依赖，只用系统自带工具（osascript / pkexec / PowerShell）。
+ * 平台方案（2026-07-14 更新）：
+ *   macOS  → Chrome Local State: devtools.remote_debugging.user-enabled = true
+ *            （旧方案写 /Library/Managed Preferences/ plist 在 macOS 26 失效——
+ *             cfprefsd 重启清文件；profiles install 命令也被禁。改走用户配置。）
+ *            前提：Chrome 必须关闭（在跑时改会被覆盖回去）。不需要 sudo。
+ *   Linux  → /etc/opt/chrome/policies/managed/ 企业策略 JSON（pkexec 提权）
+ *   Windows → 注册表 HKLM\SOFTWARE\Policies\Google\Chrome（UAC 提权）
  *
  * 用法：
- *   node scripts/fix-chrome-debug-permission.mjs            # 安装策略
- *   node scripts/fix-chrome-debug-permission.mjs --check     # 只检测不安装
- *   node scripts/fix-chrome-debug-permission.mjs --uninstall # 卸载策略
+ *   node scripts/fix-chrome-debug-permission.mjs            # 安装（macOS 需先关 Chrome）
+ *   node scripts/fix-chrome-debug-permission.mjs --check     # 只检测
+ *   node scripts/fix-chrome-debug-permission.mjs --uninstall # 卸载
  */
 
 import { execSync } from 'node:child_process';
@@ -28,22 +32,24 @@ const PLATFORM = process.platform;        // 'darwin' | 'linux' | 'win32'
 const HOME     = os.homedir();
 
 // Chrome 策略文件路径（按平台）
+// macOS 不用固定路径——走 profiles 命令管理 .mobileconfig 描述文件
 const POLICY_PATHS = {
-  darwin: '/Library/Managed Preferences/com.google.Chrome.plist',
   linux:  '/etc/opt/chrome/policies/managed/sleuth-remote-debug.json',
   // Windows 走注册表，不用文件
 };
 
-// 策略文件内容（按平台）
+// Chrome 策略内容（按平台）
+// macOS 方案变更（2026-07-14）：
+//   旧方案（写 /Library/Managed Preferences/ plist）在 macOS 26 失效——
+//   cfprefsd 守护进程重启后清理手动放入的文件；profiles install 命令也被禁。
+//   新方案：设置 Chrome 用户级 Local State 里的
+//   devtools.remote_debugging.user-enabled = true。
+//   这个值存在 ~/Library/Application Support/Google/Chrome/Local State，
+//   不受 cfprefsd 管，重启不丢，不需要 sudo。
+//   前提：Chrome 必须关闭（在跑时改会被 Chrome 覆盖回去）。
+const CHROME_LOCAL_STATE_REL = 'Library/Application Support/Google/Chrome/Local State';
+
 const POLICY_CONTENT = {
-  darwin: `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>RemoteDebuggingAllowed</key>
-    <true/>
-</dict>
-</plist>`,
   linux: `{
   "RemoteDebuggingAllowed": true
 }`,
@@ -79,11 +85,21 @@ function run(cmd, options = {}) {
 function checkInstalled() {
   switch (PLATFORM) {
     case 'darwin': {
-      const content = run(`defaults read "${POLICY_PATHS.darwin}" 2>/dev/null`);
-      if (content && content.includes('RemoteDebuggingAllowed')) {
-        return { installed: true, detail: `${POLICY_PATHS.darwin}（值 = 1）` };
+      // 查 Chrome Local State 里的 devtools.remote_debugging.user-enabled
+      const lsPath = path.join(HOME, CHROME_LOCAL_STATE_REL);
+      if (!fs.existsSync(lsPath)) {
+        return { installed: false, detail: 'Chrome Local State 文件不存在（Chrome 没装过？）' };
       }
-      return { installed: false, detail: '策略文件不存在或内容缺失' };
+      try {
+        const ls = JSON.parse(fs.readFileSync(lsPath, 'utf8'));
+        const enabled = ls?.devtools?.remote_debugging?.['user-enabled'];
+        if (enabled === true) {
+          return { installed: true, detail: 'Chrome Local State: devtools.remote_debugging.user-enabled = true' };
+        }
+        return { installed: false, detail: 'Local State 里 user-enabled 不是 true' };
+      } catch {
+        return { installed: false, detail: 'Chrome Local State 不是有效 JSON' };
+      }
     }
     case 'linux': {
       if (fs.existsSync(POLICY_PATHS.linux)) {
@@ -108,49 +124,95 @@ function checkInstalled() {
 
 // ── macOS 安装 ──────────────────────────────────────────────
 
+function isChromeRunning() {
+  return run('pgrep -f "Google Chrome.app/Contents/MacOS/Google Chrome"') !== null;
+}
+
 function installMacOS() {
-  const plistPath = POLICY_PATHS.darwin;
-  const plistContent = POLICY_CONTENT.darwin;
-  const dir = path.dirname(plistPath);   // /Library/Managed Preferences
-
-  // 写到临时文件（当前用户能写的位置）
-  const tmpFile = path.join(HOME, '.sleuth', '_chrome-policy.plist');
-  fs.mkdirSync(path.dirname(tmpFile), { recursive: true });
-  fs.writeFileSync(tmpFile, plistContent, 'utf8');
-
-  // 用 osascript with administrator privileges 弹系统密码框
-  // 把临时文件拷到目标位置 + 改权限，全程一步到位
-  const script = `do shell script "mkdir -p '${dir}' && cp '${tmpFile}' '${plistPath}' && chown root:wheel '${plistPath}' && chmod 644 '${plistPath}' && rm -f '${tmpFile}'" with administrator privileges`;
-
-  log('  → 系统会弹一个密码框，请输入你的开机密码...');
-  const result = run(`osascript -e '${script.replace(/'/g, "'\\''")}'`, { timeout: 120000 });
-
-  if (result === null) {
-    // osascript 失败——可能是用户取消了密码框，或密码错误
-    // 清理临时文件
-    try { fs.unlinkSync(tmpFile); } catch {}
-    err('✗ 安装失败。可能的原因：密码输入错误 / 点击了取消。');
-    err('  可以手动跑这条命令（需要 sudo）：');
-    err(`  sudo mkdir -p '${dir}' && sudo cp '${tmpFile}' '${plistPath}' && sudo chown root:wheel '${plistPath}' && sudo chmod 644 '${plistPath}'`);
+  // 前置检查：Chrome 必须关闭（在跑时改 Local State 会被 Chrome 覆盖回去）
+  if (isChromeRunning()) {
+    err('✗ Chrome 正在运行。改 Local State 必须先关闭 Chrome（否则改动会被覆盖回去）。');
+    err('  1. 完全退出 Chrome（Cmd+Q）');
+    err('  2. 再跑本脚本');
     process.exit(1);
   }
 
-  log(`✓ 策略已安装到 ${plistPath}`);
+  const lsPath = path.join(HOME, CHROME_LOCAL_STATE_REL);
+  if (!fs.existsSync(lsPath)) {
+    err(`✗ Chrome Local State 不存在：${lsPath}`);
+    err('  可能 Chrome 从没启动过。先打开一次 Chrome 再跑本脚本。');
+    process.exit(1);
+  }
+
+  // 读 + 改 + 写 Local State（JSON 操作，不需要 sudo）
+  let ls;
+  try {
+    ls = JSON.parse(fs.readFileSync(lsPath, 'utf8'));
+  } catch {
+    err(`✗ Chrome Local State 不是有效 JSON：${lsPath}`);
+    err('  先备份该文件，再删掉让它重新生成。');
+    process.exit(1);
+  }
+
+  // 备份原文件（防写坏）
+  const bakPath = lsPath + '.sleuth-bak';
+  try {
+    fs.copyFileSync(lsPath, bakPath);
+  } catch {}
+
+  // 设置 devtools.remote_debugging.user-enabled = true
+  if (!ls.devtools) ls.devtools = {};
+  if (!ls.devtools.remote_debugging) ls.devtools.remote_debugging = {};
+  ls.devtools.remote_debugging['user-enabled'] = true;
+
+  try {
+    fs.writeFileSync(lsPath, JSON.stringify(ls, null, 2), 'utf8');
+  } catch (e) {
+    err(`✗ 写 Local State 失败：${e.message}`);
+    err(`  原文件已备份到 ${bakPath}`);
+    process.exit(1);
+  }
+
+  log(`✓ 已设置 Chrome Local State: devtools.remote_debugging.user-enabled = true`);
+  log(`  原文件备份：${bakPath}`);
+  log('  这个值存在用户配置目录，重启不丢，不需要 sudo。');
 }
 
 function uninstallMacOS() {
-  const plistPath = POLICY_PATHS.darwin;
-  const script = `do shell script "rm -f '${plistPath}'" with administrator privileges`;
-
-  log('  → 系统会弹一个密码框，请输入你的开机密码...');
-  const result = run(`osascript -e '${script.replace(/'/g, "'\\''")}'`, { timeout: 120000 });
-
-  if (result === null) {
-    err('✗ 卸载失败。可能的原因：密码输入错误 / 点击了取消。');
+  if (isChromeRunning()) {
+    err('✗ Chrome 正在运行。改 Local State 必须先关闭 Chrome。');
+    err('  完全退出 Chrome（Cmd+Q）后再跑本脚本。');
     process.exit(1);
   }
 
-  log(`✓ 策略已删除：${plistPath}`);
+  const lsPath = path.join(HOME, CHROME_LOCAL_STATE_REL);
+  if (!fs.existsSync(lsPath)) {
+    log('Chrome Local State 不存在，无需卸载。');
+    process.exit(0);
+  }
+
+  let ls;
+  try {
+    ls = JSON.parse(fs.readFileSync(lsPath, 'utf8'));
+  } catch {
+    err(`✗ Chrome Local State 不是有效 JSON，无法卸载。`);
+    process.exit(1);
+  }
+
+  if (ls?.devtools?.remote_debugging?.['user-enabled'] !== true) {
+    log('user-enabled 不是 true，无需卸载。');
+    process.exit(0);
+  }
+
+  ls.devtools.remote_debugging['user-enabled'] = false;
+  try {
+    fs.writeFileSync(lsPath, JSON.stringify(ls, null, 2), 'utf8');
+  } catch (e) {
+    err(`✗ 写 Local State 失败：${e.message}`);
+    process.exit(1);
+  }
+
+  log(`✓ 已关闭 Chrome 远程调试授权（user-enabled = false）`);
 }
 
 // ── Linux 安装 ──────────────────────────────────────────────
@@ -272,10 +334,16 @@ function install() {
   }
 
   log('');
-  log('⚠ 重要：需要完全重启 Chrome 才能生效。');
-  log('  1. 完全退出 Chrome（macOS: Cmd+Q / Windows: 关闭所有窗口 / Linux: 退出进程）');
-  log('  2. 重新打开 Chrome');
-  log('  3. 打开 chrome://policy 确认 RemoteDebuggingAllowed 显示为 true / 正常');
+  if (PLATFORM === 'darwin') {
+    log('⚠ 现在重新打开 Chrome 即可生效（Local State 已改好）。');
+    log('  macOS 方案不显示在 chrome://policy 页面（那是企业策略页，用户配置不在那）。');
+    log('  验证方式：重新打开 Chrome 后连调试端口，不再弹「要允许远程调试吗?」即成功。');
+  } else {
+    log('⚠ 重要：需要完全重启 Chrome 才能生效。');
+    log('  1. 完全退出 Chrome（Windows: 关闭所有窗口 / Linux: 退出进程）');
+    log('  2. 重新打开 Chrome');
+    log('  3. 打开 chrome://policy 确认 RemoteDebuggingAllowed 显示为 true / 正常');
+  }
   log('');
   log('如需卸载：node scripts/fix-chrome-debug-permission.mjs --uninstall');
 }
