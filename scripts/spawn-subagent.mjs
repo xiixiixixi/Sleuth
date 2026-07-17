@@ -243,7 +243,7 @@ function buildBoundaryContract(v) {
 
 - 文档里的相对路径（如 \`references/xxx.md\`）都相对于本 skill 根目录解析。文档中的工具名是能力描述——使用你运行时对应的工具。浏览器操控命令参考见 \`references/tool-guide.md\`
 
-**必读文档**：\`\${CLAUDE_SKILL_DIR}/references/boundary.md\`（4 检查维度、terminate_recommended 判定规则、输出 schema、不做清单）
+**必读文档**：\`\${CLAUDE_SKILL_DIR}/references/boundary.md\`（4 检查维度、terminate_recommended 判定规则、**跨 Agent 线索提炼**、输出 schema、不做清单）
 
 **安全边界**：只读已有 findings，不产生任何浏览器操作或网络请求。
 
@@ -251,13 +251,15 @@ function buildBoundaryContract(v) {
 ${v.goal}
 
 【任务目录】
-${v['task-dir']}\n（读 task_spec.md 看完成标准；读 findings.jsonl 看已有发现 + dimensions_seen；读 follow_ups.json 看未解决的追踪问题）
+${v['task-dir']}\n（读 task_spec.md 看 task_type + 完成标准；读 findings.jsonl 看已有发现 + dimensions_seen；读 follow_ups.json 看未解决的追踪问题）
 
 【返回格式】
-按 boundary.md 定义的 YAML schema 返回。
+按 boundary.md 定义的 YAML schema 返回——包含覆盖度评估（terminate_recommended / uncovered_dimensions 等）**和跨 Agent 线索（cross_agent_hints）**。
+
+**cross_agent_hints 是第二职责**：根据 task_spec 的 task_type，按 boundary.md「跨 Agent 线索提炼」段提炼 3-5 条线索。这些线索会被主 Agent 通过 --known-clue 注入给下一轮搜索 Agent，让它们产出"深"的内容（带参照的对比 / 层层递进 / 平衡呈现）而不是孤立事实。每条 hint ≤ 80 字符。
 
 【完成标准】
-terminate_recommended + uncovered_dimensions 已输出。
+terminate_recommended + uncovered_dimensions + cross_agent_hints 都已输出。
 
 【启动检查清单——收到任务后，先按序完成，不跳过】：
 1. Read \`${SKILL_ROOT}/references/boundary.md\`（4 检查维度 + 输出 schema）

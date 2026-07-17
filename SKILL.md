@@ -28,7 +28,7 @@ description: >-
 |------|------|-----------|-----------|---------|
 | 侦察 Scout | `--goal`（用户问题领域） | scout.md | WebSearch + WebFetch | landscape.json（JSON 对象） |
 | 搜索 Searcher | `--goal` + `--must-verify` + `--task-dir` + `--round` | search.md | WebSearch + WebFetch + agent-browser + extract-subtitles | JSONL（findings + gaps + red_flags + follow_ups） |
-| 边界 Boundary | `--task-dir`（读 task_spec + findings + follow_ups） | boundary.md | 无（只读文件） | YAML（terminate + uncovered + drift + mismatch） |
+| 边界 Boundary | `--task-dir`（读 task_spec + findings + follow_ups） | boundary.md | 无（只读文件） | YAML（terminate + uncovered + drift + mismatch + **cross_agent_hints**） |
 | 审计 Reviewer | `--task-dir` + `--draft-path` | review.md | WebFetch（仅验证 URL） | YAML（critical + non_critical + stats） |
 | 合成 Synthesizer | `--task-dir`（读 findings.jsonl + task_spec.md） | SKILL.md §7（内联，无独立 references） | 无（不联网、不开浏览器） | Markdown（draft.md，直写） |
 
@@ -112,6 +112,9 @@ node scripts/validate-state.mjs <outputDir> --phase 1.5   # 检查门：landscap
 ## 用户问题（重写后）
 <把用户模糊问题转成具体可研究的问题>
 
+## 任务类型（task_type）
+<从下方 7 种选 1 个，根据用户问题的结构判断。boundary Agent 据此提炼不同的跨 Agent 线索>
+
 ## 子问题（状态追踪）
 
 每个子问题用 `- [ ]` 标记未完成，`- [x]` 标记已完成。
@@ -140,6 +143,22 @@ node scripts/validate-state.mjs <outputDir> --phase 1.5   # 检查门：landscap
 - 时间覆盖：<如"包含 2026 年内至少 2 个时间点">
 - 反方视角：<如"至少 1 个批评性来源">
 - 来源多样性：<如"至少 3 种来源类型">
+
+### 任务类型判断标准（写 task_type 字段时用）
+
+根据用户问题的结构判断 task_type。这个字段决定 boundary Agent 提炼什么样的跨 Agent 线索（见 `references/boundary.md`「跨 Agent 线索提炼」段）。
+
+| task_type | 识别信号 | 深度的含义 |
+|-----------|---------|-----------|
+| **comparison**（横向对比） | "对比"/"vs"/"哪家好"/要求对比表/多实体多维度 | 跨实体的差异分析 |
+| **deep_dive**（纵向深挖） | "深入研究 X"/"X 怎么实现"/"X 的机制"/单一实体多层次 | 层层递进，后层基于前层 gap |
+| **timeline**（时序追踪） | "历程"/"演变"/"从 X 到 Y"/"X 这一年" | 时间线上的因果链 |
+| **causal**（因果/机制） | "为什么 X"/"X 的原因"/"X 为何" | 多角度归因 |
+| **problem_solving**（问题解决） | "怎么 X"/"如何解决"/"X 怎么排查" | 解法完整性 + 适用条件 |
+| **enumeration**（清单/广度） | "列出所有"/"有哪些"/"X 有哪些类型" | 完备性，不漏 |
+| **debate**（争议/多视角） | "X 值得吗"/"X 会不会"/"X 好不好" | 平衡呈现，正反方各有证据 |
+
+**判断不了时**：如果用户问题同时有多个特征，选**主要交付物**决定的类型。如"对比 8 家 + 选 PRD"——交付物是对比表 → comparison。如无法明确归类，用 `general`（不启用跨 Agent 线索，保持现有行为）。
 
 ## 完成标准说明
 
@@ -292,7 +311,7 @@ node scripts/spawn-subagent.mjs \
   --task-dir <outputDir>
 ```
 
-边界 Agent 读 `task_spec.md` + `findings.jsonl` + `follow_ups.json`，返回 `terminate_recommended` + `uncovered_subquestions` + `uncovered_dimensions` + `direction_drift` + `entity_mismatch` + `follow_ups_unresolved`（判定规则和输出格式见 `references/boundary.md`）。
+边界 Agent 读 `task_spec.md` + `findings.jsonl` + `follow_ups.json`，返回 `terminate_recommended` + `uncovered_subquestions` + `uncovered_dimensions` + `direction_drift` + `entity_mismatch` + `follow_ups_unresolved` + **`cross_agent_hints`**（按 task_type 提炼的跨 Agent 线索，见 `references/boundary.md`「跨 Agent 线索提炼」段）。
 
 收到返回后校验必填字段：`terminate_recommended` 缺或不是 bool → 要求边界 Agent 重试一次。重试仍失败 → 默认 `terminate_recommended: false`（保守假设：覆盖不足），继续 LOOP。
 
@@ -344,10 +363,11 @@ node scripts/calc-novelty.mjs <outputDir>
 
 **派发步骤**：
 1. 确定本轮 P1/P2 分配（上面规则）
-2. P1 Agent 的 `--known-clue` 带入 follow_up 问题原文
-3. P2 Agent 的 `--known-clue` 带入 scout 的 source_hints 对应实体 URL
-4. **查 directions.json 避免重复**
-5. 追加新方向到 directions.json
+2. **读 boundary-report.yaml 的 `cross_agent_hints`**——这是上一轮 boundary Agent 提炼的跨 Agent 线索（按 task_type 不同，是参照系/gap/反方观点等）。**这是让下一轮 Agent 产出"深"内容的关键**——它让 Agent 知道前序 Agent 找到了什么，从而做对比/递进/平衡呈现，而不是孤立搜索。
+3. P1 Agent 的 `--known-clue` 带入：follow_up 问题原文 + 匹配它的 cross_agent_hints（按 hint.target 匹配该 Agent 负责的维度/实体）
+4. P2 Agent 的 `--known-clue` 带入：scout 的 source_hints 对应实体 URL + 匹配它的 cross_agent_hints
+5. **查 directions.json 避免重复**
+6. 追加新方向到 directions.json
 6. 回第 3 步（派搜索 Agent，`--round` 递增）
 
 **loop 持续迭代直到终止信号触发。** 正常任务 3-5 轮边界 Agent 软终止自然收敛；当软终止持续未触发但信息增益已枯竭时，收敛检查（Rule A / Rule B）作为安全网兜底终止。

@@ -72,10 +72,57 @@ findings 里 claim 提到的实体名和 URL 域名是否匹配？
 - 集成/互操作（API/平台对比——评估与上下游系统的衔接）
 - 社区生态/采用度（技术选型——GitHub stars、Slack/Discord 活跃、采用规模）
 
+## 跨 Agent 线索提炼（cross_agent_hints）—— 第二职责
+
+除了评估覆盖度，边界 Agent 还要**根据任务类型提炼"跨 Agent 线索"**，供主 Agent 在下一轮派发时通过 `--known-clue` 注入给搜索 Agent。
+
+### 为什么需要线索
+
+搜索 Agent 做完就走，看不见其他 Agent 找了什么。但深度研究（对比/纵深/时序/因果/争议）需要 Agent 知道"前序 Agent 的结论"才能产出深的 finding。边界 Agent 读所有 findings，是唯一能跨 Agent 看的角色——把关键结论压缩成 3-5 条线索，让主 Agent 中继给下一轮。
+
+### 先识别任务类型
+
+读 `task_spec.md` 的 `task_type` 字段。如果没声明，按下方标准自动识别。
+
+| task_type | 识别信号 | 线索该提炼什么 |
+|-----------|---------|--------------|
+| **comparison**（横向对比） | "对比"/"vs"/"哪家好"/要求对比表 | **参照系**——每个维度下各家的关键结论，让下一轮 Agent 带着参照搜 |
+| **deep_dive**（纵向深挖） | "深入研究 X"/"X 怎么实现"/"X 的机制" | **上层 gap**——上一层挖到什么、哪一层还没挖透 |
+| **timeline**（时序追踪） | "历程"/"演变"/"从 X 到 Y" | **事件链断点**——上一个事件的结论、下一个该追什么后果 |
+| **causal**（因果/机制） | "为什么 X"/"X 的原因" | **已有角度的解释**——已挖的角度结论、还没挖的角度 |
+| **problem_solving**（问题解决） | "怎么 X"/"如何解决"/"X 怎么排查" | **已有解法 + 边界**——已找到的解法、各自的适用条件 |
+| **enumeration**（清单/广度） | "列出所有"/"有哪些"/"X 有哪些类型" | **已发现的成员**——已列出的成员，让下一轮补漏 |
+| **debate**（争议/多视角） | "X 值得吗"/"X 会不会"/"X 好不好" | **已覆盖的视角**——正方/反方各自的论点，让下一轮补缺的视角 |
+
+### 各类型线索提炼规则
+
+**comparison（横向对比）**：每个维度，列出各家的关键结论（一句话）+ 指出哪家在这维度还是空白或证据弱。下一轮 Agent 带着这个参照系搜，产出"带参照的判断"。
+
+**deep_dive（纵向深挖）**：识别当前挖到了哪一层（如：定价 → 阶梯价 → 批量折扣 → 隐藏费用），指出最浅的那一层，给出"该往哪钻"。
+
+**timeline（时序追踪）**：列出已确认的事件 + 因果链断点（"X 事件后发生了什么"未明），指出最关键的断点。
+
+**causal（因果/机制）**：列出已覆盖的解释角度（技术/商业/社区）+ 还没覆盖的角度。
+
+**problem_solving（问题解决）**：列出已找到的解法 + 各自的适用条件 + 还没找到的解法类型。
+
+**enumeration（清单/广度）**：列出已发现的成员 + 可能漏的类别（如"非主流的"/"小众的"/"新兴的"）。
+
+**debate（争议/多视角）**：列出正方/反方各自的核心论点 + 证据强度，指出哪一方证据弱需要补强。
+
+### 线索格式要求
+
+- 每条线索 ≤ 80 字符（要能塞进 `--known-clue` 参数）
+- 只写结论，不写推理过程（推理过程在 boundary-report 里）
+- 线索必须能在搜索时直接用（"X 比 Y 强" / "X 层还没挖" / "正方说了 X，你搜反方"）
+
+---
+
 ## 输出 schema
 
 ```yaml
 terminate_recommended: <bool>
+task_type: <comparison | deep_dive | timeline | causal | problem_solving | enumeration | debate>
 uncovered_subquestions:
   - id: <子问题编号，如 "3" 或 "1.1">
     title: <子问题标题>
@@ -91,10 +138,15 @@ direction_drift:
     suggested_fix: <应该搜什么>
 entity_mismatch:
   - claim: <claim 内容>
-    url: <实际 URL>
-    expected_entity: <预期实体名>
-    actual_title: <页面实际 title>
+  url: <实际 URL>
+  expected_entity: <预期实体名>
+  actual_title: <页面实际 title>
 follow_ups_unresolved: <int>
+# 跨 Agent 线索（主 Agent 读这里 → --known-clue 注入给下一轮搜索 Agent）
+cross_agent_hints:
+  - target: <下一轮哪个 Agent / 哪个维度 / 哪家实体>
+    hint: <≤80 字符的线索，能直接用于搜索>
+    rationale: <为什么这条线索能让下一轮更深>
 ```
 
 ## terminate_recommended 判定规则
