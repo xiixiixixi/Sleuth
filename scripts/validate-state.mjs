@@ -98,6 +98,29 @@ function checkPhase2() {
   }
 }
 
+const VALID_TASK_TYPES = new Set([
+  'comparison', 'deep_dive', 'timeline', 'causal',
+  'problem_solving', 'enumeration', 'debate', 'general',
+]);
+
+function checkPhase2_typecheck() {
+  const spec = readFile(path.join(dir, 'task_spec.md'));
+  if (!spec) {
+    errors.push('task_spec.md 不存在');
+    return;
+  }
+  // 提取 task_type 字段（## 任务类型 段下面的值）
+  const m = spec.match(/##\s*任务类型[^\n]*\n\s*(\w+)/);
+  if (!m) {
+    errors.push('task_spec.md 缺 task_type 字段（## 任务类型 段）。从 7 种选 1：comparison/deep_dive/timeline/causal/problem_solving/enumeration/debate');
+    return;
+  }
+  const tt = m[1].trim();
+  if (!VALID_TASK_TYPES.has(tt)) {
+    errors.push(`task_spec.md 的 task_type "${tt}" 不是合法值。合法值：${[...VALID_TASK_TYPES].join(' / ')}`);
+  }
+}
+
 function checkPhase3_raw() {
   const rawDir = path.join(dir, 'raw');
   if (!exists(rawDir)) {
@@ -179,6 +202,22 @@ function checkPhase4() {
     return;
   }
 
+  // 检查 cross_agent_hints（跨 Agent 线索——boundary 第二职责）
+  // task_type=general 时不强制（general 明确不启用线索机制）
+  const ttMatch = report.match(/^task_type:\s*(\w+)/m);
+  const tt = ttMatch ? ttMatch[1].trim() : null;
+  if (tt && tt !== 'general') {
+    if (!/cross_agent_hints/.test(report)) {
+      errors.push('boundary-report.yaml 缺 cross_agent_hints 段——boundary 必须按 task_type 提炼跨 Agent 线索（见 references/boundary.md「跨 Agent 线索提炼」）');
+    } else {
+      // 至少 1 条 hint（粗略数 - hint: 出现次数）
+      const hintCount = (report.match(/^\s*-\s+target:/gm) || []).length;
+      if (hintCount === 0) {
+        errors.push('boundary-report.yaml 的 cross_agent_hints 段为空——至少要 1 条 hint');
+      }
+    }
+  }
+
   // 硬拦截 #009：terminate_recommended: false → boundary 认为不该终止，
   // 主 Agent 必须回第 6 步补搜，不许往合成走。
   // 唯一例外：Rule A/B 已强制收敛（progress.json 标了 stale 终止）。
@@ -231,6 +270,7 @@ function checkPhase7_post() {
 const phaseChecks = {
   '1.5': checkPhase1_5,
   '2': checkPhase2,
+  '2-typecheck': checkPhase2_typecheck,
   '3-raw': checkPhase3_raw,
   '3-findings': checkPhase3_findings,
   '4': checkPhase4,

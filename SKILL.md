@@ -210,7 +210,8 @@ task_spec 不是写一次就不动——**每轮搜索 Agent 收齐后，主 Age
 | **标记 follow_up 解决** | findings 覆盖了 follow_up 的问题 | 子节点 `[ ]` → `[x]`，follow_ups.json `resolved: true` |
 
 ```bash
-node scripts/validate-state.mjs <outputDir> --phase 2   # 检查门：task_spec.md 存在 + 有 [ ] 子问题 + 有完成标准字段
+node scripts/validate-state.mjs <outputDir> --phase 2            # 检查门：task_spec.md 存在 + 有 [ ] 子问题 + 有完成标准字段
+node scripts/validate-state.mjs <outputDir> --phase 2-typecheck  # 检查门：task_type 字段存在 + 是 7 种合法值之一
 ```
 
 ## 第 3 步：派搜索 Agent（每轮）
@@ -363,9 +364,13 @@ node scripts/calc-novelty.mjs <outputDir>
 
 **派发步骤**：
 1. 确定本轮 P1/P2 分配（上面规则）
-2. **读 boundary-report.yaml 的 `cross_agent_hints`**——这是上一轮 boundary Agent 提炼的跨 Agent 线索（按 task_type 不同，是参照系/gap/反方观点等）。**这是让下一轮 Agent 产出"深"内容的关键**——它让 Agent 知道前序 Agent 找到了什么，从而做对比/递进/平衡呈现，而不是孤立搜索。
-3. P1 Agent 的 `--known-clue` 带入：follow_up 问题原文 + 匹配它的 cross_agent_hints（按 hint.target 匹配该 Agent 负责的维度/实体）
-4. P2 Agent 的 `--known-clue` 带入：scout 的 source_hints 对应实体 URL + 匹配它的 cross_agent_hints
+2. **跑 `node scripts/inject-hints.mjs <outputDir>`**——读 boundary-report.yaml 的 cross_agent_hints，输出拼好的 `--known-clue` 参数。**这是强制步骤**——不要自己读 boundary-report 拼参数，用脚本的输出。`--target` 可过滤（只注入和某个 Agent 相关的 hint）。
+   ```bash
+   node scripts/inject-hints.mjs <outputDir>                      # 全部 hint
+   node scripts/inject-hints.mjs <outputDir> --target "Intercom"   # 只注入和 Intercom 相关的
+   ```
+3. P1 Agent 的 `--known-clue` 带入：follow_up 问题原文 + inject-hints.mjs 输出的匹配 hint
+4. P2 Agent 的 `--known-clue` 带入：scout 的 source_hints 对应实体 URL + inject-hints.mjs 输出的匹配 hint
 5. **查 directions.json 避免重复**
 6. 追加新方向到 directions.json
 6. 回第 3 步（派搜索 Agent，`--round` 递增）
