@@ -37,6 +37,7 @@ node scripts/spawn-subagent.mjs --help
 - 子 Agent 不读 `SKILL.md`；任务契约由 `spawn-subagent.mjs` 生成。
 - 主 Agent 不读完整 findings、不合成、不修改子 Agent 报告。
 - 边界和审查报告使用 JSON，禁止退回无法严格解析的 YAML 文本匹配。
+- 普通研究默认逐页检查图片；`visual_scan.pages[]` 证明检查过哪些来源页，`visuals[]` 中的图必须全部进入草稿和视觉审查。
 - 不允许重新引入 session、deliver、research-index、managed browser 或 AppleScript bridge。
 - `launch-chrome.mjs` 只允许用户主动运行并传 `--confirm-close-browser`；Sleuth 不自动启动或关闭 Chrome。
 
@@ -58,6 +59,7 @@ node scripts/spawn-subagent.mjs --help
 
 - 多轮测试必须覆盖 Round 1 + Round 2、重复事实和再次归一化。
 - 检查门必须同时测试通过与拒绝路径。
+- 视觉改动必须覆盖漏扫来源页、漏放登记图片、孤儿图片和漏做视觉审查四种拒绝路径。
 - 7 种 task_type 必须验证各自的跨轮关系。
 - 修改文档后检查不存在的引用和过时文件名。
 

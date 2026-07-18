@@ -71,6 +71,7 @@ sleuth/
   - **Unit**（参考 `browser-discovery.test.mjs`）：`import { fn } from '../lib/...'` 直接调用
   - **Integration**（参考 `spawn-subagent.test.mjs`）：`execFileSync('node', [SCRIPT, ...args])` 子进程黑盒
 - **必须显式断言不包含已废弃词**：当心 `--sid`、`session-logger`、`deliver`、`--main-sid`、`--role subagent`、`subagent_done` 不能再出现（session 系统已砍）
+- **视觉证据必须真实走完整链路**：默认逐页扫描已采用来源，`agent_done.visual_scan.pages[]` 留痕；有用图写 `visuals[]`；草稿全部内嵌，Review 逐张审查。测试必须覆盖漏扫、漏图、孤儿图和漏审。
 
 ### 文档
 

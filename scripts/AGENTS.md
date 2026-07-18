@@ -26,7 +26,7 @@ scripts/
 └── __tests__/
     ├── browser-discovery.test.mjs      Unit 风格（直接 import）
     ├── spawn-subagent.test.mjs         Integration 风格（5 种 role + 新参数 + synthesize 测试）
-    ├── normalize.test.mjs              Integration 风格（14 条：归一化 + sentinel + stats-summary + parse 错误）
+    ├── normalize.test.mjs              Integration 风格（归一化 + sentinel + stats-summary + 视觉证据 + parse 错误）
     ├── output.test.mjs                 Unit + Integration（task-name / 路径注入 / CLI flag）
     └── references-structure.test.mjs   防回潮：references/ + SKILL.md 结构
 ```
@@ -71,5 +71,6 @@ scripts/
 - **`extract-subtitles.sh` 和 `srt_to_transcript.py` 是辅助工具**：混语言存在，没有 README 解释何时用哪个——SKILL.md / references/ 里也几乎没引用
 - **`output.mjs` 的 task-name 模式（2026-06-19）**：默认行为不变（按 YYYY-MM-DD，向后兼容）；`--task-name <name>` 模式按任务名创建子目录，用于多 Agent 协作的独立 task 目录。`sanitizeTaskName` 拒绝路径分隔符 / `..` / 特殊字符（只允许 `[a-zA-Z0-9-_.]`），防注入。空字符串视为"已传入但非法"会抛错（`if (taskName !== undefined)` 而不是 truthy 检查）。
 - **`spawn-subagent.mjs` 的 5 role 模板**：`scout` / `search` / `boundary` / `review` / `synthesize`。子 Agent 不读 SKILL.md。产出分别直写 landscape.json / raw JSONL / boundary-report.json / audit-report.json / draft.md；边界与审查使用可严格解析的 JSON。
-- **search 必须绑定**：`--task-dir`、`--agent-name`、`--round`、`--subquestion-id`；视觉任务再传 `--visual-required`。这保证文件唯一、轮次和子问题归属可审计。
+- **search 必须绑定**：`--task-dir`、`--agent-name`、`--round`、`--subquestion-id`；视觉任务再传 `--visual-required`。普通任务也默认逐页扫描图片，并在 `agent_done.visual_scan.pages[]` 留下可审计记录。
 - **finding 与 red_flag 都必须有 `sources[]`**：前者支撑当前结论，后者支撑“为何排除旧版、冲突或不可靠来源”；`validate-state.mjs` 会同时检查。
+- **视觉证据用 `visuals[]`**：原图 `image_url` 与本地 `screenshot_path` 二选一；归一化器去重统计，草稿门和审查门保证图片不会再次丢失。

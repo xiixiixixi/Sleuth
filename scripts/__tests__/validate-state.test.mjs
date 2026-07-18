@@ -17,6 +17,7 @@ function run(root, phase) { return spawnSync('node', [SCRIPT, root, '--phase', p
 function summary(meets = true, accepted = false) {
   return {
     schema_version: 2, total_records: 1, total_findings: 1, unassigned_findings: 0,
+    total_visuals: 0,
     by_type: { finding: 1, gap: 0, red_flag: 0 }, by_tier: { T1: 1, T2: 0, T3: 0 },
     by_subquestion: { '1': { title: '价格问题', meets_criteria: meets, accepted_limit: accepted, known_limit: accepted ? '企业价未公开' : null } },
   };
@@ -42,12 +43,25 @@ test('phase 1.5 严格读取 landscape JSON', () => {
 
 test('phase 2 要求 task_type、逐题标准和 progress', () => {
   const root = dir();
-  fs.writeFileSync(path.join(root, 'task_spec.md'), 'task_type: comparison\n\n- [ ] 1. 价格问题\n  - min_sources: 2\n  - min_t1: 1\n  - required_fields: [价格]\n  - max_age_days: 365\n');
+  fs.writeFileSync(path.join(root, 'task_spec.md'), 'task_type: comparison\nvisual_evidence: auto\n\n- [ ] 1. 价格问题\n  - min_sources: 2\n  - min_t1: 1\n  - required_fields: [价格]\n  - max_age_days: 365\n');
   writeJson(root, 'progress.json', { current_round: 1, stats: {} });
   assert.equal(run(root, '2').status, 0);
   assert.equal(run(root, '2-typecheck').status, 0);
   fs.writeFileSync(path.join(root, 'task_spec.md'), 'task_type: wrong\n- [ ] 1. x\n');
   assert.equal(run(root, '2-typecheck').status, 1);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('phase 2 强制声明图片策略，关闭时必须说明原因', () => {
+  const root = dir();
+  writeJson(root, 'progress.json', { current_round: 1, stats: {} });
+  const base = 'task_type: comparison\n\n- [ ] 1. 价格问题\n  - min_sources: 1\n  - min_t1: 1\n  - required_fields: [价格]\n  - max_age_days: 365\n';
+  fs.writeFileSync(path.join(root, 'task_spec.md'), base);
+  assert.equal(run(root, '2').status, 1);
+  fs.writeFileSync(path.join(root, 'task_spec.md'), `visual_evidence: off\n${base}`);
+  assert.equal(run(root, '2').status, 1);
+  fs.writeFileSync(path.join(root, 'task_spec.md'), `visual_evidence: off\nvisual_evidence_reason: 用户明确只要纯文字\n${base}`);
+  assert.equal(run(root, '2').status, 0);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -77,22 +91,49 @@ test('phase 3-raw 要求 red_flag 也有结构化来源', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('visual_evidence required 时，没有 screenshot_path 不能过 raw 门', () => {
+test('visual_evidence required 时，没有结构化图片不能过 raw 门', () => {
   const root = dir();
   fs.mkdirSync(path.join(root, 'raw'));
+  fs.mkdirSync(path.join(root, 'screenshots'));
+  fs.writeFileSync(path.join(root, 'screenshots', 'a.png'), 'test-image');
   fs.writeFileSync(path.join(root, 'task_spec.md'), 'visual_evidence: required\n\n- [ ] 1. 视觉问题\n');
-  const row = { type: 'finding', claim: 'x', claim_key: '1:a:x', subquestion_ids: ['1'], fields_covered: [], sources: [{ url: 'https://a.com', tier: 'T1', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' }] };
-  fs.writeFileSync(path.join(root, 'raw', 'search-r1-a.jsonl'), `${JSON.stringify(row)}\n${JSON.stringify({ type: 'agent_done', agent: 'a', lines_written: 1 })}\n`);
+  const row = { type: 'finding', claim: 'x', claim_key: '1:a:x', subquestion_ids: ['1'], fields_covered: [], sources: [{ url: 'https://a.com', tier: 'T1', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' }], visuals: [] };
+  let done = { type: 'agent_done', agent: 'a', lines_written: 1, visual_scan: { status: 'none_useful', candidates_seen: 1, useful_saved: 0, reason: '只有装饰图', pages: [{ url: 'https://a.com', candidates_seen: 1, useful_saved: 0, reason: '只有品牌标志' }] } };
+  fs.writeFileSync(path.join(root, 'raw', 'search-r1-a.jsonl'), `${JSON.stringify(row)}\n${JSON.stringify(done)}\n`);
   assert.equal(run(root, '3-raw').status, 1);
-  row.screenshot_path = 'screenshots/a.png';
-  fs.writeFileSync(path.join(root, 'raw', 'search-r1-a.jsonl'), `${JSON.stringify(row)}\n${JSON.stringify({ type: 'agent_done', agent: 'a', lines_written: 1 })}\n`);
+  row.visuals = [{ kind: 'ui', screenshot_path: 'screenshots/a.png', source_page_url: 'https://a.com', caption: '官方界面展示关键操作入口', observed_at: '2026-07-18T00:00:00Z' }];
+  done = { type: 'agent_done', agent: 'a', lines_written: 1, visual_scan: { status: 'captured', candidates_seen: 1, useful_saved: 1, pages: [{ url: 'https://a.com', candidates_seen: 1, useful_saved: 1 }] } };
+  fs.writeFileSync(path.join(root, 'raw', 'search-r1-a.jsonl'), `${JSON.stringify(row)}\n${JSON.stringify(done)}\n`);
   assert.equal(run(root, '3-raw').status, 0);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('visual_evidence auto 时必须留下图片扫描记录', () => {
+  const root = dir();
+  fs.mkdirSync(path.join(root, 'raw'));
+  fs.writeFileSync(path.join(root, 'task_spec.md'), 'visual_evidence: auto\n\n- [ ] 1. 视觉问题\n');
+  const row = { type: 'finding', claim: 'x', claim_key: '1:a:x', subquestion_ids: ['1'], fields_covered: [], sources: [
+    { url: 'https://a.com', tier: 'T1', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' },
+    { url: 'https://b.com', tier: 'T2', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' },
+  ], visuals: [] };
+  const file = path.join(root, 'raw', 'search-r1-a.jsonl');
+  fs.writeFileSync(file, `${JSON.stringify(row)}\n${JSON.stringify({ type: 'agent_done', agent: 'a', lines_written: 1 })}\n`);
+  assert.equal(run(root, '3-raw').status, 1);
+  const done = { type: 'agent_done', agent: 'a', lines_written: 1, visual_scan: { status: 'none_useful', candidates_seen: 3, useful_saved: 0, reason: '三张都是头像和品牌标志', pages: [{ url: 'https://a.com', candidates_seen: 3, useful_saved: 0, reason: '三张都是头像和品牌标志' }] } };
+  fs.writeFileSync(file, `${JSON.stringify(row)}\n${JSON.stringify(done)}\n`);
+  assert.equal(run(root, '3-raw').status, 1, '漏掉任一已采用来源页都必须失败');
+  done.visual_scan.pages.push({ url: 'https://b.com', candidates_seen: 0, useful_saved: 0, reason: '该页没有图片元素' });
+  fs.writeFileSync(file, `${JSON.stringify(row)}\n${JSON.stringify(done)}\n`);
+  assert.equal(run(root, '3-raw').status, 0);
+  delete row.visuals;
+  fs.writeFileSync(file, `${JSON.stringify(row)}\n${JSON.stringify(done)}\n`);
+  assert.equal(run(root, '3-raw').status, 1, '新任务即使没有有用图片也必须显式写 visuals: []');
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('phase 3-findings 核对统计口径和分配状态', () => {
   const root = dir();
-  fs.writeFileSync(path.join(root, 'findings.jsonl'), `${JSON.stringify({ type: 'finding', claim_id: 'x', claim_key: '1:a:x', round: 1, subquestion_ids: ['1'], sources: [{ url: 'https://a.com' }] })}\n`);
+  fs.writeFileSync(path.join(root, 'findings.jsonl'), `${JSON.stringify({ type: 'finding', claim_id: 'x', claim_key: '1:a:x', round: 1, subquestion_ids: ['1'], sources: [{ url: 'https://a.com' }], visuals: [] })}\n`);
   writeJson(root, 'stats-summary.json', summary());
   assert.equal(run(root, '3-findings').status, 0);
   const wrong = summary(); wrong.total_findings = 2;
@@ -131,12 +172,28 @@ test('phase 7-ready 只接受完成或逐题 known_limit', () => {
 
 test('phase 7-draft 拒绝孤儿 URL，并要求逐题章节', () => {
   const root = dir();
-  fs.writeFileSync(path.join(root, 'findings.jsonl'), `${JSON.stringify({ type: 'finding', sources: [{ url: 'https://evidence.example/a' }] })}\n`);
+  fs.writeFileSync(path.join(root, 'findings.jsonl'), `${JSON.stringify({ type: 'finding', sources: [{ url: 'https://evidence.example/a' }], visuals: [] })}\n`);
   writeJson(root, 'stats-summary.json', summary());
   fs.writeFileSync(path.join(root, 'draft.md'), '# 报告\n\n## 1. 价格问题\n\n[结论](https://orphan.example/a)\n');
   assert.equal(run(root, '7-draft').status, 1);
   fs.writeFileSync(path.join(root, 'draft.md'), '# 报告\n\n## 1. 价格问题\n\n[结论](https://evidence.example/a)\n');
   assert.equal(run(root, '7-draft').status, 0);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('phase 7-draft 强制放入有用图片、来源页和图注', () => {
+  const root = dir();
+  const visual = { kind: 'diagram', image_url: 'https://img.example/workflow.png', source_page_url: 'https://evidence.example/workflow', caption: '官方流程图展示三个处理阶段', observed_at: '2026-07-18T00:00:00Z' };
+  fs.writeFileSync(path.join(root, 'task_spec.md'), 'visual_evidence: auto\n');
+  fs.writeFileSync(path.join(root, 'findings.jsonl'), `${JSON.stringify({ type: 'finding', sources: [{ url: visual.source_page_url }], visuals: [visual] })}\n`);
+  const stats = summary(); stats.total_visuals = 1;
+  writeJson(root, 'stats-summary.json', stats);
+  fs.writeFileSync(path.join(root, 'draft.md'), '# 报告\n\n## 1. 价格问题\n\n[结论](https://evidence.example/workflow)\n');
+  assert.equal(run(root, '7-draft').status, 1);
+  fs.writeFileSync(path.join(root, 'draft.md'), '# 报告\n\n## 1. 价格问题\n\n![官方流程图展示三个处理阶段](https://img.example/workflow.png)\n\n[来源页](https://evidence.example/workflow)；抓取于 2026-07-18，这张图说明三个处理阶段。\n');
+  assert.equal(run(root, '7-draft').status, 0);
+  fs.writeFileSync(path.join(root, 'draft.md'), '# 报告\n\n## 1. 价格问题\n\n![](https://img.example/unknown.png)\n\n[来源页](https://evidence.example/workflow)\n');
+  assert.equal(run(root, '7-draft').status, 1);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -156,5 +213,17 @@ test('phase 8-audit 要求问题清零、passed=true 且抽样足够', () => {
   assert.equal(run(root, '8-audit').status, 0);
   writeJson(root, 'audit-report.json', { schema_version: 2, critical: [], non_critical: [{ issue: '缺引用' }], sampled_stats: { total_t1: 6, sampled_t1: 5, total_t2: 4, sampled_t2: 2, total_t3: 2, sampled_t3: 2 }, passed: false });
   assert.equal(run(root, '8-audit').status, 1);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('phase 8-audit 有图片时必须逐张审查且全部进入报告', () => {
+  const root = dir();
+  writeJson(root, 'stats-summary.json', { by_tier: { T1: 1, T2: 0, T3: 0 }, total_visuals: 1 });
+  const audit = { schema_version: 2, critical: [], non_critical: [], sampled_stats: { total_t1: 1, sampled_t1: 1, total_t2: 0, sampled_t2: 0, total_t3: 0, sampled_t3: 0 }, passed: true };
+  writeJson(root, 'audit-report.json', audit);
+  assert.equal(run(root, '8-audit').status, 1);
+  audit.visual_audit = { total: 1, checked: 1, embedded: 1, missing: [], orphan: [] };
+  writeJson(root, 'audit-report.json', audit);
+  assert.equal(run(root, '8-audit').status, 0);
   fs.rmSync(root, { recursive: true, force: true });
 });

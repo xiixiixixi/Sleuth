@@ -3,9 +3,9 @@
 | 文档 | 内容 |
 |---|---|
 | scout.md | 侦察执行：广度扫描策略、工具选择、landscape.json 返回格式 |
-| search.md | 搜索执行：必搜/必不搜、查询规则、工具选择、失败兜底、搜索循环、多模态提取、JSONL 返回、dimensions_seen、directions.json 格式 |
+| search.md | 搜索执行：必搜/必不搜、查询规则、工具选择、失败兜底、搜索循环、多模态提取、逐页视觉扫描、JSONL 返回、dimensions_seen、directions.json 格式 |
 | boundary.md | 边界评估：覆盖度 + 方向偏移 + 实体准确 + follow-ups 状态、terminate_recommended 判定、输出 schema |
-| review.md | 证据链审计：4 项审计、critical/non_critical 分级、分层抽样、Tier 分级、输出 schema |
+| review.md | 证据链审计：5 项审计（含视觉全扫）、critical/non_critical 分级、分层抽样、Tier 分级、输出 schema |
 | tool-guide.md | agent-browser 命令速查、反爬降级、特殊内容类型 |
 
 ## 每份文档的边界

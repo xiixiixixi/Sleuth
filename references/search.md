@@ -99,7 +99,7 @@
 搜索 Agent **不返回 stdout 给主 Agent**。每搜到一条 finding/gap/red_flag，立刻写入自己独占的 `<task-dir>/raw/search-r<round>-<agent-name>.jsonl`。
 
 **直写流程**（Write 工具是覆盖不是追加，所以要先 Read 再拼接）：
-1. Read 你的 raw 文件（`<task-dir>/raw/search-<agent-name>.jsonl`，不存在则视为空）
+1. Read 你的 raw 文件（`<task-dir>/raw/search-r<round>-<agent-name>.jsonl`，不存在则视为空）
 2. 把新行追加到末尾
 3. Write 全量覆盖回去
 
@@ -108,7 +108,7 @@
 **finding 密度指导**：claim 应回答“是什么 + 为什么 + 有什么限制 + 场景影响”，不要只甩结论。少于 200 字符会被深度门提醒，但真正的硬检查是来源、字段归属和跨轮递进，不能靠堆字数过门。
 
 ```jsonl
-{"type":"finding","claim":"Claude API 输入定价及其适用条件……","claim_key":"1:claude:api_pricing","subquestion_ids":["1"],"fields_covered":["输入价格","输出价格","长上下文加价"],"sources":[{"url":"https://www.anthropic.com/pricing","tier":"T1","stance":"supports","observed_at":"2026-07-18T00:00:00Z","source_date":"2026-07-01"},{"url":"https://example.org/independent-review","tier":"T2","stance":"supports","observed_at":"2026-07-18T00:00:00Z"}],"dimensions_seen":[{"dimension":"价格/合同条款","observation":"长上下文需要额外付费"}]}
+{"type":"finding","claim":"Claude API 输入定价及其适用条件……","claim_key":"1:claude:api_pricing","subquestion_ids":["1"],"fields_covered":["输入价格","输出价格","长上下文加价"],"sources":[{"url":"https://www.anthropic.com/pricing","tier":"T1","stance":"supports","observed_at":"2026-07-18T00:00:00Z","source_date":"2026-07-01"},{"url":"https://example.org/independent-review","tier":"T2","stance":"supports","observed_at":"2026-07-18T00:00:00Z"}],"dimensions_seen":[{"dimension":"价格/合同条款","observation":"长上下文需要额外付费"}],"visuals":[]}
 {"type":"gap","what":"还缺企业定价","reason":"销售页要求联系，未公开","subquestion_ids":["1"]}
 {"type":"red_flag","claim":"第三方文章价格疑似过期","reason":"发布日期早于时效要求","subquestion_ids":["1"],"sources":[{"url":"https://example.org/old-price","tier":"T3","stance":"supports","observed_at":"2026-07-18T00:00:00Z","source_date":"2024-01-01"}]}
 ```
@@ -117,7 +117,7 @@
 
 **退出前必写 agent_done sentinel**——用 Write append 最后一行：
 ```jsonl
-{"type":"agent_done","agent":"<agent-name>","lines_written":<你写的总行数>,"ts":"<当前 ISO 时间>"}
+{"type":"agent_done","agent":"<agent-name>","lines_written":<你写的总行数>,"ts":"<当前 ISO 时间>","visual_scan":{"status":"captured 或 none_useful","candidates_seen":<各页候选合计>,"useful_saved":<visuals 总数>,"reason":"全部没有保存时说明总原因","pages":[{"url":"<被采用的来源页>","candidates_seen":<该页候选数>,"useful_saved":<该页保存数>,"reason":"该页没有保存时说明原因"}]}}
 ```
 不写这行 = 归一化器认为你被杀了，触发重派。
 
@@ -151,11 +151,17 @@
 - `observation`：该维度的具体观察（一句话，附 URL 最好）
 - `source_url`：观察来源（可选但推荐）
 
-**`screenshot_path`（可选，仅截了呈现型图片时填）**：
-- ✅ `"screenshots/llamacpp-pricing.png"`（相对路径，相对 `<task-dir>/`）
-- 截了图但没回写这个字段 = 合成 Agent 看不到这张图，等于白截
-- 没截图的 finding 不要带这个字段
-- 截图触发条件和存档流程见下方 §6.2
+**`visuals`（每条 finding 必须有数组，没有有用图片时写 `[]`）**：
+
+```json
+[{"kind":"diagram","image_url":"https://example.com/architecture.png","source_page_url":"https://example.com/architecture","caption":"官方架构图，展示请求经过三个处理层","observed_at":"2026-07-18T00:00:00Z"}]
+```
+
+- `kind`：只允许 `chart / table / diagram / ui / infographic / photo / other`。
+- `image_url` 与 `screenshot_path` 必须二选一。网页已有清晰原图时优先 `image_url`；只有动态状态、交互结果或原图无法取得时才截图。
+- `source_page_url` 必须同时出现在该 finding 的 `sources[]`，防止图片失去出处。
+- `caption` 必须解释“图里是什么、为什么对结论有用”，不能只写“截图 1”。
+- 每条 finding 最多 3 张，只登记报告中值得展示的图片；logo、头像、背景、广告和重复缩略图不要登记。
 
 **写 raw 文件前必须去重**：同维度多条观察合并；不允许返回 5 条都是「视角覆盖」的 dimensions_seen。
 
@@ -192,7 +198,7 @@
 1. **删失败结果**：删掉失败的 tool call、404 页面、登录墙挡住的空结果
 2. **删跑题内容**：和 must-verify 无关的页面内容删掉
 3. **合并重复**：同一事实多个源 → 合成一条 finding，全部来源保留在 `sources` 数组
-4. **补全字段**：每条 finding 必须有 claim + claim_key + subquestion_ids + fields_covered + sources + dimensions_seen
+4. **补全字段**：每条 finding 必须有 claim + claim_key + subquestion_ids + fields_covered + sources + dimensions_seen + visuals
 5. **提取 follow_up_questions**：搜索过程中发现的新实体 / 新概念 / 未覆盖方向，提取成具体问题
 
 follow_up_questions 规则：
@@ -202,7 +208,7 @@ follow_up_questions 规则：
 
 写入 raw 文件的 JSONL 里，finding 类型可以带 follow_up_questions 字段：
 
-    {"type":"finding","claim":"...","claim_key":"1:genesys:aop","subquestion_ids":["1"],"fields_covered":["机制"],"sources":[{"url":"https://...","tier":"T1","stance":"supports","observed_at":"2026-07-18T00:00:00Z"}],"dimensions_seen":[],"follow_up_questions":["Genesys 是否也有 AOP 机制？"]}
+    {"type":"finding","claim":"...","claim_key":"1:genesys:aop","subquestion_ids":["1"],"fields_covered":["机制"],"sources":[{"url":"https://...","tier":"T1","stance":"supports","observed_at":"2026-07-18T00:00:00Z"}],"dimensions_seen":[],"visuals":[],"follow_up_questions":["Genesys 是否也有 AOP 机制？"]}
 
 **cleanup 是写入前的最后一道工序——不清理就写等于把垃圾丢进 raw/。**
 ---
@@ -232,28 +238,28 @@ follow_up_questions 规则：
 
 reader 是线索不是证据。核心结论必须回原始来源（浏览器或官方一手页）验证。
 
-### 6.2 图片（分两种角色处理）
+### 6.2 图片（每个采用的一手页面都要扫描）
 
-- **证据型**（只为抽事实，如一张定价截图）：用 vision 工具分析 → 结论写报告 → **附原始图片 URL，不存图**
-- **呈现型**（报告本身需要给人看：产品图 / 对比图表 / 官方规格图 / UI / 示意图）：**截图 → 分析 → 内嵌**
-  1. 用浏览器操控工具 截图（命令看 `references/tool-guide.md`「截图」段）
-  2. 截图默认存在 `~/.agent-browser/tmp/screenshots/`——搬到 `<outputDir>/screenshots/` 再用
-  3. **用 vision 工具分析截图内容**（布局 / 配色 / 交互模式），分析结论写进报告——不是只放图不分析
-  4. 报告里内嵌：`![图注](screenshots/文件名.png)`（本地截图）或 `![图注](来源URL)`（网图）
-  5. 图注必带：来源 + 抓取日期 + 视觉分析结论
+文字抓取能看见页面正文，不代表图片已经进入证据库。每个最终采用的一手页面都必须做一次视觉候选检查：能直接取得 HTML 时检查 `img / picture / svg / figure`；动态页面或懒加载页面再使用浏览器；图片明显是核心证据但页面提取看不到时，使用图片搜索定位同一官方来源。
 
-**什么时候该主动截图（呈现型）**——遇到以下 5 种内容，如果报告需要给人看，就截：
+- **证据型**（定价表、性能图、流程图）：分析图中事实，把结论写入 claim，同时把原图或截图写进 `visuals[]`，让读者可以复核。
+- **呈现型**（产品 UI、架构图、官方信息图）：分析它帮助理解的部分，写入 `visuals[]`，成稿会自动内嵌。
+- 网页已有清晰原图 → 优先保存 `image_url`，不必重复截屏。
+- 只有动态状态、交互结果、画布或原图无法直接取得 → 浏览器截图，搬到 `<task-dir>/screenshots/` 后保存 `screenshot_path`。
+
+**什么时候必须登记为有用图片**——遇到以下内容且与任务结论有关时：
 1. 定价 / 套餐表（数字密集，截图比文字转录准）
 2. 对比表 / 规格表（多列横向对比，文字转录易错）
 3. 架构图 / 流程图 / 示意图（无法用文字还原）
 4. UI 界面 / 产品截图（评测类、选型类报告必需）
 5. 官方 benchmark 图表（性能数据可视化）
 
-**回写 JSONL（关键）**：截了图后，对应 finding 行必须带 `screenshot_path` 字段：
+**回写 JSONL（关键）**：有用图片必须写入对应 finding 的 `visuals[]`：
 ```jsonl
-{"type":"finding","claim":"llama.cpp 定价免费开源，并说明适用限制与场景影响","claim_key":"1:llamacpp:pricing","subquestion_ids":["1"],"fields_covered":["价格"],"sources":[{"url":"https://github.com/ggerganov/llama.cpp","tier":"T1","stance":"supports","observed_at":"2026-07-18T00:00:00Z"}],"screenshot_path":"screenshots/llamacpp-readme.png","dimensions_seen":[]}
+{"type":"finding","claim":"官方流程图展示请求依次经过路由、执行和人工接管","claim_key":"1:product:workflow","subquestion_ids":["1"],"fields_covered":["流程"],"sources":[{"url":"https://example.com/workflow","tier":"T1","stance":"supports","observed_at":"2026-07-18T00:00:00Z"}],"visuals":[{"kind":"diagram","image_url":"https://example.com/workflow.png","source_page_url":"https://example.com/workflow","caption":"官方流程图，展示路由到人工接管的完整路径","observed_at":"2026-07-18T00:00:00Z"}],"dimensions_seen":[]}
 ```
-没有这个字段 = 合成 Agent 看不到这张图，等于没截。
+
+退出前的 `agent_done.visual_scan` 必须逐页记录：`pages[]` 覆盖每个 finding 的每个来源 URL，分别写看过多少候选、保存多少有用图片；某页没有保存时写具体理由。顶层数量必须等于逐页合计。这样“页面有图但被全部略过”会定位到具体来源页，不能用一句笼统理由带过。
 
 **不做**：不对敏感 / 登录后页面截图；归档仅作研究留证，尊重版权。
 

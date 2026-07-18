@@ -59,6 +59,20 @@ function questionList(spec) {
   }));
 }
 
+function canonicalUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = '';
+    if (url.pathname !== '/') url.pathname = url.pathname.replace(/\/$/, '');
+    return url.toString().replace(/\/$/, '');
+  } catch { return value; }
+}
+
+function visualMode(spec) {
+  const match = spec?.match(/visual_evidence\s*[:：]\s*([a-z_]+)/i);
+  return match ? match[1].toLowerCase() : 'legacy';
+}
+
 function checkPhase1_5() {
   const landscape = readJson('landscape.json');
   if (!landscape) return;
@@ -83,6 +97,10 @@ function checkPhase2() {
       if (!new RegExp(`${field}\\s*:`).test(block)) errors.push(`子问题 ${question.id} 缺 ${field}`);
     }
   }
+  const mode = visualMode(spec);
+  if (mode === 'legacy') errors.push('task_spec.md 缺 visual_evidence；必须是 auto / required / off');
+  else if (!['auto', 'required', 'off'].includes(mode)) errors.push(`visual_evidence 无效：${mode}`);
+  if (mode === 'off' && !/visual_evidence_reason\s*[:：]\s*\S+/i.test(spec)) errors.push('visual_evidence: off 时必须写 visual_evidence_reason');
   const progress = readJson('progress.json');
   if (progress && (!progress.stats || typeof progress.current_round === 'undefined')) errors.push('progress.json 缺 current_round 或 stats');
 }
@@ -100,18 +118,22 @@ function checkPhase3Raw() {
   const rawDir = path.join(dir, 'raw');
   if (!fs.existsSync(rawDir)) { errors.push('raw/ 目录不存在'); return; }
   const files = fs.readdirSync(rawDir).filter((file) => file.startsWith('search-') && file.endsWith('.jsonl')).sort();
-  const visualRequired = /visual_evidence\s*:\s*required/i.test(readText('task_spec.md') || '');
+  const mode = visualMode(readText('task_spec.md') || '');
   const knownQuestionIds = new Set(questionList(readText('task_spec.md')).map((item) => item.id));
   if (files.length === 0) { errors.push('raw/ 没有 search-*.jsonl'); return; }
   for (const file of files) {
     if (!/^search-r\d+-.+\.jsonl$/.test(file)) errors.push(`${file} 缺轮次；必须使用 search-r<轮次>-<agent>.jsonl`);
     const lines = fs.readFileSync(path.join(rawDir, file), 'utf8').split('\n').filter(Boolean);
     let sentinelCount = 0;
-    let screenshotCount = 0;
+    let visualCount = 0;
+    let sentinel = null;
+    const adoptedSourceUrls = new Set();
+    const visualCountBySourcePage = new Map();
     lines.forEach((line, index) => {
       let row;
       try { row = JSON.parse(line); } catch { errors.push(`${file} 第 ${index + 1} 行不是有效 JSON`); return; }
       if (row.type === 'agent_done') {
+        sentinel = row;
         sentinelCount++;
         if (index !== lines.length - 1) errors.push(`${file} 的 agent_done 必须是最后一行`);
         if (Number(row.lines_written) !== lines.length - 1) errors.push(`${file} 的 lines_written 与实际行数不一致`);
@@ -123,9 +145,37 @@ function checkPhase3Raw() {
         if (!knownQuestionIds.has(String(id))) errors.push(`${file} 第 ${index + 1} 行引用不存在的子问题 ${id}`);
       }
       if (row.type === 'finding') {
-        if (row.screenshot_path) screenshotCount++;
         if (!row.claim_key) errors.push(`${file} 第 ${index + 1} 行缺 claim_key`);
         if (!Array.isArray(row.fields_covered)) errors.push(`${file} 第 ${index + 1} 行缺 fields_covered`);
+        if (['auto', 'required'].includes(mode) && row.screenshot_path && !Array.isArray(row.visuals)) {
+          errors.push(`${file} 第 ${index + 1} 行仍使用旧 screenshot_path；新任务必须写 visuals[]`);
+        }
+        if (['auto', 'required'].includes(mode) && !Array.isArray(row.visuals)) errors.push(`${file} 第 ${index + 1} 行缺 visuals 数组`);
+        else if (row.visuals !== undefined && !Array.isArray(row.visuals)) errors.push(`${file} 第 ${index + 1} 行 visuals 必须是数组`);
+        if ((row.visuals || []).length > 3) errors.push(`${file} 第 ${index + 1} 行 visuals 最多 3 张，避免装饰图堆积`);
+        const sourceUrls = new Set((row.sources || []).map((source) => canonicalUrl(source.url)));
+        for (const sourceUrl of sourceUrls) adoptedSourceUrls.add(sourceUrl);
+        for (const [visualIndex, visual] of (row.visuals || []).entries()) {
+          visualCount++;
+          const label = `${file} 第 ${index + 1} 行 visuals[${visualIndex}]`;
+          if (!['chart', 'table', 'diagram', 'ui', 'infographic', 'photo', 'other'].includes(visual?.kind)) errors.push(`${label} kind 无效`);
+          if (!visual?.caption || !visual?.observed_at || !visual?.source_page_url) errors.push(`${label} 缺 caption / observed_at / source_page_url`);
+          if (visual?.source_page_url && !sourceUrls.has(canonicalUrl(visual.source_page_url))) errors.push(`${label} 的 source_page_url 不在该 finding.sources 中`);
+          if (visual?.source_page_url) {
+            const pageUrl = canonicalUrl(visual.source_page_url);
+            visualCountBySourcePage.set(pageUrl, (visualCountBySourcePage.get(pageUrl) || 0) + 1);
+          }
+          const hasImage = typeof visual?.image_url === 'string' && visual.image_url.length > 0;
+          const hasScreenshot = typeof visual?.screenshot_path === 'string' && visual.screenshot_path.length > 0;
+          if (hasImage === hasScreenshot) errors.push(`${label} 必须且只能有 image_url 或 screenshot_path 之一`);
+          if (hasImage && !/^https?:\/\//i.test(visual.image_url)) errors.push(`${label} 的 image_url 必须是 http(s) URL`);
+          if (hasScreenshot) {
+            const screenshotsRoot = path.resolve(dir, 'screenshots');
+            const resolved = path.resolve(dir, visual.screenshot_path);
+            if (!resolved.startsWith(`${screenshotsRoot}${path.sep}`)) errors.push(`${label} 的 screenshot_path 必须位于 screenshots/`);
+            else if (!fs.existsSync(resolved)) errors.push(`${label} 指向的本地图片不存在：${visual.screenshot_path}`);
+          }
+        }
       }
       if (row.type === 'finding' || row.type === 'red_flag') {
         if (!Array.isArray(row.sources) || row.sources.length === 0) errors.push(`${file} 第 ${index + 1} 行缺 sources`);
@@ -137,7 +187,43 @@ function checkPhase3Raw() {
       }
     });
     if (sentinelCount !== 1) errors.push(`${file} 必须且只能有 1 个 agent_done`);
-    if (visualRequired && screenshotCount === 0) errors.push(`${file} 所属任务要求视觉证据，但没有 screenshot_path`);
+    if (['auto', 'required'].includes(mode)) {
+      const scan = sentinel?.visual_scan;
+      if (!scan || !['captured', 'none_useful'].includes(scan.status)) errors.push(`${file} 的 agent_done 缺 visual_scan，或 status 不是 captured / none_useful`);
+      if (!Number.isInteger(scan?.candidates_seen) || scan.candidates_seen < 0) errors.push(`${file} 的 visual_scan.candidates_seen 必须是非负整数`);
+      if (!Number.isInteger(scan?.useful_saved) || scan.useful_saved < 0) errors.push(`${file} 的 visual_scan.useful_saved 必须是非负整数`);
+      if (Number.isInteger(scan?.useful_saved) && scan.useful_saved !== visualCount) errors.push(`${file} 的 visual_scan.useful_saved=${scan.useful_saved}，实际 visuals=${visualCount}`);
+      if (Number.isInteger(scan?.candidates_seen) && Number.isInteger(scan?.useful_saved) && scan.candidates_seen < scan.useful_saved) errors.push(`${file} 的 visual_scan.candidates_seen 不能小于 useful_saved`);
+      if (!Array.isArray(scan?.pages)) errors.push(`${file} 的 visual_scan.pages 必须逐页记录图片检查结果`);
+      else {
+        const scannedPages = new Map();
+        let pageCandidates = 0;
+        let pageSaved = 0;
+        for (const [pageIndex, page] of scan.pages.entries()) {
+          const label = `${file} 的 visual_scan.pages[${pageIndex}]`;
+          const pageUrl = canonicalUrl(page?.url);
+          if (!/^https?:\/\//i.test(page?.url || '')) errors.push(`${label}.url 必须是 http(s) URL`);
+          if (scannedPages.has(pageUrl)) errors.push(`${label}.url 重复：${page?.url}`);
+          scannedPages.set(pageUrl, page);
+          if (!Number.isInteger(page?.candidates_seen) || page.candidates_seen < 0) errors.push(`${label}.candidates_seen 必须是非负整数`);
+          if (!Number.isInteger(page?.useful_saved) || page.useful_saved < 0) errors.push(`${label}.useful_saved 必须是非负整数`);
+          if (Number.isInteger(page?.candidates_seen)) pageCandidates += page.candidates_seen;
+          if (Number.isInteger(page?.useful_saved)) pageSaved += page.useful_saved;
+          if (Number.isInteger(page?.candidates_seen) && Number.isInteger(page?.useful_saved) && page.candidates_seen < page.useful_saved) errors.push(`${label}.candidates_seen 不能小于 useful_saved`);
+          const actualSaved = visualCountBySourcePage.get(pageUrl) || 0;
+          if (Number.isInteger(page?.useful_saved) && page.useful_saved !== actualSaved) errors.push(`${label}.useful_saved=${page.useful_saved}，该来源页实际登记 visuals=${actualSaved}`);
+          if (page?.useful_saved === 0 && !String(page?.reason || '').trim()) errors.push(`${label} 没有保存图片时必须说明原因`);
+        }
+        for (const sourceUrl of adoptedSourceUrls) {
+          if (!scannedPages.has(sourceUrl)) errors.push(`${file} 没有为已采用来源页留下视觉扫描记录：${sourceUrl}`);
+        }
+        if (Number.isInteger(scan?.candidates_seen) && scan.candidates_seen !== pageCandidates) errors.push(`${file} 的 visual_scan.candidates_seen 与 pages 合计不一致`);
+        if (Number.isInteger(scan?.useful_saved) && scan.useful_saved !== pageSaved) errors.push(`${file} 的 visual_scan.useful_saved 与 pages 合计不一致`);
+      }
+      if (visualCount > 0 && scan?.status !== 'captured') errors.push(`${file} 已保存视觉证据，visual_scan.status 必须是 captured`);
+      if (visualCount === 0 && (scan?.status !== 'none_useful' || !String(scan?.reason || '').trim())) errors.push(`${file} 没有保存图片时，visual_scan 必须说明 none_useful 的理由`);
+    }
+    if (mode === 'required' && visualCount === 0) errors.push(`${file} 所属任务要求视觉证据，但没有 visuals`);
   }
 }
 
@@ -146,6 +232,7 @@ function checkPhase3Findings() {
   const summary = readJson('stats-summary.json');
   if (!summary) return;
   const counts = { finding: 0, gap: 0, red_flag: 0 };
+  const visualTargets = new Set();
   for (const row of rows) {
     if (counts[row.type] === undefined) errors.push(`findings.jsonl 出现未知 type：${row.type}`);
     else counts[row.type]++;
@@ -154,10 +241,13 @@ function checkPhase3Findings() {
       if (!Array.isArray(row.subquestion_ids) || row.subquestion_ids.length === 0) errors.push(`finding ${row.claim_id || '(未知)'} 未分配子问题`);
       if (row.round === null || row.legacy_round_unknown) errors.push(`finding ${row.claim_id || '(未知)'} 轮次未知`);
       if (!Array.isArray(row.sources) || row.sources.length === 0) errors.push(`finding ${row.claim_id || '(未知)'} 缺来源`);
+      if (!Array.isArray(row.visuals)) errors.push(`finding ${row.claim_id || '(未知)'} 缺 visuals 数组`);
+      for (const visual of row.visuals || []) visualTargets.add(visual.image_url || visual.screenshot_path);
     }
   }
   if (summary.total_records !== rows.length) errors.push(`stats total_records=${summary.total_records}，实际=${rows.length}`);
   if (summary.total_findings !== counts.finding) errors.push(`stats total_findings=${summary.total_findings}，实际=${counts.finding}`);
+  if (summary.total_visuals !== visualTargets.size) errors.push(`stats total_visuals=${summary.total_visuals}，实际=${visualTargets.size}`);
   for (const type of Object.keys(counts)) {
     if (summary.by_type?.[type] !== counts[type]) errors.push(`stats by_type.${type}=${summary.by_type?.[type]}，实际=${counts[type]}`);
   }
@@ -224,20 +314,30 @@ function checkPhase7Draft() {
   if (!draft) { errors.push('draft.md 不存在或为空'); return; }
   const findings = readJsonl('findings.jsonl');
   const summary = readJson('stats-summary.json');
-  const canonicalUrl = (value) => {
-    try {
-      const url = new URL(value);
-      url.hash = '';
-      if (url.pathname !== '/') url.pathname = url.pathname.replace(/\/$/, '');
-      return url.toString().replace(/\/$/, '');
-    } catch { return value; }
-  };
+  const mode = visualMode(readText('task_spec.md') || '');
+  const visuals = findings.filter((row) => row.type === 'finding').flatMap((row) => row.visuals || []);
+  const visualTargets = new Map();
+  for (const visual of visuals) visualTargets.set(visual.image_url || visual.screenshot_path, visual);
   const evidenceUrls = new Set(findings
     .filter((row) => row.type === 'finding' || row.type === 'red_flag')
     .flatMap((row) => (row.sources || []).map((source) => canonicalUrl(source.url))));
+  for (const visual of visualTargets.values()) if (visual.image_url) evidenceUrls.add(canonicalUrl(visual.image_url));
   const draftUrls = [...draft.matchAll(/https?:\/\/[^\s)\]>"']+/g)].map((match) => match[0].replace(/[.,;，。；]+$/, ''));
+  const draftCanonicalUrls = new Set(draftUrls.map(canonicalUrl));
   const orphan = [...new Set(draftUrls.filter((url) => !evidenceUrls.has(canonicalUrl(url))))];
   if (orphan.length) errors.push(`draft.md 有不在 finding/red_flag 结构化来源中的 URL：${orphan.join(', ')}`);
+  const draftImages = [...draft.matchAll(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map((match) => ({ alt: match[1].trim(), target: match[2] }));
+  const allowedImageTargets = new Map([...visualTargets].map(([target, visual]) => [canonicalUrl(target), visual]));
+  for (const image of draftImages) {
+    if (!image.alt) errors.push(`draft.md 图片缺少有意义的图注：${image.target}`);
+    if (!allowedImageTargets.has(canonicalUrl(image.target))) errors.push(`draft.md 出现未登记的图片：${image.target}`);
+  }
+  for (const [target, visual] of visualTargets) {
+    if (!draftImages.some((image) => canonicalUrl(image.target) === canonicalUrl(target))) errors.push(`draft.md 漏掉已登记的有用图片：${target}`);
+    if (!draftCanonicalUrls.has(canonicalUrl(visual.source_page_url))) errors.push(`draft.md 图片缺来源页链接：${visual.source_page_url}`);
+    if (visual.screenshot_path && !fs.existsSync(path.resolve(dir, visual.screenshot_path))) errors.push(`draft.md 引用的本地图片不存在：${visual.screenshot_path}`);
+  }
+  if (mode === 'required' && visualTargets.size === 0) errors.push('visual_evidence: required，但 findings 没有视觉证据');
   for (const [id, item] of readySubquestions(summary)) {
     const title = item.title.replace(/[`*_]/g, '').trim();
     if (!draft.includes(title) && !new RegExp(`(^|\\n)#{1,6}\\s+${id}(?:\\.|\\s)`, 'm').test(draft)) {
@@ -264,6 +364,16 @@ function checkPhase8Audit() {
   if (summary) {
     for (const tier of ['T1', 'T2', 'T3']) {
       if (sampled[`total_${tier.toLowerCase()}`] !== summary.by_tier?.[tier]) errors.push(`audit 的 ${tier} 总数与 stats-summary 不一致`);
+    }
+  }
+  if ((summary?.total_visuals || 0) > 0) {
+    const visualAudit = audit.visual_audit;
+    if (!visualAudit) errors.push('有视觉证据时 audit 缺 visual_audit');
+    else {
+      if (visualAudit.total !== summary.total_visuals) errors.push(`visual_audit.total=${visualAudit.total}，stats total_visuals=${summary.total_visuals}`);
+      if (visualAudit.checked !== visualAudit.total || visualAudit.embedded !== visualAudit.total) errors.push('所有视觉证据都必须审查并进入报告');
+      if (!Array.isArray(visualAudit.missing) || visualAudit.missing.length) errors.push('visual_audit.missing 必须是空数组');
+      if (!Array.isArray(visualAudit.orphan) || visualAudit.orphan.length) errors.push('visual_audit.orphan 必须是空数组');
     }
   }
   if (sampled.sampled_t3 < sampled.total_t3) errors.push('T3 必须 100% 审计');

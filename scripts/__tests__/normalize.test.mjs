@@ -173,13 +173,30 @@ test('red_flag 保留结构化来源，供成稿解释版本冲突', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('screenshot_path 与 context_links 会保留', () => {
+test('旧 screenshot_path 会转成结构化 visual，并保留 context_links', () => {
   const dir = makeDir();
   writeRaw(dir, 'search-r2-a.jsonl', [finding({ screenshot_path: 'screenshots/a.png', context_links: [{ claim_key: '1:x:y', relationship: 'compares' }] })]);
   run(dir);
   const row = jsonl(dir)[0];
   assert.equal(row.screenshot_path, 'screenshots/a.png');
+  assert.equal(row.visuals[0].screenshot_path, 'screenshots/a.png');
+  assert.equal(row.visuals[0].source_page_url, 'https://example.com/a');
   assert.deepEqual(row.context_links, [{ claim_key: '1:x:y', relationship: 'compares' }]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('结构化图片会去重、合并并写入视觉统计', () => {
+  const dir = makeDir();
+  writeSpec(dir);
+  const visual = { kind: 'table', image_url: 'https://example.com/pricing.png', source_page_url: 'https://example.com/a', caption: '官方套餐表展示三个档位', observed_at: '2026-07-18T00:00:00Z' };
+  writeRaw(dir, 'search-r1-a.jsonl', [finding({ visuals: [visual] })], 'a');
+  writeRaw(dir, 'search-r2-b.jsonl', [finding({ visuals: [visual], context_links: [{ claim_key: '1:other:field', relationship: 'compares' }] })], 'b');
+  run(dir);
+  assert.equal(jsonl(dir)[0].visuals.length, 1);
+  const stats = JSON.parse(fs.readFileSync(path.join(dir, 'stats-summary.json')));
+  assert.equal(stats.total_visuals, 1);
+  assert.equal(stats.by_visual_kind.table, 1);
+  assert.equal(stats.by_subquestion['1'].visuals_count, 1);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

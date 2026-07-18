@@ -12,6 +12,7 @@ import path from 'node:path';
 
 const VALID_TYPES = new Set(['finding', 'gap', 'red_flag', 'agent_done']);
 const VALID_TIERS = new Set(['T1', 'T2', 'T3']);
+const VALID_VISUAL_KINDS = new Set(['chart', 'table', 'diagram', 'ui', 'infographic', 'photo', 'other']);
 const TIER_MAP = { 1: 'T1', 2: 'T2', 3: 'T3', primary: 'T1', secondary: 'T2', tertiary: 'T3' };
 
 function log(message) { console.log(message); }
@@ -150,6 +151,59 @@ function normalizeSources(parsed, fallbackObservedAt) {
   return result.sort((a, b) => `${a.url}:${a.stance}`.localeCompare(`${b.url}:${b.stance}`));
 }
 
+function normalizeVisuals(parsed, sources, fallbackObservedAt) {
+  const input = Array.isArray(parsed.visuals) ? [...parsed.visuals] : [];
+  if (parsed.screenshot_path && !input.some((item) => item?.screenshot_path === parsed.screenshot_path)) {
+    input.push({
+      kind: 'other',
+      screenshot_path: parsed.screenshot_path,
+      source_page_url: sources[0]?.url,
+      caption: '页面截图（旧格式）',
+      observed_at: parsed.observed_at || parsed.ts || fallbackObservedAt,
+    });
+  }
+
+  const visuals = [];
+  const seen = new Set();
+  let invalidCount = 0;
+  for (const item of input) {
+    const kind = String(item?.kind || '').trim();
+    const imageUrl = normalizeUrl(item?.image_url);
+    const screenshotPath = String(item?.screenshot_path || '').trim();
+    const sourcePageUrl = normalizeUrl(item?.source_page_url);
+    const caption = String(item?.caption || '').trim();
+    const observedAt = item?.observed_at || parsed.observed_at || parsed.ts || fallbackObservedAt;
+    const hasOneTarget = Boolean(imageUrl) !== Boolean(screenshotPath);
+    if (!VALID_VISUAL_KINDS.has(kind) || !hasOneTarget || !sourcePageUrl || !caption || !observedAt) {
+      invalidCount++;
+      continue;
+    }
+    const key = imageUrl || screenshotPath;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    visuals.push({
+      kind,
+      source_page_url: sourcePageUrl,
+      ...(imageUrl ? { image_url: imageUrl } : { screenshot_path: screenshotPath }),
+      caption,
+      observed_at: observedAt,
+    });
+  }
+  return {
+    visuals: visuals.sort((a, b) => String(a.image_url || a.screenshot_path).localeCompare(String(b.image_url || b.screenshot_path))),
+    invalidCount,
+  };
+}
+
+function mergeVisuals(items) {
+  const byTarget = new Map();
+  for (const item of items || []) {
+    const key = item?.image_url || item?.screenshot_path;
+    if (key && !byTarget.has(key)) byTarget.set(key, item);
+  }
+  return [...byTarget.values()].sort((a, b) => String(a.image_url || a.screenshot_path).localeCompare(String(b.image_url || b.screenshot_path)));
+}
+
 function normalizeRow(rawLine, identity, fallbackObservedAt) {
   let parsed;
   try { parsed = JSON.parse(rawLine); } catch (error) {
@@ -175,6 +229,8 @@ function normalizeRow(rawLine, identity, fallbackObservedAt) {
     if (!parsed.claim) return { error: 'finding 缺必填字段: claim' };
     const sources = normalizeSources(parsed, fallbackObservedAt);
     if (sources.length === 0) return { error: 'finding 缺有效 sources（至少 1 个 url + tier）' };
+    const { visuals, invalidCount } = normalizeVisuals(parsed, sources, fallbackObservedAt);
+    if (invalidCount > 0) return { error: `finding 有 ${invalidCount} 条无效 visuals` };
     const fieldsCovered = normalizeStringArray(parsed.fields_covered);
     const fallbackKey = `legacy:${normalizeText(parsed.claim)}`;
     const claimKey = String(parsed.claim_key || fallbackKey).trim();
@@ -193,6 +249,7 @@ function normalizeRow(rawLine, identity, fallbackObservedAt) {
         confidence: deriveConfidence(sources),
         dimensions_seen: normalizeDimensions(parsed.dimensions_seen),
         context_links: normalizeContextLinks(parsed.context_links),
+        visuals,
         ...(Array.isArray(parsed.follow_up_questions) ? { follow_up_questions: normalizeStringArray(parsed.follow_up_questions) } : {}),
         ...(parsed.screenshot_path ? { screenshot_path: String(parsed.screenshot_path) } : {}),
       },
@@ -246,6 +303,7 @@ function mergeFindings(rows) {
     existing.follow_up_questions = [...new Set([...(existing.follow_up_questions || []), ...(row.follow_up_questions || [])])].sort();
     existing.dimensions_seen = normalizeDimensions([...existing.dimensions_seen, ...row.dimensions_seen]);
     existing.context_links = normalizeContextLinks([...existing.context_links, ...row.context_links]);
+    existing.visuals = mergeVisuals([...(existing.visuals || []), ...(row.visuals || [])]);
     existing.sources = normalizeSources({ sources: [...existing.sources, ...row.sources] }, existing.ts);
     existing.url = existing.sources[0].url;
     existing.tier = strongestTier(existing.sources);
@@ -330,6 +388,7 @@ function generateStatsSummary(rows, taskSpec) {
       fields_missing: [...criteria.required_fields],
       stale_sources: 0,
       gaps_to_resolve: [],
+      visuals_count: 0,
       meets_criteria: false,
       accepted_limit: Boolean(criteria.known_limit),
       known_limit: criteria.known_limit || null,
@@ -370,6 +429,7 @@ function generateStatsSummary(rows, taskSpec) {
       ...gaps.map((gap) => gap.what),
       ...findings.flatMap((finding) => finding.follow_up_questions || []),
     ])];
+    stats.visuals_count = new Set(findings.flatMap((finding) => (finding.visuals || []).map((visual) => visual.image_url || visual.screenshot_path))).size;
     stats.meets_criteria = stats.unique_urls >= criteria.min_sources
       && stats.t1_count >= criteria.min_t1
       && stats.fields_missing.length === 0;
@@ -385,6 +445,11 @@ function generateStatsSummary(rows, taskSpec) {
   }
 
   const numericRounds = rows.flatMap((row) => row.rounds_seen || (row.round ? [row.round] : []));
+  const visuals = rows.filter((row) => row.type === 'finding').flatMap((row) => row.visuals || []);
+  const uniqueVisuals = new Map();
+  for (const visual of visuals) uniqueVisuals.set(visual.image_url || visual.screenshot_path, visual);
+  const byVisualKind = Object.fromEntries([...VALID_VISUAL_KINDS].map((kind) => [kind, 0]));
+  for (const visual of uniqueVisuals.values()) byVisualKind[visual.kind]++;
   return {
     schema_version: 2,
     generated_at: new Date().toISOString(),
@@ -393,11 +458,13 @@ function generateStatsSummary(rows, taskSpec) {
     total_records: rows.length,
     total_findings: byType.finding,
     total_t1: byTier.T1,
+    total_visuals: uniqueVisuals.size,
     unassigned_findings: unassignedFindings,
     unknown_subquestion_ids: [...unknownSubquestionIds].sort(),
     by_subquestion: bySubquestion,
     by_type: byType,
     by_tier: byTier,
+    by_visual_kind: byVisualKind,
   };
 }
 

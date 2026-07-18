@@ -2,7 +2,7 @@
 
 审计报告草稿的证据链。不补 gap、不重走搜索循环，但允许网页读取工具验证已有 URL（验证 ≠ 重做研究）。
 
-## 4 项审计
+## 5 项审计
 
 | 审计项 | 怎么审 | 失败时怎么报 |
 |--------|--------|-------------|
@@ -10,6 +10,7 @@
 | **幻觉 URL（分层抽样）** | 按 Tier 分层抽样验证 URL 真实存在且包含所述内容。逐个验证 URL 是否可达 | critical（核心结论 URL 假）/ non_critical（次要） |
 | **抹平冲突** | 读 findings 和草稿，看是否所有冲突都被明示（A 源说 X，B 源说 Y 是否被列出） | non_critical |
 | **可信度分级错误** | 对照下方 5 级可信度定义，看草稿里的分级是否合理 | non_critical |
+| **视觉证据（全扫）** | 逐张核对 visuals：图片能打开、本地文件存在、来源页匹配、图注说明用途、图像与结论相关，并且全部已嵌入草稿；装饰图不得充数 | 核心图虚假或错配为 critical；漏图、缺图注、无来源为 non_critical |
 
 ## 审计分级标准
 
@@ -58,9 +59,18 @@
     "total_t2": 0, "sampled_t2": 0,
     "total_t1": 0, "sampled_t1": 0
   },
+  "visual_audit": {
+    "total": 0,
+    "checked": 0,
+    "embedded": 0,
+    "missing": [],
+    "orphan": []
+  },
   "passed": false
 }
 ```
+
+当 `stats-summary.json.total_visuals > 0` 时，`visual_audit` 必须出现，而且视觉证据 100% 全查。`missing` 记录 findings 已登记但草稿没放的图；`orphan` 记录草稿出现但 findings 没登记的图。两者不为空时禁止 `passed:true`。没有视觉证据时可以省略 `visual_audit`。
 
 只有 `critical` 和 `non_critical` 都为空时，`passed` 才能是 `true`。JSON 必须可以被 `JSON.parse` 直接读取，禁止输出注释、代码围栏或额外文字。
 

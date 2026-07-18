@@ -197,18 +197,16 @@ network requests            # 查看所有请求
 
 **PDF：** eval 找链接 `document.querySelectorAll('a[href$=".pdf"]')`，下载后用 Read 工具读取。arXiv 论文直接访问 `arxiv.org/pdf/<论文ID>`。
 
-**图片与视觉内容（分两种角色处理）：** 页面里的图表、截图、产品图、信息图，纯文本提取会丢关键信息。先用 `eval` 提取图片 URL：
+**图片与视觉内容：** 页面里的图表、截图、产品图、信息图，纯文本提取会丢关键信息。每个最终采用的一手页面都要先扫描视觉候选；浏览器页面可用 `eval` 提取图片 URL：
 
 ```bash
 eval "Array.from(document.querySelectorAll('img')).map(i => ({src: i.src, alt: i.alt}))"
 ```
 
-- **证据型**（只为抽事实，如一张定价截图）：用 vision 工具（analyze_image / analyze_data_visualization）分析 → 结论写进报告 → **附原始图片 URL，不存图**。
-- **呈现型**（报告本身需要给人看：产品图 / 对比图表 / 官方规格图 / UI / 示意图）：**归档 + 内嵌**——
-  1. 下载：用 curl 或 WebFetch 把图片 URL 拉到本地（如 `curl -o /tmp/img.jpg "<图片URL>"`）。
-  2. 内嵌：报告里默认用**来源 URL** 内嵌 `![图注](来源URL)`（可移植，GitHub/各 viewer 都能渲染）；本地归档作离线备份。
-  3. 图注必带：来源 URL + 抓取日期 +（如有）视觉分析结论。
+- 原图清晰且 URL 稳定：直接登记 `image_url`，报告使用来源 URL 内嵌，避免无意义的二次截图。
+- 动态状态、交互结果、Canvas 或原图无法取得：截图后搬到任务目录 `screenshots/`，登记 `screenshot_path`。
+- 每张图同时登记 `source_page_url`、抓取日期和解释性图注；图片来源页必须属于该 finding 的证据来源。
+- 只登记任务相关图片，不保存 logo、头像、广告、背景和重复缩略图。
 - **不做**：不对敏感 / 登录后页面截图；归档仅作研究留证，尊重版权。
 
 **DOM 技巧：** 折叠区块和懒加载内容已在 DOM 中，eval 可直接提取。Shadow DOM 和 iframe 在 snapshot 中展开一级，eval 可递归穿透。`scroll down` 触发懒加载后再提取图片 URL。
-

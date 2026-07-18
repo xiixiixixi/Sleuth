@@ -23,10 +23,11 @@ test('search prompt 绑定任务、轮次、唯一文件和子问题', () => {
 
 test('search prompt 强制新证据 schema 与多来源', () => {
   const prompt = run(SEARCH_ARGS);
-  for (const field of ['claim_key', 'subquestion_ids', 'fields_covered', 'sources', 'observed_at', 'context_links', 'source_claim_keys']) {
+  for (const field of ['claim_key', 'subquestion_ids', 'fields_covered', 'sources', 'observed_at', 'context_links', 'source_claim_keys', 'visuals', 'image_url', 'source_page_url', 'visual_scan']) {
     assert.match(prompt, new RegExp(field));
   }
   assert.match(prompt, /多个独立来源放在同一条 finding/);
+  assert.match(prompt, /visual_scan\.pages.*覆盖每个 finding 的每个来源 URL/);
   assert.match(prompt, /red_flag.*sources/);
   assert.match(prompt, /禁止只把 URL 塞进 reason/);
 });
@@ -46,7 +47,14 @@ test('visual-required 形成独立硬要求', () => {
   const prompt = run([...SEARCH_ARGS, '--visual-required']);
   assert.match(prompt, /视觉证据——本任务必需/);
   assert.match(prompt, /至少保存 1 张/);
-  assert.match(prompt, /screenshot_path/);
+  assert.match(prompt, /原图或页面截图/);
+  assert.match(prompt, /visuals\[\]/);
+});
+
+test('默认搜索也会逐页扫描有用图片', () => {
+  const prompt = run(SEARCH_ARGS);
+  assert.match(prompt, /每个被采用的一手页面都要检查图片候选/);
+  assert.match(prompt, /纯装饰图、头像、logo 和广告不要记录/);
 });
 
 test('search 缺关键绑定参数会拒绝生成', () => {
@@ -71,6 +79,7 @@ test('review 直接写 JSON 审计报告', () => {
   const prompt = run(['--role', 'review', '--goal', '审计', '--task-dir', TASK, '--draft-path', `${TASK}/draft.md`]);
   assert.match(prompt, /audit-report\.json/);
   assert.match(prompt, /critical、non_critical、sampled_stats、passed/);
+  assert.match(prompt, /visual_audit/);
   assert.doesNotMatch(prompt, /YAML schema/);
 });
 
@@ -80,6 +89,8 @@ test('synthesize 从 stats 取数字，只写 draft', () => {
   assert.match(prompt, /draft\.md/);
   assert.match(prompt, /没有证据的实体只能写数据缺口/);
   assert.match(prompt, /PRD/);
+  assert.match(prompt, /finding\.visuals\[\]/);
+  assert.match(prompt, /禁止静默略过/);
 });
 
 test('synthesize 接收审计修复意见', () => {

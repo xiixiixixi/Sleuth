@@ -52,7 +52,7 @@ test('SKILL.md 不自动启动 Chrome，并保留安全边界', () => {
 
 test('search.md 定义可审计的多来源 finding', () => {
   const search = read('references/search.md');
-  for (const field of ['claim_key', 'subquestion_ids', 'fields_covered', 'sources', 'source_date', 'observed_at', 'context_links']) {
+  for (const field of ['claim_key', 'subquestion_ids', 'fields_covered', 'sources', 'source_date', 'observed_at', 'context_links', 'visuals', 'image_url', 'source_page_url', 'visual_scan']) {
     assert.match(search, new RegExp(field));
   }
   assert.match(search, /禁止只保留一个网址/);
@@ -93,6 +93,8 @@ test('review.md 使用 JSON 审计并规定抽样率', () => {
   assert.match(review, /Tier 2.*50%/);
   assert.match(review, /Tier 3.*100%/);
   assert.match(review, /都为空时.*passed.*true/);
+  assert.match(review, /visual_audit/);
+  assert.match(review, /视觉证据（全扫）/);
   assert.doesNotMatch(review, /```yaml/);
 });
 
@@ -104,6 +106,7 @@ test('scout 和 tool guide 的职责不重叠', () => {
   assert.match(tool, /network requests/);
   assert.match(tool, /截图默认存到/);
   assert.match(tool, /不要用.*--file/);
+  assert.match(tool, /原图清晰且 URL 稳定/);
 });
 
 test('references 不反向引用 SKILL.md', () => {

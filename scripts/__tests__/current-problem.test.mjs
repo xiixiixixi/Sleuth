@@ -16,7 +16,10 @@ const relationships = {
 
 function source(url) { return { url, tier: 'T1', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' }; }
 function raw(filePath, rows, agent) {
-  fs.writeFileSync(filePath, `${[...rows, { type: 'agent_done', agent, lines_written: rows.length }].map(JSON.stringify).join('\n')}\n`);
+  const normalizedRows = rows.map((row) => row.type === 'finding' && row.visuals === undefined ? { ...row, visuals: [] } : row);
+  const pages = [...new Set(normalizedRows.filter((row) => row.type === 'finding').flatMap((row) => (row.sources || []).map((source) => source.url)))].map((url) => ({ url, candidates_seen: 0, useful_saved: 0, reason: '端到端夹具不访问真实网页图片' }));
+  const visualScan = { status: 'none_useful', candidates_seen: 0, useful_saved: 0, reason: '端到端夹具不访问真实网页图片', pages };
+  fs.writeFileSync(filePath, `${[...normalizedRows, { type: 'agent_done', agent, lines_written: normalizedRows.length, visual_scan: visualScan }].map(JSON.stringify).join('\n')}\n`);
 }
 function run(script, args) { return spawnSync(process.execPath, [path.join(SCRIPTS, script), ...args], { encoding: 'utf8' }); }
 
@@ -24,7 +27,7 @@ for (const [taskType, relationship] of Object.entries(relationships)) {
   test(`${taskType}：R1 缺口被拦截，hint 注入后 R2 形成 ${relationship} 递进并通过最终审计`, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), `sleuth-${taskType}-`));
     fs.mkdirSync(path.join(dir, 'raw'));
-    fs.writeFileSync(path.join(dir, 'task_spec.md'), `task_type: ${taskType}\n\n- [ ] 1. 核心问题\n  - min_sources: 2\n  - min_t1: 1\n  - required_fields: [核心字段]\n  - max_age_days: 365\n`);
+    fs.writeFileSync(path.join(dir, 'task_spec.md'), `task_type: ${taskType}\nvisual_evidence: auto\n\n- [ ] 1. 核心问题\n  - min_sources: 2\n  - min_t1: 1\n  - required_fields: [核心字段]\n  - max_age_days: 365\n`);
     fs.writeFileSync(path.join(dir, 'directions.json'), '[]\n');
     fs.writeFileSync(path.join(dir, 'follow_ups.json'), '[]\n');
     fs.writeFileSync(path.join(dir, 'progress.json'), JSON.stringify({ current_round: 1, stats: {} }));

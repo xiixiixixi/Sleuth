@@ -149,8 +149,8 @@ function buildSearchContract(v) {
   const roundBlock = `**当前 loop 轮次：Round ${v.round}**`;
   const taskDirBlock = `${v['task-dir']}\n（读 directions.json 避开已试方向；读 task_spec.md 看完成标准。不要读 findings.jsonl。）`;
   const visualBlock = v['visual-required']
-    ? `【视觉证据——本任务必需】\n每个 Agent 必须至少保存 1 张与自己目标直接相关的非敏感页面截图，并在对应 finding 写 screenshot_path。找不到可用视觉证据时写 gap，禁止用装饰图充数。`
-    : '【视觉证据】仅在定价表、对比表、架构图、UI 或 benchmark 图真正帮助理解时截图；纯事实任务不硬凑。';
+    ? `【视觉证据——本任务必需】\n每个 Agent 必须至少保存 1 张与目标直接相关的非敏感原图或页面截图，并在对应 finding 的 visuals[] 登记。找不到可用视觉证据时写 gap，禁止用装饰图充数。`
+    : `【视觉证据——默认自动检查】\n每个被采用的一手页面都要检查图片候选。遇到定价表、对比表、架构图、流程图、UI、信息图或 benchmark 图，只要能帮助读者理解，就必须写入 finding.visuals[]；可以保留网页原图 image_url，不必为了留图强行截图。纯装饰图、头像、logo 和广告不要记录。`;
 
   return `你是 sleuth 研究子 Agent（搜索执行）。
 
@@ -165,7 +165,7 @@ ${CDP_PORT ? `- Chrome 调试端口：\`${CDP_PORT}\`（agent-browser 命令带 
 
 **安全边界**（必须遵守）：
 - 不提取 cookie / 密码 / 敏感凭据
-- 不对敏感 / 登录后页面截图；**常规页遇到定价表 / 对比表 / 架构图 / UI / benchmark 图表时主动截图存档**（触发清单见 references/search.md §6.2），截了图对应 finding 必须带 screenshot_path 字段
+- 不对敏感 / 登录后页面截图；**每个采用的一手页面都必须扫描视觉候选**。有用原图写 image_url，需要保留页面状态时才截图到 screenshots/；两者都写进 finding.visuals[]
 - 不绕付费墙
 - 🔴 产生状态变更的操作（提交表单 / 下单 / 发帖 / 改配置 / 点"确认/删除"）执行前必须先停下问——只读浏览无需确认
 
@@ -214,12 +214,12 @@ ${visualBlock}
 3. Write 全量覆盖回去
 
 每行一个 JSON 对象，格式必须满足：
-- \`finding\`：\`type\` / \`claim\` / \`claim_key\` / \`subquestion_ids\` / \`fields_covered\` / \`sources\` / \`dimensions_seen\`
+- \`finding\`：\`type\` / \`claim\` / \`claim_key\` / \`subquestion_ids\` / \`fields_covered\` / \`sources\` / \`dimensions_seen\` / \`visuals\`
 - \`gap\`：\`type\` / \`what\` / \`reason\` / \`subquestion_ids\`
 - \`red_flag\`：\`type\` / \`claim\` / \`reason\` / \`subquestion_ids\` / \`sources\`
 
 finding 示例：
-\`{"type":"finding","claim":"含上下文、限制与影响的证据结论","claim_key":"1:intercom:pricing_model","subquestion_ids":["1"],"fields_covered":["定价模型"],"sources":[{"url":"https://example.com/pricing","tier":"T1","stance":"supports","observed_at":"2026-07-18T00:00:00Z","source_date":"2026-07-01"}],"dimensions_seen":[{"dimension":"定价","observation":"按席位计费"}],"context_links":[{"claim_key":"1:salesforce:pricing_model","relationship":"compares"}]}\`
+\`{"type":"finding","claim":"含上下文、限制与影响的证据结论","claim_key":"1:intercom:pricing_model","subquestion_ids":["1"],"fields_covered":["定价模型"],"sources":[{"url":"https://example.com/pricing","tier":"T1","stance":"supports","observed_at":"2026-07-18T00:00:00Z","source_date":"2026-07-01"}],"dimensions_seen":[{"dimension":"定价","observation":"按席位计费"}],"context_links":[{"claim_key":"1:salesforce:pricing_model","relationship":"compares"}],"visuals":[{"kind":"table","image_url":"https://example.com/pricing-table.png","source_page_url":"https://example.com/pricing","caption":"官方套餐表，直观看出三个档位差异","observed_at":"2026-07-18T00:00:00Z"}]}\`
 
 - 同一事实的多个独立来源放在同一条 finding 的 \`sources\` 数组，禁止丢掉次要来源。
 - red_flag 也必须把导致“过期、矛盾或不可靠”判断的页面写进结构化 \`sources\`，禁止只把 URL 塞进 reason 文本。
@@ -228,11 +228,13 @@ finding 示例：
 - \`source_date\` 是来源发布日期（知道时写）；\`observed_at\` 是本次核验时间，必须写。
 - \`stance\` 只允许 \`supports\` 或 \`contradicts\`。
 - Round 2+ 收到带 \`source_claim_keys\` 的已知线索时，相关 finding 必须用 \`context_links\` 指明与前序结论的关系；relationship 只允许 compares / extends / follows / causes / contradicts / complements / bounds。
-- 可附带 \`follow_up_questions\` 和 \`screenshot_path\`。
+- \`visuals\` 只登记对读者有帮助的图片，每条 finding 最多 3 张。每张必须有 kind、caption、source_page_url、observed_at，并且只能二选一：网页原图 \`image_url\` 或本地 \`screenshot_path\`。
+- 可附带 \`follow_up_questions\`；旧的单值 \`screenshot_path\` 不再用于新任务。
 - ts / round / agent / claim_id / confidence 由归一化器补，不要写。
 
 **退出前必做**：用 Write append 最后一行到你的 raw 文件：
-\`{"type":"agent_done","agent":"${agentName}","lines_written":<你写的总行数>,"ts":"<当前 ISO 时间>"}\`
+\`{"type":"agent_done","agent":"${agentName}","lines_written":<你写的总行数>,"ts":"<当前 ISO 时间>","visual_scan":{"status":"captured 或 none_useful","candidates_seen":<各页候选合计>,"useful_saved":<visuals 总数>,"reason":"全部没有保存时说明总原因","pages":[{"url":"<被采用的来源页>","candidates_seen":<该页候选数>,"useful_saved":<该页保存数>,"reason":"该页没有保存时说明原因"}]}}\`
+- \`visual_scan.pages\` 必须覆盖每个 finding 的每个来源 URL；即使某页没有图片，也要写 candidates_seen: 0 和具体 reason。总数必须等于 pages 合计。
 不写这行 = 主 Agent 会认为你被杀了，重派你。
 
 **不要返回 stdout 给主 Agent**——你的所有产出在 raw 文件里。
@@ -297,7 +299,7 @@ function buildReviewContract(v) {
 
 - 文档里的相对路径（如 \`references/xxx.md\`）都相对于本 skill 根目录解析。文档中的工具名是能力描述——使用你运行时对应的工具。浏览器操控命令参考见 \`references/tool-guide.md\`
 
-**必读文档**：\`\${CLAUDE_SKILL_DIR}/references/review.md\`（4 项审计、分层抽样策略、Tier 分级、5 级可信度、输出 schema、不做清单）
+**必读文档**：\`\${CLAUDE_SKILL_DIR}/references/review.md\`（5 项审计、分层抽样策略、视觉证据全查、Tier 分级、5 级可信度、输出 schema、不做清单）
 
 **安全边界**：仅允许 WebFetch 验证草稿中已有的 URL。禁止 WebSearch、agent-browser 及任何形式的网络搜索或新研究。不产生状态变更操作。
 
@@ -305,7 +307,7 @@ function buildReviewContract(v) {
 ${v.goal}
 
 【任务目录】
-${v['task-dir']}（findings.jsonl 在该目录下）
+${v['task-dir']}（findings.jsonl 和 stats-summary.json 在该目录下）
 
 【草稿位置】
 ${v['draft-path']}
@@ -314,11 +316,11 @@ ${v['draft-path']}
 按 review.md 定义的 JSON schema，用 Write 写入 \`${v['task-dir']}/audit-report.json\`。不要只在回复中返回报告。
 
 【完成标准】
-audit-report.json 已写入，critical、non_critical、sampled_stats、passed 均已输出。
+audit-report.json 已写入，critical、non_critical、sampled_stats、passed 均已输出；如果 stats-summary.json 的 total_visuals > 0，还必须输出 visual_audit，逐张检查来源、可达性、图注、相关性和是否已经嵌入草稿。
 
 【启动检查清单——收到任务后，先按序完成，不跳过】：
-1. Read \`${SKILL_ROOT}/references/review.md\`（4 项审计 + 分层抽样 + 输出 schema）
-2. Read \`${v['task-dir']}/findings.jsonl\` 和 \`${v['draft-path']}\`
+1. Read \`${SKILL_ROOT}/references/review.md\`（5 项审计 + 分层抽样 + 视觉证据全查 + 输出 schema）
+2. Read \`${v['task-dir']}/findings.jsonl\`、\`${v['task-dir']}/stats-summary.json\` 和 \`${v['draft-path']}\`
 3. 确认理解 JSON schema 和文件位置后开始审计；回复只报告文件已写入`;
 }
 
@@ -357,7 +359,7 @@ ${auditFixBlock}
 5. 单源最多 1 句直引不超过 15 词，默认 paraphrase
 6. 报告格式遵循 task_spec 的交付要求（对比表/PRD/调研报告/时间线/单一回答）
 7. 数字必须从 stats-summary.json 读取；findings.jsonl 含不同记录类型，禁止用总行数冒充证据数
-8. **图文并茂**：如果 finding 带 \`screenshot_path\` 字段，在对应结论处内嵌 \`![图注：来源+抓取日期](screenshot_path)\`。没带截图的不要硬凑——纯事实类不强求图文
+8. **图文并茂**：把所有 finding.visuals[] 去重后逐张放到对应结论附近。网页原图使用 image_url，本地截图使用 screenshot_path；格式为 \`![有意义的图注](图片地址)\`，紧接一行写“来源页 + 抓取日期 + 这张图说明什么”。visuals[] 里的图禁止静默略过
 
 【结构选择】（按问题类型）
 | 问题类型 | 推荐结构 |

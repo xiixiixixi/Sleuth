@@ -35,7 +35,7 @@ node scripts/validate-state.mjs <task-dir> --phase 1.5
 - `task_type`：`comparison / deep_dive / timeline / causal / problem_solving / enumeration / debate / general`
 - 每个子问题：`- [ ] N. 标题`
 - 每个子问题必须声明：`min_sources`、`min_t1`、`required_fields`、`max_age_days`
-- 需要图文证据时声明 `visual_evidence: required`，派搜索时加 `--visual-required`
+- `visual_evidence` 必须声明：默认 `auto`（每个一手页面扫描有用图片）；结论依赖图片时用 `required` 并在派搜索时加 `--visual-required`；只有用户明确不要图片或内容敏感时才可用 `off`，并写 `visual_evidence_reason`
 - 无法取得但允许带限制交付时，只能在对应子问题下写 `known_limit`，禁止用全局限制放行全部问题
 
 同时初始化 `progress.json`、`directions.json`、`follow_ups.json`，再检查：
@@ -67,7 +67,7 @@ node scripts/validate-state.mjs <task-dir> --phase 3-findings
 node scripts/calc-novelty.mjs <task-dir>
 ```
 
-`raw/` 是唯一原始账本；`normalize.mjs` 每次确定性重建结果。禁止修改 `findings.jsonl`，禁止凭印象改统计。
+`raw/` 是唯一原始账本；`normalize.mjs` 每次确定性重建结果。禁止修改 `findings.jsonl`，禁止凭印象改统计。每个搜索 Agent 必须在 `agent_done.visual_scan.pages[]` 逐页说明检查了多少图片候选；有用原图或截图进入 finding 的 `visuals[]`。
 
 ## 4. 边界反馈与下一轮
 
@@ -106,6 +106,7 @@ node scripts/validate-state.mjs <task-dir> --phase 8-audit
 - `non_critical`：把问题作为 `--audit-fix` 重派合成，再重新审查。
 - `critical`：带 `suggested_search` 回到搜索轮次。
 - 只有 `8-audit` 通过才能交付 `draft.md`；禁止把“未通过审查”说成完成。
+- `visuals[]` 中登记的图片必须全部进入草稿，并由 Review 逐张检查来源、图注和相关性。
 
 ## 硬边界
 
