@@ -1,313 +1,219 @@
-/**
- * normalize.mjs 测试。
- *
- * Integration 风格：execFileSync 跑脚本，验证输出文件。
- */
+/** normalize.mjs 的两轮、去重、完成条件与兼容性测试。 */
 
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const SCRIPT = fileURLToPath(new URL('../normalize.mjs', import.meta.url));
 
-/** 创建临时 task-dir + raw/ 文件 */
-function setupTaskDir(files) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sleuth-test-'));
-  const rawDir = path.join(dir, 'raw');
-  fs.mkdirSync(rawDir, { recursive: true });
-  for (const [name, content] of Object.entries(files)) {
-    fs.writeFileSync(path.join(rawDir, name), content, 'utf8');
-  }
+function makeDir() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sleuth-normalize-'));
+  fs.mkdirSync(path.join(dir, 'raw'));
   return dir;
 }
 
-import fs from 'node:fs';
-
-function runNormalize(taskDir) {
-  return execFileSync('node', [SCRIPT, taskDir], {
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+function writeRaw(dir, file, rows, agent = 'agent') {
+  const sentinel = { type: 'agent_done', agent, lines_written: rows.length, ts: '2026-07-18T00:00:00Z' };
+  fs.writeFileSync(path.join(dir, 'raw', file), `${[...rows, sentinel].map(JSON.stringify).join('\n')}\n`);
 }
 
-function readJsonl(filePath) {
-  return readFileSync(filePath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+function finding(overrides = {}) {
+  return {
+    type: 'finding',
+    claim: '这是包含背景、限制条件和场景影响的完整证据结论，用来验证多轮研究的结构化数据是否正确。',
+    claim_key: '1:entity:field',
+    subquestion_ids: ['1'],
+    fields_covered: ['价格'],
+    sources: [{ url: 'https://example.com/a', tier: 'T1', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' }],
+    dimensions_seen: [{ dimension: '价格/合同条款', observation: '公开定价' }],
+    ...overrides,
+  };
 }
 
-function readJson(filePath) {
-  return JSON.parse(readFileSync(filePath, 'utf8'));
+function writeSpec(dir, extra = '') {
+  fs.writeFileSync(path.join(dir, 'task_spec.md'), `# task\n\ntask_type: comparison\n\n- [ ] 1. 中文价格问题\n  - min_sources: 2\n  - min_t1: 1\n  - required_fields: [价格, 限制]\n  - max_age_days: 365\n${extra}`);
 }
 
-// ===== 基本流程 =====
+function run(dir) {
+  return execFileSync('node', [SCRIPT, dir], { encoding: 'utf8' });
+}
 
-test('normalize: reads raw/ → writes findings.jsonl + stats-summary.json', () => {
-  const dir = setupTaskDir({
-    'search-intercom.jsonl': JSON.stringify({ type: 'finding', claim: 'Intercom 定价 $1', url: 'https://intercom.com/pricing', tier: 'T1', confidence: '已验证事实', dimensions_seen: [{ dimension: '定价', observation: '$1/seat' }] }) + '\n' +
-      JSON.stringify({ type: 'agent_done', agent: 'intercom', lines_written: 1, ts: '2026-07-01T00:00:00Z' }) + '\n',
-  });
+function jsonl(dir) {
+  return fs.readFileSync(path.join(dir, 'findings.jsonl'), 'utf8').split('\n').filter(Boolean).map(JSON.parse);
+}
 
-  const out = runNormalize(dir);
-  assert.ok(existsSync(path.join(dir, 'findings.jsonl')), 'findings.jsonl must exist');
-  assert.ok(existsSync(path.join(dir, 'stats-summary.json')), 'stats-summary.json must exist');
-
-  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
-  assert.equal(findings.length, 1);
-  assert.equal(findings[0].type, 'finding');
-  assert.equal(findings[0].claim, 'Intercom 定价 $1');
-  assert.ok(findings[0].claim_id, 'must have claim_id');
-  assert.equal(findings[0].agent, 'intercom');
-
+test('normalize 确定性重建：同一批 raw 重跑不会追加', () => {
+  const dir = makeDir();
+  writeRaw(dir, 'search-r1-a.jsonl', [finding()]);
+  run(dir);
+  const first = fs.readFileSync(path.join(dir, 'findings.jsonl'), 'utf8');
+  run(dir);
+  const second = fs.readFileSync(path.join(dir, 'findings.jsonl'), 'utf8');
+  assert.equal(second, first);
+  assert.equal(jsonl(dir).length, 1);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('normalize: agent_done sentinel does not enter findings.jsonl', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl': JSON.stringify({ type: 'finding', claim: 'test', url: 'https://example.com', tier: 'T1', confidence: '已验证事实' }) + '\n' +
-      JSON.stringify({ type: 'agent_done', agent: 'test', lines_written: 1, ts: '2026-07-01T00:00:00Z' }) + '\n',
-  });
-
-  runNormalize(dir);
-  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
-  assert.equal(findings.length, 1, 'only the finding, not the sentinel');
-  assert.equal(findings[0].type, 'finding');
-
+test('两轮同一 claim_key 合并来源，并保留 rounds_seen', () => {
+  const dir = makeDir();
+  writeSpec(dir);
+  writeRaw(dir, 'search-r1-a.jsonl', [finding({
+    fields_covered: ['价格'],
+    sources: [{ url: 'https://vendor.example/pricing', tier: 'T1', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' }],
+  })], 'a');
+  writeRaw(dir, 'search-r2-b.jsonl', [finding({
+    claim: '同一结论的第二轮表述更完整，并补充独立来源、限制和跨实体对比，不能被当作新的事实重复计数。',
+    fields_covered: ['限制'],
+    sources: [{ url: 'https://review.example/analysis', tier: 'T2', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' }],
+    context_links: [{ claim_key: '1:other:field', relationship: 'compares' }],
+  })], 'b');
+  run(dir);
+  const rows = jsonl(dir);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].rounds_seen, [1, 2]);
+  assert.equal(rows[0].sources.length, 2);
+  assert.equal(rows[0].confidence, '已验证事实');
+  assert.deepEqual(rows[0].fields_covered, ['价格', '限制']);
+  const stats = JSON.parse(fs.readFileSync(path.join(dir, 'stats-summary.json')));
+  assert.equal(stats.total_findings, 1);
+  assert.equal(stats.by_subquestion['1'].meets_criteria, true);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// ===== 字段归一化 =====
-
-test('normalize: integer tier → T1/T2/T3', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl': JSON.stringify({ type: 'finding', claim: 'a', url: 'https://a.com', tier: 1 }) + '\n' +
-      JSON.stringify({ type: 'finding', claim: 'b', url: 'https://b.com', tier: 2 }) + '\n' +
-      JSON.stringify({ type: 'finding', claim: 'c', url: 'https://c.com', tier: 3 }) + '\n',
-  });
-
-  runNormalize(dir);
-  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
-  assert.equal(findings[0].tier, 'T1');
-  assert.equal(findings[1].tier, 'T2');
-  assert.equal(findings[2].tier, 'T3');
-
+test('完成条件只认 subquestion_ids 和 fields_covered，不猜中文标题', () => {
+  const dir = makeDir();
+  writeSpec(dir);
+  writeRaw(dir, 'search-r1-a.jsonl', [finding({ subquestion_ids: [], fields_covered: ['价格', '限制'] })]);
+  run(dir);
+  const stats = JSON.parse(fs.readFileSync(path.join(dir, 'stats-summary.json')));
+  assert.equal(stats.unassigned_findings, 1);
+  assert.equal(stats.by_subquestion['1'].findings_count, 0);
+  assert.equal(stats.by_subquestion['1'].meets_criteria, false);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('normalize: non-standard type → forced to finding', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl': JSON.stringify({ type: 'funding_round', claim: 'raised $10M', url: 'https://a.com', tier: 'T1' }) + '\n',
-  });
-
-  runNormalize(dir);
-  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
-  assert.equal(findings[0].type, 'finding', 'non-standard type forced to finding');
-
+test('required_fields 全覆盖后可完成，缺一个字段则不能完成', () => {
+  const dir = makeDir();
+  writeSpec(dir);
+  writeRaw(dir, 'search-r1-a.jsonl', [finding({
+    fields_covered: ['价格'],
+    sources: [
+      { url: 'https://a.example/x', tier: 'T1', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' },
+      { url: 'https://b.example/x', tier: 'T2', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' },
+    ],
+  })]);
+  run(dir);
+  let stats = JSON.parse(fs.readFileSync(path.join(dir, 'stats-summary.json')));
+  assert.deepEqual(stats.by_subquestion['1'].fields_missing, ['限制']);
+  assert.equal(stats.by_subquestion['1'].meets_criteria, false);
+  writeRaw(dir, 'search-r2-b.jsonl', [finding({ claim_key: '1:entity:limit', fields_covered: ['限制'], sources: [{ url: 'https://c.example/x', tier: 'T2', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' }] })]);
+  run(dir);
+  stats = JSON.parse(fs.readFileSync(path.join(dir, 'stats-summary.json')));
+  assert.deepEqual(stats.by_subquestion['1'].fields_missing, []);
+  assert.equal(stats.by_subquestion['1'].meets_criteria, true);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('normalize: missing confidence → inferred from tier', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl': JSON.stringify({ type: 'finding', claim: 'a', url: 'https://a.com', tier: 'T1' }) + '\n' +
-      JSON.stringify({ type: 'finding', claim: 'b', url: 'https://b.com', tier: 'T3' }) + '\n',
-  });
-
-  runNormalize(dir);
-  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
-  assert.equal(findings[0].confidence, '高置信推断', 'T1/T2 → 高置信推断');
-  assert.equal(findings[1].confidence, '未确认线索', 'T3 → 未确认线索');
-
+test('过期来源不计入完成标准', () => {
+  const dir = makeDir();
+  writeSpec(dir);
+  writeRaw(dir, 'search-r1-a.jsonl', [finding({
+    fields_covered: ['价格', '限制'],
+    sources: [
+      { url: 'https://old-a.example/x', tier: 'T1', stance: 'supports', observed_at: '2020-01-01T00:00:00Z' },
+      { url: 'https://old-b.example/x', tier: 'T2', stance: 'supports', observed_at: '2020-01-01T00:00:00Z' },
+    ],
+  })]);
+  run(dir);
+  const stats = JSON.parse(fs.readFileSync(path.join(dir, 'stats-summary.json')));
+  assert.equal(stats.by_subquestion['1'].unique_urls, 0);
+  assert.equal(stats.by_subquestion['1'].stale_sources, 2);
+  assert.equal(stats.by_subquestion['1'].meets_criteria, false);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('normalize: string dimensions_seen → object array', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl': JSON.stringify({ type: 'finding', claim: 'a', url: 'https://a.com', tier: 'T1', dimensions_seen: ['price', 'date'] }) + '\n',
-  });
-
-  runNormalize(dir);
-  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
-  assert.ok(Array.isArray(findings[0].dimensions_seen));
-  assert.equal(findings[0].dimensions_seen[0].dimension, 'price');
-  assert.equal(findings[0].dimensions_seen[1].dimension, 'date');
-
+test('相同结论的支持与反对来源会生成冲突信息', () => {
+  const dir = makeDir();
+  writeRaw(dir, 'search-r1-a.jsonl', [finding({ sources: [
+    { url: 'https://a.example/x', tier: 'T1', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' },
+    { url: 'https://b.example/x', tier: 'T1', stance: 'contradicts', observed_at: '2026-07-18T00:00:00Z' },
+  ] })]);
+  run(dir);
+  assert.equal(jsonl(dir)[0].confidence, '冲突信息');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('normalize: URL normalized (lowercase host, no utm)', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl': JSON.stringify({ type: 'finding', claim: 'a', url: 'https://Example.com/pricing?utm_source=foo&id=1', tier: 'T1' }) + '\n',
-  });
-
-  runNormalize(dir);
-  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
-  assert.ok(findings[0].url.includes('example.com'), 'host lowercased');
-  assert.ok(!findings[0].url.includes('utm_'), 'utm params removed');
-
+test('gap 和 follow_up 按 subquestion_ids 进入对应缺口', () => {
+  const dir = makeDir();
+  writeSpec(dir);
+  writeRaw(dir, 'search-r1-a.jsonl', [
+    finding({ follow_up_questions: ['还要核对合同限制'] }),
+    { type: 'gap', what: '企业价未公开', reason: '需联系销售', subquestion_ids: ['1'] },
+  ]);
+  run(dir);
+  const gaps = JSON.parse(fs.readFileSync(path.join(dir, 'stats-summary.json'))).by_subquestion['1'].gaps_to_resolve;
+  assert.deepEqual(gaps.sort(), ['企业价未公开', '还要核对合同限制'].sort());
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// ===== screenshot_path 透传（图文并茂机制）=====
-
-test('normalize: screenshot_path preserved when present', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl': JSON.stringify({ type: 'finding', claim: 'llama.cpp 定价免费开源', url: 'https://github.com/ggerganov/llama.cpp', tier: 'T1', confidence: '已验证事实', screenshot_path: 'screenshots/llamacpp-readme.png' }) + '\n' +
-      JSON.stringify({ type: 'agent_done', agent: 'test', lines_written: 1, ts: '2026-07-13T00:00:00Z' }) + '\n',
-  });
-
-  runNormalize(dir);
-  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
-  assert.equal(findings.length, 1);
-  assert.equal(findings[0].screenshot_path, 'screenshots/llamacpp-readme.png', 'screenshot_path must be preserved');
-
+test('red_flag 保留结构化来源，供成稿解释版本冲突', () => {
+  const dir = makeDir();
+  writeRaw(dir, 'search-r1-a.jsonl', [{
+    type: 'red_flag', claim: '旧版数字不能代表当前产品', reason: '产品代际不同', subquestion_ids: ['1'],
+    sources: [{ url: 'https://legacy.example/limit', tier: 'T1', stance: 'supports', observed_at: '2026-07-18T00:00:00Z', source_date: '2024-01-01' }],
+  }]);
+  run(dir);
+  const row = jsonl(dir)[0];
+  assert.equal(row.type, 'red_flag');
+  assert.equal(row.sources[0].url, 'https://legacy.example/limit');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('normalize: screenshot_path absent when not provided (backward compat)', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl': JSON.stringify({ type: 'finding', claim: 'plain finding no screenshot', url: 'https://a.com', tier: 'T1', confidence: '已验证事实' }) + '\n' +
-      JSON.stringify({ type: 'agent_done', agent: 'test', lines_written: 1, ts: '2026-07-13T00:00:00Z' }) + '\n',
-  });
-
-  runNormalize(dir);
-  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
-  assert.equal(findings.length, 1);
-  assert.equal(findings[0].screenshot_path, undefined, 'screenshot_path key should not exist when not provided');
-
+test('screenshot_path 与 context_links 会保留', () => {
+  const dir = makeDir();
+  writeRaw(dir, 'search-r2-a.jsonl', [finding({ screenshot_path: 'screenshots/a.png', context_links: [{ claim_key: '1:x:y', relationship: 'compares' }] })]);
+  run(dir);
+  const row = jsonl(dir)[0];
+  assert.equal(row.screenshot_path, 'screenshots/a.png');
+  assert.deepEqual(row.context_links, [{ claim_key: '1:x:y', relationship: 'compares' }]);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// ===== gap / red_flag =====
-
-test('normalize: gap and red_flag pass through', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl': JSON.stringify({ type: 'gap', what: 'missing pricing', reason: 'no official source' }) + '\n' +
-      JSON.stringify({ type: 'red_flag', claim: 'conflicting prices', reason: 'A says $1, B says $2' }) + '\n',
-  });
-
-  runNormalize(dir);
-  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
-  assert.equal(findings.length, 2);
-  assert.equal(findings[0].type, 'gap');
-  assert.equal(findings[1].type, 'red_flag');
-
+test('旧文件名不被静默算成第 1 轮', () => {
+  const dir = makeDir();
+  writeRaw(dir, 'search-legacy.jsonl', [finding()]);
+  run(dir);
+  const row = jsonl(dir)[0];
+  assert.equal(row.round, null);
+  assert.equal(row.legacy_round_unknown, true);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// ===== parse errors =====
-
-test('normalize: malformed lines go to parse_errors.log', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl': '{ broken json\n' +
-      JSON.stringify({ type: 'finding', claim: 'good', url: 'https://a.com', tier: 'T1' }) + '\n',
-  });
-
-  runNormalize(dir);
-  assert.ok(existsSync(path.join(dir, 'parse_errors.log')), 'parse_errors.log must exist');
-  const errors = readFileSync(path.join(dir, 'parse_errors.log'), 'utf8');
-  assert.ok(errors.includes('broken json'), 'error must mention the bad line');
-
+test('非法 type 被拒绝，不伪装成 finding', () => {
+  const dir = makeDir();
+  writeRaw(dir, 'search-r1-a.jsonl', [{ type: 'funding_round', claim: 'x', url: 'https://x.example', tier: 'T1' }]);
+  const result = spawnSync('node', [SCRIPT, dir], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(fs.readFileSync(path.join(dir, 'parse_errors.log'), 'utf8'), /type 无效/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('normalize: finding missing required fields → rejected', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl': JSON.stringify({ type: 'finding', claim: 'no url', tier: 'T1' }) + '\n',
-  });
-
-  // 脚本在 >50% 行被拒时 exit(1)，这是预期行为
-  try {
-    runNormalize(dir);
-  } catch {
-    // exit(1) 是正常的——表示 Agent 结果质量太差
-  }
-  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
-  assert.equal(findings.length, 0, 'finding without url should be rejected');
-
+test('坏 JSON 写入 parse_errors.log，仍保留有效行', () => {
+  const dir = makeDir();
+  fs.writeFileSync(path.join(dir, 'raw', 'search-r1-a.jsonl'), `{bad}\n${JSON.stringify(finding())}\n${JSON.stringify({ type: 'agent_done', agent: 'a', lines_written: 2 })}\n`);
+  run(dir);
+  assert.equal(jsonl(dir).length, 1);
+  assert.match(fs.readFileSync(path.join(dir, 'parse_errors.log'), 'utf8'), /JSON parse error/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// ===== stats-summary.json =====
-
-test('normalize: stats-summary.json has correct structure', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl':
-      JSON.stringify({ type: 'finding', claim: 'Intercom pricing $1', url: 'https://intercom.com/p1', tier: 'T1' }) + '\n' +
-      JSON.stringify({ type: 'finding', claim: 'Intercom features', url: 'https://intercom.com/p2', tier: 'T1' }) + '\n' +
-      JSON.stringify({ type: 'gap', what: 'missing', reason: 'none' }) + '\n',
-  });
-
-  // 写 task_spec.md
-  fs.writeFileSync(path.join(dir, 'task_spec.md'),
-    '# task_spec\n\n## 子问题\n\n- [ ] 1. Intercom 定价\n  - min_sources: 2\n  - min_t1: 1\n  - required_fields: []\n  - max_age_days: 365\n',
-    'utf8');
-
-  runNormalize(dir);
-  const summary = readJson(path.join(dir, 'stats-summary.json'));
-
-  assert.ok(summary.total_findings !== undefined);
-  assert.ok(summary.by_type);
-  assert.ok(summary.by_tier);
-  assert.equal(summary.by_type.finding, 2);
-  assert.equal(summary.by_type.gap, 1);
-
+test('缺 raw 或缺参数时非零退出', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sleuth-normalize-missing-'));
+  assert.notEqual(spawnSync('node', [SCRIPT, dir]).status, 0);
+  assert.equal(spawnSync('node', [SCRIPT]).status, 2);
   fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('normalize: gaps_to_resolve populated from follow_up_questions and gaps', () => {
-  const dir = setupTaskDir({
-    'search-test.jsonl':
-      JSON.stringify({ type: 'finding', claim: 'Intercom pricing $1', url: 'https://intercom.com/p1', tier: 'T1', follow_up_questions: ['Intercom API 限制?'] }) + '\n' +
-      JSON.stringify({ type: 'gap', what: 'Intercom 企业定价缺失', reason: '联系销售' }) + '\n',
-  });
-
-  fs.writeFileSync(path.join(dir, 'task_spec.md'),
-    '# task_spec\n\n## 子问题\n\n- [ ] 1. Intercom 定价\n  - min_sources: 2\n  - min_t1: 1\n  - required_fields: []\n  - max_age_days: 365\n',
-    'utf8');
-
-  runNormalize(dir);
-  const summary = readJson(path.join(dir, 'stats-summary.json'));
-
-  // gaps_to_resolve 应该包含 follow_up_questions + gap 的 what
-  const gaps = summary.by_subquestion['1'].gaps_to_resolve;
-  assert.ok(gaps.length >= 2, `gaps_to_resolve should have follow_up + gap, got ${gaps.length}`);
-  assert.ok(gaps.some((g) => g.includes('API 限制')), 'should contain follow_up_question');
-  assert.ok(gaps.some((g) => g.includes('企业定价')), 'should contain gap what');
-
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-// ===== append behavior =====
-
-test('normalize: appends to existing findings.jsonl (not overwrite)', () => {
-  const dir = setupTaskDir({
-    'search-round2.jsonl': JSON.stringify({ type: 'finding', claim: 'round2 finding', url: 'https://r2.com', tier: 'T2' }) + '\n',
-  });
-
-  // 先写一个已有的 findings.jsonl
-  fs.writeFileSync(path.join(dir, 'findings.jsonl'),
-    JSON.stringify({ type: 'finding', claim: 'existing', url: 'https://old.com', tier: 'T1' }) + '\n',
-    'utf8');
-
-  runNormalize(dir);
-  const findings = readJsonl(path.join(dir, 'findings.jsonl'));
-  assert.equal(findings.length, 2, 'should have 1 existing + 1 new');
-  assert.equal(findings[0].claim, 'existing');
-  assert.equal(findings[1].claim, 'round2 finding');
-
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-// ===== error cases =====
-
-test('normalize: exits non-zero when raw/ missing', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sleuth-test-'));
-  assert.throws(() => runNormalize(dir));
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('normalize: exits non-zero when task-dir arg missing', () => {
-  assert.throws(() => execFileSync('node', [SCRIPT], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }));
 });

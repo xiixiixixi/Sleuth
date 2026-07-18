@@ -20,7 +20,7 @@
 
 - **中文硬规则用 强势动词**：必须 / 绝不 / 不要 / 禁止 / 不允许
 - **每份文档独立可读**
-- **跟 SKILL.md 的硬规则对齐**：SKILL.md 是根，references/ 是各子 Agent 的展开
+- **跟主流程的硬规则对齐**：references/ 是各子 Agent 的自包含展开，但不反向引用 SKILL.md
 - **引用调研结论时附 URL**：`[结论](https://来源URL)`，单源最多 15 词直引
 
 ## ANTI-PATTERNS
@@ -32,5 +32,5 @@
 
 ## NOTES
 
-- **文档拆分历史**：原 research.md（363 行）逐步拆为现在的 search.md + boundary.md + review.md + tool-guide.md 四份独立文档；合成规则移入 SKILL.md §7
+- **当前拆分**：scout/search/boundary/review/tool-guide 五份；合成规则由 spawn-subagent.mjs 的 synthesize prompt 内联
 - **每份子 Agent 文档自包含**：子 Agent 只读被指定的那一份 references，不跨文档跳转

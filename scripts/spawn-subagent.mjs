@@ -14,7 +14,8 @@
  *   node spawn-subagent.mjs --role search --goal <text> \
  *     [--must-verify <fact> ...] [--known-clue <clue> ...] \
  *     [--deliverable <text>] [--stop-criteria <text> ...] \
- *     [--task-dir <path>] [--round <int>]
+ *     --task-dir <path> --agent-name <name> --round <int>
+ *     --subquestion-id <id> [--subquestion-id <id> ...]
  *
  *   # 边界 Agent
  *   node spawn-subagent.mjs --role boundary --goal <text> --task-dir <path>
@@ -59,6 +60,8 @@ const { values } = parseArgs({
     'agent-name':    { type: 'string' },
     'draft-path':    { type: 'string' },
     'audit-fix':     { type: 'string' },
+    'subquestion-id': { type: 'string', multiple: true },
+    'visual-required': { type: 'boolean' },
     round:           { type: 'string' },
     help:            { type: 'boolean', short: 'h' },
   },
@@ -80,9 +83,11 @@ if (values.help) {
       '  --known-clue <clue> ...     已知线索\n' +
       '  --deliverable <text>        可验证交付物\n' +
       '  --stop-criteria <text> ...  终止标准\n' +
-      '  --task-dir <path>           可选；Round 2+ 必传——子 Agent 读 directions.json 避开已试方向 + 写 raw/\n' +
-      '  --agent-name <name>         可选；Agent 名（决定 raw/ 文件名 search-<name>.jsonl + sentinel agent 字段）\n' +
-      '  --round <int>               可选；loop 轮次，主 Agent 派发时传入\n\n' +
+      '  --task-dir <path>           必填；任务目录\n' +
+      '  --agent-name <name>         必填；本轮唯一 Agent 名\n' +
+      '  --round <int>               必填；loop 轮次\n' +
+      '  --subquestion-id <id> ...   必填；负责的子问题编号\n\n' +
+      '  --visual-required           可选；该任务必须产出可呈现的视觉证据\n\n' +
       'boundary role:\n' +
       '  --task-dir <path>           任务目录（含 task_spec.md + findings.jsonl）\n\n' +
       'review role:\n' +
@@ -113,13 +118,15 @@ function cdpSection() {
 // --- search role ---
 function buildSearchContract(v) {
   if (!v.goal) fail('search role requires --goal');
+  if (!v['task-dir']) fail('search role requires --task-dir');
+  if (!v['agent-name']) fail('search role requires --agent-name');
+  if (!/^\d+$/.test(v.round || '') || Number(v.round) < 1) fail('search role requires positive --round');
+  if (!v['subquestion-id']?.length) fail('search role requires --subquestion-id');
 
-  // agent 名：从 --agent-name 参数取，没有就用 goal 前两个词做 fallback
-  const agentName = v['agent-name'] || v.goal.replace(/[^\w\u4e00-\u9fff]/g, '').slice(0, 12) || 'agent';
-  const rawFileName = `search-${agentName}`;
-  const rawFilePath = v['task-dir']
-    ? `${v['task-dir']}/raw/${rawFileName}.jsonl`
-    : `<task-dir>/raw/${rawFileName}.jsonl`;
+  const agentName = v['agent-name'];
+  const rawFileName = `search-r${v.round}-${agentName}`;
+  const rawFilePath = `${v['task-dir']}/raw/${rawFileName}.jsonl`;
+  const subquestionIds = v['subquestion-id'];
 
   const mustVerify = v['must-verify'] || [];
   const knownClues = v['known-clue'] || [];
@@ -139,17 +146,11 @@ function buildSearchContract(v) {
     ? stopCriteria.map((s) => `- ${s}`).join('\n')
     : '- （按 search.md §5 终止信号判断）';
 
-  const roundBlock = v.round
-    ? `**当前 loop 轮次：Round ${v.round}**`
-    : '';
-
-  const taskDirBlock = v['task-dir']
-    ? `${v['task-dir']}\n（读 directions.json 避开已试方向；读 task_spec.md 看完成标准。**不要读 findings.jsonl**——那是归一化器管的，你只管写 raw/）`
-    : '（未指定——按 goal 独立研究）';
-
-  const taskDirChecklist = v['task-dir']
-    ? `3. Read \`${v['task-dir']}/directions.json\`（已试方向，避免重复）`
-    : '3. 确认理解【返回格式】和【完成标准】后，开始执行——中间不停下问是否需要继续';
+  const roundBlock = `**当前 loop 轮次：Round ${v.round}**`;
+  const taskDirBlock = `${v['task-dir']}\n（读 directions.json 避开已试方向；读 task_spec.md 看完成标准。不要读 findings.jsonl。）`;
+  const visualBlock = v['visual-required']
+    ? `【视觉证据——本任务必需】\n每个 Agent 必须至少保存 1 张与自己目标直接相关的非敏感页面截图，并在对应 finding 写 screenshot_path。找不到可用视觉证据时写 gap，禁止用装饰图充数。`
+    : '【视觉证据】仅在定价表、对比表、架构图、UI 或 benchmark 图真正帮助理解时截图；纯事实任务不硬凑。';
 
   return `你是 sleuth 研究子 Agent（搜索执行）。
 
@@ -187,6 +188,9 @@ ${v.goal}
 【必须验证的核心事实】
 ${mustVerifyBlock}
 
+【负责的子问题】
+${subquestionIds.map((id) => `- ${id}`).join('\n')}
+
 【已知线索】
 ${knownCluesBlock}
 
@@ -199,6 +203,8 @@ ${deliverableBlock}
 【终止标准】
 ${stopCriteriaBlock}
 
+${visualBlock}
+
 【返回格式——直接写文件，不返回 stdout】
 每搜到一条 finding/gap/red_flag，**立刻用 Write 工具 append 到 \`${rawFilePath}\`**。
 
@@ -207,12 +213,23 @@ ${stopCriteriaBlock}
 2. 把新行追加到末尾
 3. Write 全量覆盖回去
 
-每行一个 JSON 对象，允许三种 type：
-- \`finding\`：type / claim / url / confidence / tier / dimensions_seen，可附带 \`follow_up_questions\`（字符串数组）和 \`screenshot_path\`（截了呈现型图片时必填，相对路径如 \`screenshots/xxx.png\`）
-- \`gap\`：type / what / reason
-- \`red_flag\`：type / claim / reason
+每行一个 JSON 对象，格式必须满足：
+- \`finding\`：\`type\` / \`claim\` / \`claim_key\` / \`subquestion_ids\` / \`fields_covered\` / \`sources\` / \`dimensions_seen\`
+- \`gap\`：\`type\` / \`what\` / \`reason\` / \`subquestion_ids\`
+- \`red_flag\`：\`type\` / \`claim\` / \`reason\` / \`subquestion_ids\` / \`sources\`
 
-ts / round / agent / claim_id 由归一化器补，不要写这些字段。
+finding 示例：
+\`{"type":"finding","claim":"含上下文、限制与影响的证据结论","claim_key":"1:intercom:pricing_model","subquestion_ids":["1"],"fields_covered":["定价模型"],"sources":[{"url":"https://example.com/pricing","tier":"T1","stance":"supports","observed_at":"2026-07-18T00:00:00Z","source_date":"2026-07-01"}],"dimensions_seen":[{"dimension":"定价","observation":"按席位计费"}],"context_links":[{"claim_key":"1:salesforce:pricing_model","relationship":"compares"}]}\`
+
+- 同一事实的多个独立来源放在同一条 finding 的 \`sources\` 数组，禁止丢掉次要来源。
+- red_flag 也必须把导致“过期、矛盾或不可靠”判断的页面写进结构化 \`sources\`，禁止只把 URL 塞进 reason 文本。
+- \`claim_key\` 使用“子问题:实体:字段”稳定命名；同一事实换种说法时仍用同一个 key。
+- \`fields_covered\` 只能填写这条证据真正覆盖的 task_spec 必需字段。
+- \`source_date\` 是来源发布日期（知道时写）；\`observed_at\` 是本次核验时间，必须写。
+- \`stance\` 只允许 \`supports\` 或 \`contradicts\`。
+- Round 2+ 收到带 \`source_claim_keys\` 的已知线索时，相关 finding 必须用 \`context_links\` 指明与前序结论的关系；relationship 只允许 compares / extends / follows / causes / contradicts / complements / bounds。
+- 可附带 \`follow_up_questions\` 和 \`screenshot_path\`。
+- ts / round / agent / claim_id / confidence 由归一化器补，不要写。
 
 **退出前必做**：用 Write append 最后一行到你的 raw 文件：
 \`{"type":"agent_done","agent":"${agentName}","lines_written":<你写的总行数>,"ts":"<当前 ISO 时间>"}\`
@@ -229,7 +246,8 @@ ${cdpSection()}
 【启动检查清单——收到任务后，先按序完成，不跳过】：
 1. Read \`${SKILL_ROOT}/references/search.md\`（搜索逻辑 + 返回格式）
 2. Read \`${SKILL_ROOT}/references/tool-guide.md\`（agent-browser 命令）
-${taskDirChecklist}`;
+3. Read \`${v['task-dir']}/directions.json\`（不存在视为空；已试方向，避免重复）
+4. 确认每条记录都带负责的 subquestion_ids 后开始执行`;
 }
 
 // --- boundary role ---
@@ -251,20 +269,20 @@ function buildBoundaryContract(v) {
 ${v.goal}
 
 【任务目录】
-${v['task-dir']}\n（读 task_spec.md 看 task_type + 完成标准；读 findings.jsonl 看已有发现 + dimensions_seen；读 follow_ups.json 看未解决的追踪问题）
+${v['task-dir']}\n（读 task_spec.md 看 task_type；读 stats-summary.json 看机械完成结果；读 findings.jsonl 复核语义和 dimensions_seen；读 follow_ups.json / directions.json 看未解决问题和已试方向）
 
-【返回格式】
-按 boundary.md 定义的 YAML schema 返回——包含覆盖度评估（terminate_recommended / uncovered_dimensions 等）**和跨 Agent 线索（cross_agent_hints）**。
+【产出文件】
+按 boundary.md 定义的 JSON schema，用 Write 写入 \`${v['task-dir']}/boundary-report.json\`。不要只在回复中返回报告。
 
-**cross_agent_hints 是第二职责**：根据 task_spec 的 task_type，按 boundary.md「跨 Agent 线索提炼」段提炼 3-5 条线索。这些线索会被主 Agent 通过 --known-clue 注入给下一轮搜索 Agent，让它们产出"深"的内容（带参照的对比 / 层层递进 / 平衡呈现）而不是孤立事实。每条 hint ≤ 80 字符。
+**cross_agent_hints 是第二职责**：根据 task_spec 的 task_type，按 boundary.md「跨 Agent 线索提炼」段提炼 3-5 条线索。这些线索会被主 Agent通过 --known-clue 注入下一轮。每条 hint ≤ 80 字符，并必须带 source_claim_keys，让下一轮用 context_links 留下使用证据。
 
 【完成标准】
-terminate_recommended + uncovered_dimensions + cross_agent_hints 都已输出。
+boundary-report.json 已写入；包含 terminate_recommended、逐子问题证据映射、uncovered_dimensions 和 cross_agent_hints。
 
 【启动检查清单——收到任务后，先按序完成，不跳过】：
 1. Read \`${SKILL_ROOT}/references/boundary.md\`（4 检查维度 + 输出 schema）
-2. Read \`${v['task-dir']}/task_spec.md\`、\`${v['task-dir']}/findings.jsonl\`、\`${v['task-dir']}/follow_ups.json\`
-3. 确认理解【返回格式】（YAML schema）后，开始评估`;
+2. Read \`${v['task-dir']}/task_spec.md\`、\`${v['task-dir']}/stats-summary.json\`、\`${v['task-dir']}/findings.jsonl\`、\`${v['task-dir']}/follow_ups.json\`、\`${v['task-dir']}/directions.json\`
+3. 确认理解 JSON schema 和文件位置后开始评估；回复只报告文件已写入`;
 }
 
 // --- review role ---
@@ -292,16 +310,16 @@ ${v['task-dir']}（findings.jsonl 在该目录下）
 【草稿位置】
 ${v['draft-path']}
 
-【返回格式】
-按 review.md 定义的 YAML schema 返回（含 sampled_stats）。
+【产出文件】
+按 review.md 定义的 JSON schema，用 Write 写入 \`${v['task-dir']}/audit-report.json\`。不要只在回复中返回报告。
 
 【完成标准】
-critical + non_critical + sampled_stats 已输出。
+audit-report.json 已写入，critical、non_critical、sampled_stats、passed 均已输出。
 
 【启动检查清单——收到任务后，先按序完成，不跳过】：
 1. Read \`${SKILL_ROOT}/references/review.md\`（4 项审计 + 分层抽样 + 输出 schema）
 2. Read \`${v['task-dir']}/findings.jsonl\` 和 \`${v['draft-path']}\`
-3. 确认理解【返回格式】（YAML schema）后，开始审计`;
+3. 确认理解 JSON schema 和文件位置后开始审计；回复只报告文件已写入`;
 }
 
 // --- synthesize role ---
@@ -325,6 +343,7 @@ ${v['task-dir']}
 【必读文件】
 1. \`${v['task-dir']}/findings.jsonl\`——最终证据库（每行一个 JSON 对象）
 2. \`${v['task-dir']}/task_spec.md\`——子问题清单 + 完成标准 + 交付格式要求
+3. \`${v['task-dir']}/stats-summary.json\`——唯一可信的数量和完成状态
 
 【你的产出】
 Write 到 \`${v['task-dir']}/draft.md\`
@@ -337,7 +356,7 @@ ${auditFixBlock}
 4. 冲突的 findings 必须明示（不抹平分歧）
 5. 单源最多 1 句直引不超过 15 词，默认 paraphrase
 6. 报告格式遵循 task_spec 的交付要求（对比表/PRD/调研报告/时间线/单一回答）
-7. 数字必须从 findings.jsonl 机械统计（用 Bash 跑 \`wc -l\` / \`grep -c\`），不许凭印象写
+7. 数字必须从 stats-summary.json 读取；findings.jsonl 含不同记录类型，禁止用总行数冒充证据数
 8. **图文并茂**：如果 finding 带 \`screenshot_path\` 字段，在对应结论处内嵌 \`![图注：来源+抓取日期](screenshot_path)\`。没带截图的不要硬凑——纯事实类不强求图文
 
 【结构选择】（按问题类型）
@@ -376,12 +395,13 @@ ${auditFixBlock}
 - 不许用 bullet list 重现原文章结构（版权问题）
 
 【完成标准】
-draft.md 已写入，包含所有 task_spec 中 [x] 子问题对应的章节，每个核心结论有内联 URL。`;
+draft.md 已写入；每个达到标准或明确标注 known_limit 的子问题都有对应章节；没有证据的实体只能写数据缺口，禁止补写事实；每个核心结论有内联 URL。`;
 }
 
 // --- scout role ---
 function buildScoutContract(v) {
   if (!v.goal) fail('scout role requires --goal');
+  if (!v['task-dir']) fail('scout role requires --task-dir');
 
   return `你是 sleuth 研究子 Agent（侦察 / Scout）。
 
@@ -414,8 +434,8 @@ ${v.goal}
 
 **不做的事**：不做深度研究、不提取 claim、不写 findings、不截图。只画地图。
 
-【返回格式】
-返回一个 JSON 对象（landscape.json），格式：
+【产出文件】
+把 JSON 对象写入 \`${v['task-dir']}/landscape.json\`，格式：
 
     {
       "entities": [
@@ -428,7 +448,7 @@ ${v.goal}
     }
 
 【完成标准】
-landscape.json 已输出，包含至少 3 个实体 + 2 个视角 + 2 个来源。
+landscape.json 已写入，包含至少 3 个实体 + 2 个视角 + 2 个来源。回复只报告文件已写入。
 
 【启动检查清单——收到任务后，先按序完成，不跳过】：
 1. Read \`${SKILL_ROOT}/references/scout.md\`（广度扫描策略 + 返回格式）

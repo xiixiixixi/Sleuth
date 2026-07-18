@@ -20,11 +20,7 @@
 
 如果子问题未显式声明完成标准，使用默认值。
 
-**自动判定每个子问题**（按以下规则逐一检查）：
-- **来源数**：统计 findings.jsonl 中与该子问题相关的独立 URL 数 → ≥ min_sources？
-- **T1 来源数**：其中 tier="T1" 的有几条 → ≥ min_t1？
-- **required_fields 覆盖**：每个 required_field 是否被至少 1 条 finding 的 claim 或 dimensions_seen 覆盖？**用 LLM 语义判断**——看 finding 实际讨论了什么，不是字符串匹配。例：required_field「定价模型」，finding claim「按请求量阶梯计费，超出免费额度后 $0.01/1K tokens」→ 语义覆盖 ✓，即便「定价模型」四字没出现在 claim 里。
-- **时效性**：所有相关 finding 的 ts 是否在 max_age_days 窗口内？（缺 ts 宽松处理，不判失败）
+`stats-summary.json` 已按 finding 的 `subquestion_ids`、`fields_covered` 和来源日期机械计算来源数、T1 数、字段覆盖与时效性。边界 Agent 必须复核证据是否真的支持这些标签，不能再根据标题关键词猜归属。
 
 对已标 `[x]` 的子问题同样做 4 项检查——`[x]` 不代表跳过，边界 Agent 独立验证每项完成标准是否被 findings 证据支撑。若 `[x]` 与 evidence 不一致，列入 `uncovered_subquestions`。
 
@@ -33,7 +29,7 @@
 - 有 `- [ ]` 的子问题 → **task_spec 未全覆盖，强制不终止**
 - 输出 `uncovered_subquestions`：列出所有还是 `[ ]` 的子问题编号和标题，**注明具体哪个标准未达标**（如 `"sources: 1/2, T1: 0/1, required_fields: [触发方式] 未覆盖"`）
 
-**子问题归属判定**：如何将一个 finding 归属到某个子问题？按 finding 的 claim 文本与子问题标题/required_fields 的关键词匹配度——匹配度最高的子问题即为归属。一条 finding 可以归属多个子问题。
+**子问题归属判定**：只认 finding 的 `subquestion_ids`。缺编号的 finding 列入 `evidence_map.unassigned_findings`，不能支撑任何完成标准。
 ### 1. 覆盖度（Coverage）
 
 | 维度 | 问什么 |
@@ -115,39 +111,51 @@ findings 里 claim 提到的实体名和 URL 域名是否匹配？
 - 每条线索 ≤ 80 字符（要能塞进 `--known-clue` 参数）
 - 只写结论，不写推理过程（推理过程在 boundary-report 里）
 - 线索必须能在搜索时直接用（"X 比 Y 强" / "X 层还没挖" / "正方说了 X，你搜反方"）
+- 每条线索必须带 `source_claim_keys`，让下一轮 finding 能通过 `context_links` 证明它确实使用了前序结论
 
 ---
 
 ## 输出 schema
 
-```yaml
-terminate_recommended: <bool>
-task_type: <comparison | deep_dive | timeline | causal | problem_solving | enumeration | debate>
-uncovered_subquestions:
-  - id: <子问题编号，如 "3" 或 "1.1">
-    title: <子问题标题>
-    reason: <为什么没覆盖>
-uncovered_dimensions:
-  - dimension: <维度名>
-    priority: high | medium | low
-    rationale: <为什么这个维度对回答用户问题重要>
-    suggested_direction: <下一波搜索该往哪搜>
-direction_drift:
-  - direction: <已搜方向>
-    problem: <偏离了 task_spec 的哪个子问题>
-    suggested_fix: <应该搜什么>
-entity_mismatch:
-  - claim: <claim 内容>
-  url: <实际 URL>
-  expected_entity: <预期实体名>
-  actual_title: <页面实际 title>
-follow_ups_unresolved: <int>
-# 跨 Agent 线索（主 Agent 读这里 → --known-clue 注入给下一轮搜索 Agent）
-cross_agent_hints:
-  - target: <下一轮哪个 Agent / 哪个维度 / 哪家实体>
-    hint: <≤80 字符的线索，能直接用于搜索>
-    rationale: <为什么这条线索能让下一轮更深>
+写入任务目录的 `boundary-report.json`：
+
+```json
+{
+  "schema_version": 2,
+  "terminate_recommended": false,
+  "task_type": "comparison",
+  "evidence_map": {
+    "by_subquestion": {
+      "1": {
+        "supported_claim_keys": ["1:intercom:pricing_model"],
+        "fields_verified": ["定价模型"],
+        "fields_disputed": [],
+        "assessment": "证据是否真的覆盖该问题"
+      }
+    },
+    "unassigned_findings": []
+  },
+  "uncovered_subquestions": [
+    {"id":"3","title":"子问题标题","reason":"具体哪个标准未满足"}
+  ],
+  "uncovered_dimensions": [
+    {"dimension":"维度名","priority":"high","rationale":"重要原因","suggested_direction":"下一轮方向"}
+  ],
+  "direction_drift": [
+    {"direction":"已搜方向","problem":"偏离点","suggested_fix":"修正方向"}
+  ],
+  "entity_mismatch": [
+    {"claim":"结论","url":"https://...","expected_entity":"预期实体","actual_title":"实际标题"}
+  ],
+  "follow_ups_unresolved": 0,
+  "cross_agent_hints": [
+    {"target":"下一轮实体或维度","hint":"不超过80字符、可直接搜索的线索","rationale":"为什么能让下一轮更深","source_claim_keys":["1:salesforce:pricing_model"]}
+  ],
+  "rationale": "是否建议终止的总理由"
+}
 ```
+
+非 `general` 任务且准备继续下一轮时，`cross_agent_hints` 必须有 3-5 条；准备终止时允许为空。JSON 必须可以被 `JSON.parse` 直接读取，禁止输出注释、代码围栏或额外文字。
 
 ## terminate_recommended 判定规则
 

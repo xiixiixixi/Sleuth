@@ -81,6 +81,8 @@ test('ensureOutputDir creates nested directory tree', () => {
   try {
     ensureOutputDir(nested);
     assert.ok(existsSync(nested), 'nested dir should exist');
+    assert.ok(existsSync(path.join(nested, 'raw')), 'raw dir should exist');
+    assert.ok(existsSync(path.join(nested, 'screenshots')), 'screenshots dir should exist');
   } finally {
     rmSync(tmpRoot, { recursive: true, force: true });
   }

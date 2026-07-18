@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-07-02
-**Commit:** 2d5b524
+**Generated:** 2026-07-18
+**Commit:** 当前工作树（以 `git rev-parse HEAD` 为准）
 **Branch:** main
 
 ## OVERVIEW
@@ -19,7 +19,7 @@ sleuth/
 ├── scripts/            CLI 工具（见 scripts/AGENTS.md）
 │   ├── lib/
 │   └── __tests__/
-├── docs/               # gitignored —— 本地决策/测试文档，不入仓（当前含 DESIGN-v2/v3.md、TESTING.md、AOP-TEST-POSTMORTEM.md）
+├── docs/               # 随仓维护的当前设计、问题、测试和状态文档；仅 docs/local/ 被忽略
 └── test/               # gitignored —— 本地测试残留
 ```
 
@@ -36,16 +36,17 @@ sleuth/
 | 合成 / 证据分层 / 交付 | `SKILL.md` §7 | 主 Agent |
 | 改子 Agent 角色 / 任务分析 / loop / 长程任务行为 | `SKILL.md` 第 1-2 步（任务分析）+ 第 3-7 步（主 Agent loop：搜索/边界/审查）+「状态文件 schema」+「长程任务行为」段 | 4 角色（主/搜索/边界/审查）+ state schema + 零交互 / 就绪即执行 |
 | 改 agent-browser 命令参考 / 反爬降级 / 特殊内容类型 | `references/tool-guide.md` | 完整命令速查 |
-| 启动带 CDP 调试的 Chrome（symlink profile 绕 Chrome 136+ 限制） | `scripts/launch-chrome.mjs` | SKILL.md §check-deps 失败时引导用户跑；输出 `SLEUTH_CDP_PORT` / `SLEUTH_CDP_WS` |
+| 用户主动启动带 CDP 调试的 Chrome | `scripts/launch-chrome.mjs` | 仅用户明确选择并传 `--confirm-close-browser`；主流程禁止自动运行 |
 | 压住 Chrome 144+「要允许远程调试吗?」弹窗 | `scripts/fix-chrome-debug-permission.mjs` | 一键装 RemoteDebuggingAllowed 企业策略；跨平台（osascript/pkexec/UAC 弹密码框）；支持 `--check` / `--uninstall` |
 | 改环境检查 | `scripts/check-deps.mjs` + `scripts/lib/check-deps-core.mjs` | 薄 shim + 核心逻辑 |
 | 改子 Agent prompt 模板 | `scripts/spawn-subagent.mjs` | 单文件，无 lib 依赖；5 role：scout/search/boundary/review/synthesize |
-| 改归一化器（raw/ → findings.jsonl + stats-summary.json） | `scripts/normalize.mjs` | v2 核心脚本；14 条测试 |
+| 改任务类型初判 | `scripts/classify-task.mjs` | 规则只处理明确措辞；无信号返回 general 给主 Agent 判断 |
+| 改归一化器（raw/ → findings.jsonl + stats-summary.json） | `scripts/normalize.mjs` | v2 核心脚本；测试数量以实时命令为准 |
 | 改反认知循环计算 | `scripts/calc-novelty.mjs` | 算 novelty_ratio + stale_count → 更新 progress.json |
 | 改检查门 | `scripts/validate-state.mjs` | 7 个 phase 检查；不通过 exit(1) |
 | 改本地 URL 搜索 | `scripts/find-url.mjs` | 341 行单体脚本（注意：未测试） |
 | 加测试 | `scripts/__tests__/<name>.test.mjs` | 用 `node:test`，不要 jest/vitest |
-| 设计决策追溯 | `docs/DECISION.md` | gitignored 本地，记录否决方案 |
+| 当前架构与决策 | `docs/DESIGN-v3.md` + `docs/STATUS.md` | 只写当前事实；历史问题在 TEST-ISSUES.md |
 | 测试步骤与检查命令 | `docs/TESTING.md` | 怎么测：case 要求 + 检查清单 |
 | 测试问题追踪 | `docs/TEST-ISSUES.md` | 测出了什么：问题清单 + 解决状态 |
 
@@ -112,18 +113,21 @@ sleuth/
 - **SKILL.md 全部用相对路径**：`scripts/check-deps.mjs`、`references/search.md`——所有路径从 SKILL.md 所在目录（skill 根目录）解析。Agent 正在读这份文档就知道根目录在哪。子 Agent 的 prompt 由 `spawn-subagent.mjs` 在运行时解析为绝对路径。
 - **`spawn-subagent.mjs` 在 Node.js 运行时自感知 skill 根目录**：通过 `import.meta.url` 解析绝对路径，将 `${CLAUDE_SKILL_DIR}` 替换为绝对路径后输出——消除子 Agent 对运行时变量替换的依赖
 - **output 目录按 task-name 不按日期**：`~/.sleuth/output/<task-name>/`（多 Agent 协作需独立 task 目录；旧 `lib/output.mjs` 按日期，与新 loop 模式不兼容——见 SKILL.md「状态文件 schema」）
-- **`check-deps-core.mjs` 行 128-134 有死 re-export**：`main as ensureCDP` 是旧名遗留；`resolveOutputDir`/`ensureOutputDir` 现在在 core 内部被消费（行 94-100），外部 CLI 不直接 import output.mjs
+- **`check-deps-core.mjs` 已移除旧 `ensureCDP` 别名**：环境检查现在显式区分 `--mode light` 与 `--mode full`，只有 full 要求浏览器就绪
 - **`output.mjs` task-name 模式（2026-06-19）**：`resolveOutputDir(taskName?)` 支持两种模式——传 taskName 则按 `~/.sleuth/output/<task-name>/`（多 Agent 协作需独立 task 目录），不传则按 `YYYY-MM-DD/`（向后兼容）。`sanitizeTaskName` 拒路径分隔符 / `..` / 特殊字符（只允许 `[a-zA-Z0-9-_.]`），防注入。空字符串视为「已传入但非法」会抛错（`if (taskName !== undefined)` 不是 truthy 检查）。check-deps CLI 通过 `--task-name <name>` 传入。
-- **`spawn-subagent.mjs` 的 4 role 模板**：`scout`（侦察，广度扫描）/ `search`（搜索执行，默认）/ `boundary`（边界评估，列未覆盖维度）/ `review`（证据链审计）。四个 builder 函数 `buildScoutContract` / `buildSearchContract` / `buildBoundaryContract` / `buildReviewContract` 分别生成不同 prompt。返回格式：scout→landscape.json；search→JSONL（findings/gaps/red_flags/dimensions_seen）；boundary→YAML（terminate_recommended + uncovered_dimensions + ...）；review→YAML（critical/non_critical + sampled_stats）。
+- **`spawn-subagent.mjs` 的 5 role 模板**：`scout` / `search` / `boundary` / `review` / `synthesize`。各角色直接写自己的文件：landscape.json / raw JSONL / boundary-report.json / audit-report.json / draft.md；回复只报状态。
+- **raw 文件名强制带轮次**：`raw/search-r<round>-<agent>.jsonl`。`normalize.mjs` 从全部 raw 确定性重建 findings，不追加旧派生结果；同一批 raw 重跑结果必须一致。
+- **red_flag 也必须有结构化来源**：旧版、冲突或不可靠页面写入 `sources[]`，成稿只能用限制语义引用它来解释排除理由，不能当成当前事实。
+- **跨 Agent 深度可审计**：boundary hint 必须带 `source_claim_keys`；Round 2+ finding 用 `context_links` 证明使用前序结论；`check-depth.mjs` 按 7 种 task_type 检查关系。
 
 ## COMMANDS
 
 ```bash
 # 跑环境检查（agent 触发 sleuth 后第一件事）
-node scripts/check-deps.mjs --check-only
+node scripts/check-deps.mjs --mode light --check-only
 
 # check-deps 报「chrome: 未发现可连的浏览器」时，启动带 CDP 的 Chrome
-node scripts/launch-chrome.mjs   # 输出 SLEUTH_CDP_PORT / SLEUTH_CDP_WS
+node scripts/launch-chrome.mjs --confirm-close-browser   # 仅用户明确选择；可能关闭 Chrome
 
 # Chrome 144+ 连日常 Chrome 时反复弹「要允许远程调试吗?」→ 装策略压住
 node scripts/fix-chrome-debug-permission.mjs            # 安装（弹系统密码框）
@@ -163,9 +167,8 @@ npm i -g agent-browser@latest
 
 ## NOTES
 
-- **`docs/TESTING.md` 已重写（2026-06-23）**：旧版引用已删的 `finish-gate.test.mjs` / session-logger / deliver 系统；新版按当前架构重写（84 条自动化测试 + 手动 skill 行为测试清单 C1-C16 + 覆盖盲区 + 已知问题）
-- **docs/DECISION.md 与 RESEARCH_AUDIT.md 未在 WHERE TO LOOK 列出**：DECISION 是否决方案追溯，RESEARCH_AUDIT 是 2026-06-19 references 重构的依据文档（5 份→ 3 份的 audit）。两者都是 gitignored 本地文档。
-- **测试覆盖盲区**：`find-url.mjs`（341 行）、`check-deps.mjs`、`check-deps-core.mjs`、`launch-chrome.mjs`（339 行）都 0 测试。`output.mjs` 现已被 `__tests__/output.test.mjs` 覆盖（14 条，含 check-deps `--task-name` 集成）。
+- **测试数量不写死在文档里**：以 `node --test scripts/__tests__/*.mjs` 的实时输出为准。核心覆盖包括两轮确定性归一化、完成条件、7 种跨轮关系、收敛规则、边界/草稿/审查检查门和角色交接。
+- **环境脚本测试边界**：浏览器发现与“未经确认不得关闭 Chrome”可自动测；真正启动 Chrome、系统策略和真实历史数据库需要人工环境测试。
 - **agent-browser 版本敏感**：0.27.1 的 `--cdp <ws-url>` 有 HTTP 预检 403 bug，必须 0.28+
 - **chrome://inspect toggle 不持久**：Chrome 重启会重置，用户需重新勾选
 - **`extract-subtitles.sh` + `srt_to_transcript.py`** 在 `scripts/` 下，混语言（Node + Bash + Python），无 README 解释边界

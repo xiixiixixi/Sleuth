@@ -60,4 +60,6 @@ export function resolveOutputDir(taskName) {
  */
 export function ensureOutputDir(outDir) {
   mkdirSync(outDir, { recursive: true });
+  mkdirSync(path.join(outDir, 'raw'), { recursive: true });
+  mkdirSync(path.join(outDir, 'screenshots'), { recursive: true });
 }

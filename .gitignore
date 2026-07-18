@@ -5,7 +5,7 @@ __pycache__/
 node_modules/
 sleuth-output/
 .sisyphus/
-docs/
+docs/local/
 .claude/
 .omo/
 *.tgz

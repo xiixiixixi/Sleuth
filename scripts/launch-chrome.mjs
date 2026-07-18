@@ -5,7 +5,7 @@
  *
  * 支持 macOS / Linux / Windows。
  *
- * 用法：node launch-chrome.mjs
+ * 用法：node launch-chrome.mjs --confirm-close-browser
  * 输出：SLEUTH_CDP_PORT 和 SLEUTH_CDP_WS（和 check-deps 一致）
  */
 
@@ -19,11 +19,18 @@ const PLATFORM = process.platform;        // 'darwin' | 'linux' | 'win32'
 const IS_WSL   = !!process.env.WSL_DISTRO_NAME;
 const HOME     = os.homedir();
 
-const DEBUG_PORT = 9222;
+const DEBUG_PORT = Number(process.env.SLEUTH_DEBUG_PORT || 9222);
 const LINK_DIR   = path.join(HOME, '.sleuth/chrome-live');
 const PID_FILE   = path.join(HOME, '.sleuth/chrome-debug.pid');
 const KILL_GRACE_MS = 5000;
 const KILL_TERM_MS  = 3000;
+const CONFIRM_CLOSE = process.argv.includes('--confirm-close-browser');
+
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  console.log('用法：node scripts/launch-chrome.mjs --confirm-close-browser');
+  console.log('警告：该脚本需要关闭当前 Chrome。请先保存标签页和未提交内容。');
+  process.exit(0);
+}
 
 // ── 工具函数 ────────────────────────────────────────────────
 
@@ -138,9 +145,9 @@ function stopPreviousChrome() {
     } catch {}
     sleepSync(KILL_GRACE_MS);
     if (waitForPortFree(5)) return;
-    log('  ⚠ Chrome 未响应退出请求，将强制终止。未保存的浏览器状态可能丢失。');
-    try { execSync('pkill -9 -f "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"', { stdio: 'pipe' }); } catch {}
-    waitForPortFree(5);
+    err('✗ Chrome 未正常退出。为保护未保存内容，脚本不会强制终止日常 Chrome。');
+    err('  请手动 Cmd+Q 关闭 Chrome 后再重试。');
+    process.exit(1);
   }
 }
 
@@ -320,6 +327,11 @@ if (!CHROME_BIN) {
 }
 
 // 3. 停上次 sleuth Chrome → 链接 profile → 清锁 → 启动
+if (!CONFIRM_CLOSE) {
+  err('✗ 此脚本会请求关闭当前 Chrome。');
+  err('  保存未提交内容后，由你手动重跑：node scripts/launch-chrome.mjs --confirm-close-browser');
+  process.exit(2);
+}
 log('chrome-cdp: not running. Setting up profile + relaunch...');
 log('  (Chrome 重启后标签页 URL 自动恢复；登录态视站点而定)');
 stopPreviousChrome();

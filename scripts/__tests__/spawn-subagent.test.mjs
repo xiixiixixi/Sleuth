@@ -1,224 +1,120 @@
+/** spawn-subagent.mjs 的角色契约测试。 */
+
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT = fileURLToPath(new URL('../spawn-subagent.mjs', import.meta.url));
+const TASK = '/tmp/sleuth-task';
+const SEARCH_ARGS = ['--role', 'search', '--goal', '验证定价', '--task-dir', TASK, '--agent-name', 'pricing', '--round', '2', '--subquestion-id', '1'];
 
-function run(args) {
-  return execFileSync('node', [SCRIPT, ...args], { encoding: 'utf8' });
+function run(args, env = {}) {
+  return execFileSync('node', [SCRIPT, ...args], { encoding: 'utf8', env: { ...process.env, ...env } });
 }
 
-// ===== search role =====
-
-test('search role: has environment variables + absolute doc path + safety + task fields', () => {
-  const out = run([
-    '--goal', '验证产品当前公开定价',
-    '--must-verify', '价格数字',
-    '--must-verify', '计费单位',
-    '--known-clue', '域名: example.com',
-  ]);
-  assert.match(out, /references\/search\.md/);
-  assert.match(out, /Chrome 调试端口/);
-  assert.match(out, /不提取 cookie/);
-  assert.match(out, /不绕付费墙/);
-  assert.match(out, /产生状态变更.*先停下问/);
-  assert.match(out, /验证产品当前公开定价/);
-  assert.match(out, /价格数字/);
-  assert.match(out, /计费单位/);
-  assert.match(out, /example\.com/);
-  assert.match(out, /raw\/search-/);   // v2: 直写 raw/
-  assert.match(out, /ts .* round .* agent .* claim_id 由归一化器补/);  // v2: 归一化器补，不是主 Agent
-  assert.match(out, /agent-browser close --all/);
-  assert.match(out, /agent_done/);  // v2: EOF sentinel
-  assert.match(out, /网络失败处理/);  // v2: 网络失败重试规则
-  assert.match(out, /WebFetch 单 URL 重试上限.*3 次/);  // v2: 重试上限
+test('search prompt 绑定任务、轮次、唯一文件和子问题', () => {
+  const prompt = run(SEARCH_ARGS);
+  assert.match(prompt, /Round 2/);
+  assert.match(prompt, /search-r2-pricing\.jsonl/);
+  assert.match(prompt, /【负责的子问题】\s*- 1/);
+  assert.match(prompt, /directions\.json/);
 });
 
-test('search role: exits non-zero when --goal is missing', () => {
-  assert.throws(() => run(['--must-verify', 'x']));
+test('search prompt 强制新证据 schema 与多来源', () => {
+  const prompt = run(SEARCH_ARGS);
+  for (const field of ['claim_key', 'subquestion_ids', 'fields_covered', 'sources', 'observed_at', 'context_links', 'source_claim_keys']) {
+    assert.match(prompt, new RegExp(field));
+  }
+  assert.match(prompt, /多个独立来源放在同一条 finding/);
+  assert.match(prompt, /red_flag.*sources/);
+  assert.match(prompt, /禁止只把 URL 塞进 reason/);
 });
 
-test('search role: defaults when must-verify/known-clue/stop-criteria not provided', () => {
-  const out = run(['--goal', '了解某产品']);
-  assert.match(out, /按目标自行判断/);
-  assert.match(out, /最保守方式解释/);
-  assert.match(out, /search\.md §5 终止信号/);
+test('search prompt 注入 must-verify、known-clue、deliverable 和 stop', () => {
+  const prompt = run([...SEARCH_ARGS, '--must-verify', '价格数字', '--known-clue', '参照结论', '--deliverable', '对比表', '--stop-criteria', '两个独立源']);
+  for (const text of ['价格数字', '参照结论', '对比表', '两个独立源']) assert.match(prompt, new RegExp(text));
 });
 
-test('search role: --deliverable injects', () => {
-  const out = run(['--goal', 'x', '--deliverable', '含 3 个独立源的定价对比表']);
-  assert.match(out, /含 3 个独立源的定价对比表/);
+test('search prompt 有浏览器端口时使用字面值', () => {
+  const prompt = run(SEARCH_ARGS, { SLEUTH_CDP_PORT: '9222' });
+  assert.match(prompt, /--cdp 9222/);
+  assert.doesNotMatch(prompt, /--cdp \$SLEUTH_CDP_PORT/);
 });
 
-test('search role: --stop-criteria injects as bullet list', () => {
-  const out = run(['--goal', 'x', '--stop-criteria', '至少 3 个独立源', '--stop-criteria', '每个数字有时间戳']);
-  assert.match(out, /- 至少 3 个独立源/);
-  assert.match(out, /- 每个数字有时间戳/);
+test('visual-required 形成独立硬要求', () => {
+  const prompt = run([...SEARCH_ARGS, '--visual-required']);
+  assert.match(prompt, /视觉证据——本任务必需/);
+  assert.match(prompt, /至少保存 1 张/);
+  assert.match(prompt, /screenshot_path/);
 });
 
-test('search role: --task-dir injects simplified task context', () => {
-  const out = run(['--goal', 'x', '--task-dir', '/tmp/test-task/']);
-  assert.match(out, /\/tmp\/test-task\//);
-  assert.match(out, /读 directions\.json 避开已试方向/);
-  assert.match(out, /不要读 findings\.jsonl/);  // v2: search Agent 不读 findings
+test('search 缺关键绑定参数会拒绝生成', () => {
+  for (const args of [
+    ['--role', 'search', '--goal', 'x'],
+    ['--role', 'search', '--goal', 'x', '--task-dir', TASK, '--round', '1', '--subquestion-id', '1'],
+    ['--role', 'search', '--goal', 'x', '--task-dir', TASK, '--agent-name', 'a', '--subquestion-id', '1'],
+    ['--role', 'search', '--goal', 'x', '--task-dir', TASK, '--agent-name', 'a', '--round', '1'],
+  ]) assert.equal(spawnSync('node', [SCRIPT, ...args]).status, 2);
 });
 
-test('search role: --agent-name sets raw file name + sentinel agent field', () => {
-  const out = run(['--goal', 'x', '--task-dir', '/tmp/test/', '--agent-name', 'intercom']);
-  assert.match(out, /raw\/search-intercom\.jsonl/, 'file name must use agent-name');
-  assert.match(out, /"agent":"intercom"/, 'sentinel agent field must use agent-name');
+test('boundary 直接写 JSON 报告并负责跨 Agent 线索', () => {
+  const prompt = run(['--role', 'boundary', '--goal', '评估覆盖度', '--task-dir', TASK]);
+  assert.match(prompt, /boundary-report\.json/);
+  assert.match(prompt, /JSON schema/);
+  assert.match(prompt, /cross_agent_hints/);
+  assert.match(prompt, /3-5 条线索/);
+  assert.doesNotMatch(prompt, /YAML schema/);
 });
 
-test('search role: --round injects loop round', () => {
-  const out = run(['--goal', 'x', '--round', '2']);
-  assert.match(out, /Round 2/);
+test('review 直接写 JSON 审计报告', () => {
+  const prompt = run(['--role', 'review', '--goal', '审计', '--task-dir', TASK, '--draft-path', `${TASK}/draft.md`]);
+  assert.match(prompt, /audit-report\.json/);
+  assert.match(prompt, /critical、non_critical、sampled_stats、passed/);
+  assert.doesNotMatch(prompt, /YAML schema/);
 });
 
-test('search role: --role search explicit works', () => {
-  const out = run(['--role', 'search', '--goal', 'x']);
-  assert.match(out, /搜索执行/);
+test('synthesize 从 stats 取数字，只写 draft', () => {
+  const prompt = run(['--role', 'synthesize', '--task-dir', TASK]);
+  assert.match(prompt, /stats-summary\.json/);
+  assert.match(prompt, /draft\.md/);
+  assert.match(prompt, /没有证据的实体只能写数据缺口/);
+  assert.match(prompt, /PRD/);
 });
 
-// ===== boundary role =====
-
-test('boundary role: has env var + absolute doc path + safety + task context', () => {
-  const out = run([
-    '--role', 'boundary',
-    '--goal', '评估覆盖度',
-    '--task-dir', '/tmp/test/',
-  ]);
-  assert.match(out, /边界评估/);
-  assert.match(out, /references\/boundary\.md/);
-  assert.match(out, /只读已有 findings/);
-  assert.match(out, /评估覆盖度/);
-  assert.match(out, /\/tmp\/test\//);
-  assert.match(out, /按 boundary\.md 定义的 YAML schema 返回/);
-  assert.doesNotMatch(out, /来源类型多样性/);
+test('synthesize 接收审计修复意见', () => {
+  const prompt = run(['--role', 'synthesize', '--task-dir', TASK, '--audit-fix', '补充冲突说明']);
+  assert.match(prompt, /补充冲突说明/);
 });
 
-test('boundary role: exits non-zero when --task-dir missing', () => {
-  assert.throws(() => run(['--role', 'boundary', '--goal', 'x']));
+test('scout 直接写 landscape.json', () => {
+  const prompt = run(['--role', 'scout', '--goal', '摸清领域', '--task-dir', TASK]);
+  assert.match(prompt, new RegExp(`${TASK}/landscape\\.json`));
+  assert.match(prompt, /至少 3 个实体/);
+  assert.match(prompt, /不使用 agent-browser/);
 });
 
-test('boundary role: exits non-zero when --goal missing', () => {
-  assert.throws(() => run(['--role', 'boundary', '--task-dir', '/tmp/x/']));
+test('各角色缺必填参数会失败', () => {
+  assert.equal(spawnSync('node', [SCRIPT, '--role', 'scout', '--goal', 'x']).status, 2);
+  assert.equal(spawnSync('node', [SCRIPT, '--role', 'boundary', '--goal', 'x']).status, 2);
+  assert.equal(spawnSync('node', [SCRIPT, '--role', 'review', '--goal', 'x', '--task-dir', TASK]).status, 2);
+  assert.equal(spawnSync('node', [SCRIPT, '--role', 'synthesize']).status, 2);
 });
 
-// ===== review role =====
-
-test('review role: has env var + absolute doc path + safety + draft path', () => {
-  const out = run([
-    '--role', 'review',
-    '--goal', '审计报告',
-    '--task-dir', '/tmp/test/',
-    '--draft-path', '/tmp/test/draft.md',
-  ]);
-  assert.match(out, /证据链审计/);
-  assert.match(out, /references\/review\.md/);
-  assert.match(out, /仅允许 WebFetch 验证/);
-  assert.match(out, /审计报告/);
-  assert.match(out, /\/tmp\/test\//);
-  assert.match(out, /draft\.md/);
-  assert.match(out, /按 review\.md 定义的 YAML schema 返回.*sampled_stats/);
-  assert.doesNotMatch(out, /T3 来源.*100% 抽样/);
+test('所有角色 prompt 不含已废弃系统', () => {
+  const prompts = [
+    run(SEARCH_ARGS),
+    run(['--role', 'scout', '--goal', 'x', '--task-dir', TASK]),
+    run(['--role', 'boundary', '--goal', 'x', '--task-dir', TASK]),
+    run(['--role', 'review', '--goal', 'x', '--task-dir', TASK, '--draft-path', `${TASK}/draft.md`]),
+    run(['--role', 'synthesize', '--task-dir', TASK]),
+  ].join('\n');
+  assert.doesNotMatch(prompts, /session-logger|--sid|--main-sid|subagent_done|deliver\.mjs/);
 });
 
-test('review role: exits non-zero when --task-dir missing', () => {
-  assert.throws(() => run(['--role', 'review', '--goal', 'x', '--draft-path', '/tmp/d.md']));
-});
-
-test('review role: exits non-zero when --draft-path missing', () => {
-  assert.throws(() => run(['--role', 'review', '--goal', 'x', '--task-dir', '/tmp/x/']));
-});
-
-// ===== synthesize role =====
-
-test('synthesize role: generates prompt with findings + task_spec + draft output', () => {
-  const out = run([
-    '--role', 'synthesize',
-    '--task-dir', '/tmp/test/',
-  ]);
-  assert.match(out, /合成子 Agent/);
-  assert.match(out, /findings\.jsonl/);
-  assert.match(out, /task_spec\.md/);
-  assert.match(out, /draft\.md/);
-  assert.match(out, /\/tmp\/test\//);
-});
-
-test('synthesize role: has synthesis rules (tiers, citation, conflict)', () => {
-  const out = run(['--role', 'synthesize', '--task-dir', '/tmp/test/']);
-  assert.match(out, /T1\/T2\/T3/);
-  assert.match(out, /每个核心结论必须内联/);
-  assert.match(out, /冲突.*明示/);
-  assert.match(out, /不许读 raw/);
-  assert.match(out, /不许写 draft\.md 之外/);
-});
-
-test('synthesize role: --audit-fix injects feedback', () => {
-  const out = run([
-    '--role', 'synthesize',
-    '--task-dir', '/tmp/test/',
-    '--audit-fix', '第5章URL失效',
-  ]);
-  assert.match(out, /审计反馈/);
-  assert.match(out, /第5章URL失效/);
-});
-
-test('synthesize role: exits non-zero when --task-dir missing', () => {
-  assert.throws(() => run(['--role', 'synthesize']));
-});
-
-test('synthesize role: does NOT contain session/deliver/sid references', () => {
-  const out = run(['--role', 'synthesize', '--task-dir', '/tmp/x/']);
-  assert.doesNotMatch(out, /--sid|session-logger|deliver|--main-sid|--role subagent|subagent_done/);
-});
-
-// ===== invalid role =====
-
-test('invalid --role exits non-zero', () => {
-  assert.throws(() => run(['--role', 'invalid', '--goal', 'x']));
-});
-
-// ===== regression =====
-
-test('does NOT contain session/deliver/sid references in any role', () => {
-  const searchOut = run(['--goal', 'test']);
-  assert.doesNotMatch(searchOut, /--sid|session-logger|deliver|--main-sid|--role subagent|subagent_done/);
-
-  const boundaryOut = run(['--role', 'boundary', '--goal', 'test', '--task-dir', '/tmp/x/']);
-  assert.doesNotMatch(boundaryOut, /--sid|session-logger|deliver|--main-sid|--role subagent|subagent_done/);
-
-  const reviewOut = run(['--role', 'review', '--goal', 'test', '--task-dir', '/tmp/x/', '--draft-path', '/tmp/d.md']);
-  assert.doesNotMatch(reviewOut, /--sid|session-logger|deliver|--main-sid|--role subagent|subagent_done/);
-});
-
-// ===== Scout role tests =====
-
-test('scout role: generates prompt with landscape.json format', () => {
-  const out = run(['--role', 'scout', '--goal', 'test landscape']);
-  assert.match(out, /Scout/);
-  assert.match(out, /landscape\.json/);
-  assert.match(out, /entities/);
-  assert.match(out, /perspectives/);
-  assert.match(out, /source_hints/);
-});
-
-test('scout role: points to scout.md for strategy (no hardcoded types)', () => {
-  const out = run(['--role', 'scout', '--goal', 'test']);
-  assert.match(out, /scout\.md.*广度扫描策略/);
-  assert.doesNotMatch(out, /实体发现.*结构对比.*技术维度/);
-});
-
-test('scout role: exits non-zero when --goal missing', () => {
-  assert.throws(() => run(['--role', 'scout']), /scout role requires --goal/);
-});
-test('scout role: has no tool-call hardcap', () => {
-  const out = run(['--role', 'scout', '--goal', 'test']);
-  assert.doesNotMatch(out, /硬上限.*tool call/);
-});
-
-test('scout role: does NOT contain session/deliver/sid references', () => {
-  const out = run(['--role', 'scout', '--goal', 'test']);
-  assert.doesNotMatch(out, /--sid|session-logger|deliver|--main-sid|--role subagent|subagent_done/);
+test('非法角色与 help 行为正确', () => {
+  assert.equal(spawnSync('node', [SCRIPT, '--role', 'invalid']).status, 2);
+  const help = run(['--help']);
+  assert.match(help, /subquestion-id/);
+  assert.match(help, /scout\|search\|boundary\|review\|synthesize/);
 });

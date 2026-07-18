@@ -96,22 +96,21 @@
 
 ### 4.3 中间记录格式（JSONL，直写 raw/ 文件）
 
-搜索 Agent **不返回 stdout 给主 Agent**。每搜到一条 finding/gap/red_flag，**立刻用 Write 工具 append 到 `<task-dir>/raw/search-<agent-name>.jsonl`**。
+搜索 Agent **不返回 stdout 给主 Agent**。每搜到一条 finding/gap/red_flag，立刻写入自己独占的 `<task-dir>/raw/search-r<round>-<agent-name>.jsonl`。
 
 **直写流程**（Write 工具是覆盖不是追加，所以要先 Read 再拼接）：
 1. Read 你的 raw 文件（`<task-dir>/raw/search-<agent-name>.jsonl`，不存在则视为空）
 2. 把新行追加到末尾
 3. Write 全量覆盖回去
 
-每行一个 JSON 对象（**硬约束——字段值只允许以下枚举，不允许自创**）：
+每行一个 JSON 对象（**硬约束——字段和值不允许自创**）：
 
-**finding 密度要求**（硬规则）：每条 finding 的 claim ≥ 200 字符（约 100 汉字），要回答"是什么 + 为什么 + 有什么限制 + 场景影响"，不是只甩一个结论。浅断言（< 200 字符）会被深度门（`scripts/check-depth.mjs`）拦下重派。
+**finding 密度指导**：claim 应回答“是什么 + 为什么 + 有什么限制 + 场景影响”，不要只甩结论。少于 200 字符会被深度门提醒，但真正的硬检查是来源、字段归属和跨轮递进，不能靠堆字数过门。
 
 ```jsonl
-{"type":"finding","claim":"Claude API 输入定价 $3/M tokens、输出 $15/M tokens（2026 年 7 月调价后）。对比 GPT-4o 的 $5/$15，Claude 输入侧便宜 40% 但输出侧持平。对高吞吐场景（如客服机器人，输入远多于输出），Claude 成本优势明显；对长生成场景（如代码生成），成本与 GPT-4o 接近。100K context window 加价 +100%，200K 加价 +200%，长上下文场景成本翻倍。","url":"https://www.anthropic.com/pricing","confidence":"已验证事实","tier":"T1","dimensions_seen":[{"dimension":"价格/合同条款","observation":"Reddit r/LocalLLaMA 有用户吐槽价格涨幅，但官方定价页未提历史调价记录","source_url":"https://reddit.com/r/LocalLLaMA/..."}]}
-{"type":"finding","claim":"...","url":"...","confidence":"高置信推断","tier":"T2","follow_up_questions":["Genesys 是否也有类似机制？"]}
-{"type":"gap","what":"还缺企业定价","reason":"Sales 页要求联系未公开"}
-{"type":"red_flag","claim":"...","reason":"疑似过期（2024 文章）"}
+{"type":"finding","claim":"Claude API 输入定价及其适用条件……","claim_key":"1:claude:api_pricing","subquestion_ids":["1"],"fields_covered":["输入价格","输出价格","长上下文加价"],"sources":[{"url":"https://www.anthropic.com/pricing","tier":"T1","stance":"supports","observed_at":"2026-07-18T00:00:00Z","source_date":"2026-07-01"},{"url":"https://example.org/independent-review","tier":"T2","stance":"supports","observed_at":"2026-07-18T00:00:00Z"}],"dimensions_seen":[{"dimension":"价格/合同条款","observation":"长上下文需要额外付费"}]}
+{"type":"gap","what":"还缺企业定价","reason":"销售页要求联系，未公开","subquestion_ids":["1"]}
+{"type":"red_flag","claim":"第三方文章价格疑似过期","reason":"发布日期早于时效要求","subquestion_ids":["1"],"sources":[{"url":"https://example.org/old-price","tier":"T3","stance":"supports","observed_at":"2026-07-18T00:00:00Z","source_date":"2024-01-01"}]}
 ```
 
 ❌ **反面教材**（不要这样写）：`"claim":"Claude API 定价 $3/M"`——只有结论，没有上下文、对比、限制、场景影响。这种浅断言浪费一次搜索。
@@ -122,27 +121,28 @@
 ```
 不写这行 = 归一化器认为你被杀了，触发重派。
 
-**不要返回 stdout 给主 Agent**——你的所有产出在 raw 文件里。归一化器（`normalize.mjs`）会自动合并 raw/*.jsonl 到 findings.jsonl。
+**不要返回 stdout 给主 Agent**——你的所有产出在 raw 文件里。归一化器（`normalize.mjs`）会从全部 raw 文件确定性重建 findings.jsonl。
 
 **`type` 字段——只允许以下 3 个值**（加 agent_done sentinel）：
 - `finding`：已验证或已提取的事实（**不允许** `funding_round` / `valuation` / `investor` 等自定义类型——把分类信息放进 `dimensions_seen`）
 - `gap`：还缺什么（字段用 `what` + `reason`，不用 `claim` / `url`）
-- `red_flag`：疑似过期 / 矛盾 / 不可靠（字段用 `claim` + `reason`）
+- `red_flag`：疑似过期 / 矛盾 / 不可靠（字段用 `claim` + `reason` + `sources`）。结构化来源用于证明“为什么要排除”，禁止只把 URL 塞在 reason 里。
 
-**`confidence` 字段——只允许以下 5 个值**（`gap` / `red_flag` 类型不需要此字段）：
-- `已验证事实`：多个独立源一致 + T1 来源
-- `高置信推断`：单源 + T1/T2 来源
-- `未确认线索`：单源 + T3 来源，或标了 red_flag
-- `冲突信息`：源之间矛盾
-- `覆盖缺口`：所有 gaps 汇总
-- **不允许** `已确认` / `高` / `低` 等缩写或自创值
+**finding 和 red_flag 的 `sources` 必须保留全部独立证据**。每个来源包含 `url`、`tier`、`stance`、`observed_at`，知道发布日期时再加 `source_date`。同一事实多个来源合并进数组，禁止只保留一个网址。
 
-**`tier` 字段——字符串 `"T1"` / `"T2"` / `"T3"`，不是整数**：
+**`tier`——字符串 `"T1"` / `"T2"` / `"T3"`，不是整数**：
 - `"T1"`：官方文档、官方博客、监管文件、同行评议
 - `"T2"`：行业分析、第三方评测、GitHub issues、成熟评论站
 - `"T3"`：搜索摘要、SEO 文、未署名新闻稿、单条论坛评论
 - ❌ `1` / `2` / `3`（整数不接受）
 - ❌ `"primary"` / `"secondary"` / `"tertiary"`
+
+**归属与覆盖字段**：
+- `subquestion_ids`：必须填写主 Agent 派发时指定的子问题编号；一条证据可以属于多个子问题。
+- `fields_covered`：只填写证据真正覆盖的 `required_fields`；无法覆盖就留空，禁止为了过门乱标。
+- `claim_key`：使用“子问题:实体:字段”稳定命名。同一事实换种说法仍用同一个 key，让多轮去重和新发现率可信。
+- `confidence`、`claim_id`、`round` 和 `agent` 由归一化器根据来源和文件名生成，搜索 Agent 不写。
+- `context_links`：Round 2+ 收到 `[source_claim_keys: ...]` 线索后，相关 finding 必须引用前序 `claim_key`，并标明 `compares / extends / follows / causes / contradicts / complements / bounds` 之一。它是“这一轮真的利用了跨 Agent 线索”的机器证据。
 
 **`dimensions_seen` 必须是对象数组**（不是字符串数组）：
 - ✅ `[{"dimension":"视角覆盖","observation":"Reddit 用户吐槽价格涨幅","source_url":"https://reddit.com/..."}]`
@@ -191,8 +191,8 @@
 清理步骤：
 1. **删失败结果**：删掉失败的 tool call、404 页面、登录墙挡住的空结果
 2. **删跑题内容**：和 must-verify 无关的页面内容删掉
-3. **合并重复**：同一事实多个源 → 合成一条 finding，claim 里写“多源确认”，url 只列最权威的一个
-4. **补全字段**：每条 finding 必须有 claim + url + tier + confidence（按 §4.3 枚举）
+3. **合并重复**：同一事实多个源 → 合成一条 finding，全部来源保留在 `sources` 数组
+4. **补全字段**：每条 finding 必须有 claim + claim_key + subquestion_ids + fields_covered + sources + dimensions_seen
 5. **提取 follow_up_questions**：搜索过程中发现的新实体 / 新概念 / 未覆盖方向，提取成具体问题
 
 follow_up_questions 规则：
@@ -202,7 +202,7 @@ follow_up_questions 规则：
 
 写入 raw 文件的 JSONL 里，finding 类型可以带 follow_up_questions 字段：
 
-    {"type":"finding","claim":"...","url":"...","tier":"T1","confidence":"已验证事实","follow_up_questions":["Genesys 是否也有 AOP 机制？"]}
+    {"type":"finding","claim":"...","claim_key":"1:genesys:aop","subquestion_ids":["1"],"fields_covered":["机制"],"sources":[{"url":"https://...","tier":"T1","stance":"supports","observed_at":"2026-07-18T00:00:00Z"}],"dimensions_seen":[],"follow_up_questions":["Genesys 是否也有 AOP 机制？"]}
 
 **cleanup 是写入前的最后一道工序——不清理就写等于把垃圾丢进 raw/。**
 ---
@@ -251,7 +251,7 @@ reader 是线索不是证据。核心结论必须回原始来源（浏览器或�
 
 **回写 JSONL（关键）**：截了图后，对应 finding 行必须带 `screenshot_path` 字段：
 ```jsonl
-{"type":"finding","claim":"llama.cpp 定价免费开源","url":"https://github.com/ggerganov/llama.cpp","confidence":"已验证事实","tier":"T1","screenshot_path":"screenshots/llamacpp-readme.png","dimensions_seen":[...]}
+{"type":"finding","claim":"llama.cpp 定价免费开源，并说明适用限制与场景影响","claim_key":"1:llamacpp:pricing","subquestion_ids":["1"],"fields_covered":["价格"],"sources":[{"url":"https://github.com/ggerganov/llama.cpp","tier":"T1","stance":"supports","observed_at":"2026-07-18T00:00:00Z"}],"screenshot_path":"screenshots/llamacpp-readme.png","dimensions_seen":[]}
 ```
 没有这个字段 = 合成 Agent 看不到这张图，等于没截。
 

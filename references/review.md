@@ -16,7 +16,7 @@
 | 级别 | 含义 | 主 Agent 怎么处理 |
 |------|------|------------------|
 | **critical** | 核心结论的 URL 是幻觉 / 实体完全错误 / 核心结论完全无源 | **回 LOOP 补搜**（带 suggested_search 作为新方向） |
-| **non_critical** | 缺个别 URL / 分级偏差 / 冲突没标 / 次要结论问题 | **在 draft 里修**（补 URL、改分级、标冲突） |
+| **non_critical** | 缺个别 URL / 分级偏差 / 冲突没标 / 次要结论问题 | **重派合成 Agent 修 draft**，修完重新审计 |
 
 ## Tier 分级（幻觉 URL 抽样依据）
 
@@ -38,27 +38,31 @@
 
 审计"可信度分级错误"时对照以上定义。如：单源 + T3 来源不应标"已验证事实"。
 
+草稿可以引用 red_flag 的结构化 `sources` 来解释“旧版、冲突或不可靠来源为什么被排除”，但句子必须明确保持否定或限制语义，绝不能把 red_flag 当成当前事实。
+
 ## 输出 schema
 
-```yaml
-critical:
-  - issue: <问题描述>
-    location: <在 draft.md 的位置>
-    action: <需要回 LOOP 补搜的原因>
-    suggested_search: <具体的搜索方向>
-non_critical:
-  - issue: <问题描述>
-    action: <在 draft 里怎么修>
-    location: <位置>
-sampled_stats:
-  total_t3: <int>
-  sampled_t3: <int>
-  total_t2: <int>
-  sampled_t2: <int>
-  total_t1: <int>
-  sampled_t1: <int>
-passed: <bool>
+写入任务目录的 `audit-report.json`：
+
+```json
+{
+  "schema_version": 2,
+  "critical": [
+    {"issue":"问题描述","location":"draft 位置","action":"为什么要回 LOOP","suggested_search":"具体方向"}
+  ],
+  "non_critical": [
+    {"issue":"问题描述","location":"draft 位置","action":"合成 Agent 怎么修"}
+  ],
+  "sampled_stats": {
+    "total_t3": 0, "sampled_t3": 0,
+    "total_t2": 0, "sampled_t2": 0,
+    "total_t1": 0, "sampled_t1": 0
+  },
+  "passed": false
+}
 ```
+
+只有 `critical` 和 `non_critical` 都为空时，`passed` 才能是 `true`。JSON 必须可以被 `JSON.parse` 直接读取，禁止输出注释、代码围栏或额外文字。
 
 ## 不做
 

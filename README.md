@@ -1,101 +1,87 @@
 # Sleuth
 
-让 AI Agent 在做网络研究时知道该信任什么、怀疑什么、什么时候该亲自去看。
+让 AI Agent 在网络研究中知道该去哪里找、什么能当证据、还缺什么，以及什么时候可以停止。
 
-## 解决什么问题
+Sleuth 不是搜索工具，而是研究判断层。它把搜索摘要当线索，把原始页面当证据，并用机器检查门阻止重复记账、浅层搜索、无来源合成和未经审查的交付。
 
-AI Agent 能搜索、能读网页、能操控浏览器，但大多数时候它分不清：
+## 两条路径
 
-- 搜索摘要和原始来源有什么区别
-- reader 抓回来的内容是不是页面真实状态
-- 什么时候该用浏览器亲自验证，什么时候搜索就够了
+| 路径 | 适用情况 | 做法 |
+|---|---|---|
+| 轻任务 | 1-2 次搜索、单一来源即可回答 | 直接研究，核心结论回一手来源核验 |
+| 完整研究 | 多实体、多维度、多源或需要多轮 | 侦察 → 搜索 → 边界反馈 → 继续搜索 → 合成 → 审查 |
 
-Sleuth 不是又一个搜索工具或浏览器自动化框架。它是一套判断层——帮 Agent 在不同工具之间做出正确的选择，并对拿到的证据保持合理的怀疑。
+完整研究包含 5 个子 Agent：
 
-## 怎么工作
+- Scout（侦察）：画信息源地图，写 `landscape.json`
+- Search（搜索）：每轮独占一个 raw 文件，写结构化证据
+- Boundary（边界）：判断缺口并提炼跨 Agent 线索，写 `boundary-report.json`
+- Synthesize（合成）：只基于证据写 `draft.md`
+- Review（审查）：检查引用和可信度，写 `audit-report.json`
 
-Sleuth 根据任务复杂度分两条路径：
+主 Agent 只负责调度和运行检查门，不自己补研究结论。
 
-| 路径 | 什么时候用 | 做什么 |
-|------|-----------|--------|
-| 轻任务 | 1-2 次搜索能答完 | 直接答 + 必要时一次 WebFetch 验证一手来源 |
-| 并行调研 | 深度报告 / 多源交叉 / 多个独立子主题 / 跨多日 | 主 Agent 调度，派侦察/搜索/边界/审查 4 种子 Agent，状态写文件 |
+## 关键保障
 
-所有路径都遵循工具升级原则：**从最轻的工具开始，证据不够再升级。**
-
-- 找不到入口 → 先搜索
-- 知道在哪但没读内容 → 先用 reader
-- reader 结果不确定是不是真的 → 用浏览器验证原始页面
-- 需要登录态、动态交互 → 只能用浏览器
-
-所有研究结论区分可信度：已验证事实 > 高置信推断 > 未确认线索 > 冲突信息 > 覆盖缺口。
+- `raw/` 是唯一原始账本；整理程序每次重建结果，不会重复追加。
+- 每条证据明确绑定子问题、覆盖字段、来源日期和稳定 `claim_key`。
+- 同一结论保留多个支持或反对来源，置信度由程序计算。
+- 风险标记也保留结构化来源，让报告能解释“为什么排除旧资料”，又不会把旧资料算成当前事实。
+- 7 种任务类型使用不同的跨轮关系：对比、纵深、时序、因果、问题解决、清单、争议。
+- Round 2+ 必须用 `context_links` 证明使用了前序线索。
+- 边界、草稿和审查都由严格 JSON 检查，不靠关键词猜测。
+- 只有最终审查通过才能交付。
 
 ## 安装
 
-### 前置依赖
-
-| 依赖 | 用途 |
-|------|------|
-| **Node.js >= 18** | 运行辅助脚本 |
-| **agent-browser** | 浏览器操作 CLI，`npm i -g agent-browser && agent-browser install` |
-| **Chrome** | Chrome 144+（chrome://inspect/#remote-debugging 勾选 toggle） |
-
-可选：**sqlite3**（Chrome 历史搜索）、**yt-dlp**（YouTube 字幕）。
-
-### 安装 skill
-
 ```bash
-# 安装到当前项目（支持 Claude Code、Codex、Gemini CLI 等 50+ Agent）
 npx skills add xiixiixixi/Sleuth
-
-# 全局安装
-npx skills add xiixiixixi/Sleuth -g
-
-# 只安装到指定 Agent
-npx skills add xiixiixixi/Sleuth -a claude-code
 ```
 
-安装后 sleuth 会自动注册。Agent 收到搜索、浏览、验证类任务时会自动加载。
-
-更新：
+基础要求：Node.js ≥ 18。只有需要动态页面、登录态或交互时，才需要 `agent-browser` ≥ 0.28 和 Chrome。
 
 ```bash
-npx skills update sleuth
+# 普通研究检查
+node scripts/check-deps.mjs --mode light --check-only
+
+# 确实需要浏览器时
+node scripts/check-deps.mjs --mode full --check-only
 ```
 
-### Chrome 连接
+Sleuth 不会自行启动或关闭 Chrome。`scripts/launch-chrome.mjs` 只能由用户明确运行，并要求 `--confirm-close-browser`；脚本不会强制结束未正常退出的日常 Chrome。
 
-- **Approval mode（全平台）**：连你的日常 Chrome，天然带登录态。一次性操作：`chrome://inspect/#remote-debugging` 勾选 toggle。每次新连接 Chrome 弹窗点 Allow。没开 toggle 就报错，sleuth 不自起 Chrome。
+## 测试
 
-check-deps 检查环境，输出端口和连接变量。
-
-## 安全
-
-- 不提取 cookie、密码或任何敏感凭据
-- 不绕过付费墙
-- 不对敏感页面截图
-- 不执行会产生记录的操作（如提交表单），除非你明确要求
-- 所有浏览器操作在你的本地 Chrome 中进行，你始终可见
-
-## 目录结构
-
-```
-├── SKILL.md                    主 skill 文件
-├── references/
-│   ├── scout.md             侦察执行（广度扫描策略 / landscape.json 返回格式）
-│   ├── search.md            搜索执行（查询 / 工具 / 失败 / 循环 / JSONL 返回）
-│   ├── boundary.md          边界评估（4 固定维度 / terminate_recommended / 输出 schema）
-│   ├── review.md            证据链审计（4 项审计 / 分层抽样 / Tier 分级 / 输出 schema）
-│   └── tool-guide.md        agent-browser 命令速查 / 反爬降级 / 特殊内容
-├── scripts/                    CLI 工具（环境检查 / 子 Agent prompt / 本地 URL 搜索）
-│   ├── check-deps.mjs       环境检查
-│   ├── spawn-subagent.mjs   子 Agent prompt 生成
-│   ├── find-url.mjs         本地 Chrome 历史/书签搜索
-│   └── lib/                 核心逻辑（环境检查 / 浏览器发现 / 输出目录）
-├── LICENSE
-└── README.md
+```bash
+node --test scripts/__tests__/*.mjs
 ```
 
-## License
+完整测试与验收方法见 `docs/TESTING.md`，当前问题的专项验收见 `docs/CURRENT-PROBLEM.md`。
 
-MIT
+## 目录
+
+```text
+SKILL.md                         主 Agent 的精简操作流程
+references/scout.md             侦察规则
+references/search.md            搜索、证据与多模态规则
+references/boundary.md          覆盖评估与跨 Agent 线索
+references/review.md            证据链审查
+references/tool-guide.md        浏览器操作参考
+scripts/normalize.mjs           确定性重建证据与统计
+scripts/classify-task.mjs       根据用户问题初判 7 种深度类型
+scripts/check-depth.mjs         结构与跨轮深度检查
+scripts/validate-state.mjs      流程检查门
+scripts/calc-novelty.mjs        统一收敛判断
+scripts/inject-hints.mjs        下一轮线索注入
+scripts/spawn-subagent.mjs      5 种子 Agent 的任务契约
+docs/                            当前设计、问题、测试和状态文档
+```
+
+## 安全边界
+
+- 不提取 cookie、密码或敏感凭据
+- 不绕付费墙、不对敏感页面截图
+- 不替用户提交表单、下单、发帖、改配置或删除内容
+- 不静默放弃用户指定的实体或范围
+
+MIT License

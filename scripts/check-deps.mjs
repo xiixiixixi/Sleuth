@@ -11,6 +11,7 @@ const HELP = `用法: node check-deps.mjs [选项]
 
 选项:
   --check-only              非破坏性诊断（不写运行目录）
+  --mode <light|full>       light 只检查基础研究；full 额外要求浏览器可连接
   --task-name <name>        按任务名创建/解析输出目录（多 Agent 协作需独立目录）
   --json                    输出机器可读 JSON
   --help, -h                显示此帮助
@@ -24,7 +25,7 @@ const KNOWN_FLAGS = new Set([
 ]);
 
 const VALUE_FLAGS = new Set([
-  '--task-name',
+  '--task-name', '--mode',
 ]);
 
 function parseArgv(argv) {
@@ -76,7 +77,13 @@ const options = {
   checkOnly: booleans.has('checkOnly'),
   json: booleans.has('json'),
   taskName: values.taskName,
+  mode: values.mode || 'light',
 };
+
+if (!['light', 'full'].includes(options.mode)) {
+  console.error('--mode 只允许 light 或 full');
+  process.exit(2);
+}
 
 main(options).catch((err) => {
   console.error('check-deps error:', err.message);

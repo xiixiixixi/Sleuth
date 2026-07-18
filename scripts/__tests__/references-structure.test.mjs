@@ -1,457 +1,122 @@
-/**
- * references/ + SKILL.md 结构防回潮测试。
- *
- * 文档结构（2026-06-19 第三次重构）：
- *   SKILL.md            主 Agent 操作手册（含合成/证据分层/交付）
- *   references/
- *     search.md         搜索子 Agent
- *     boundary.md       边界子 Agent
- *     review.md         审查子 Agent
- *     tool-guide.md     通用工具手册
- *
- * 旧文件（research.md / synthesis.md / search-guide.md / deep-research.md /
- * multi-agent.md / orchestration.md）必须不存在。
- */
+/** 主流程与 references 的契约测试。 */
 
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { join } from 'node:path';
 
-const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
-const REFERENCES = join(ROOT, 'references');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const read = (relative) => readFileSync(path.join(ROOT, relative), 'utf8');
 
-function readRel(rel) {
-  return readFileSync(join(ROOT, rel), 'utf8');
-}
-
-test('references/ has exactly AGENTS.md + boundary.md + review.md + search.md + tool-guide.md', () => {
-  const files = readdirSync(REFERENCES).filter(f => !f.startsWith('.'));
-  files.sort();
-  assert.deepEqual(files, ['AGENTS.md', 'boundary.md', 'review.md', 'scout.md', 'search.md', 'tool-guide.md'],
-    `references/ must contain only AGENTS.md + boundary.md + review.md + scout.md + search.md + tool-guide.md, got: ${files.join(', ')}`);
+test('references 只保留当前 5 个角色/工具文档', () => {
+  const files = readdirSync(path.join(ROOT, 'references')).filter((file) => !file.startsWith('.')).sort();
+  assert.deepEqual(files, ['AGENTS.md', 'boundary.md', 'review.md', 'scout.md', 'search.md', 'tool-guide.md']);
 });
 
-test('old references files are gone (no rollback)', () => {
-  const oldFiles = [
-    'search-guide.md',
-    'deep-research.md',
-    'multi-agent.md',
-    'orchestration.md',
-    'research.md',
-    'synthesis.md',
-  ];
-  for (const f of oldFiles) {
-    assert.strictEqual(existsSync(join(REFERENCES, f)), false, `${f} must not exist in references/`);
+test('已废弃 references 和会话系统不会回归', () => {
+  for (const file of ['search-guide.md', 'deep-research.md', 'multi-agent.md', 'orchestration.md', 'research.md', 'synthesis.md']) {
+    assert.equal(existsSync(path.join(ROOT, 'references', file)), false);
+  }
+  const all = ['SKILL.md', 'references/search.md', 'references/boundary.md', 'references/review.md', 'scripts/spawn-subagent.mjs'].map(read).join('\n');
+  assert.doesNotMatch(all, /session-logger|--main-sid|subagent_done|deliver\.mjs|research-index/);
+});
+
+test('SKILL.md 保持精简且只承担主调度', () => {
+  const skill = read('SKILL.md');
+  const lines = skill.split('\n').length;
+  assert.ok(lines <= 150, `SKILL.md 应不超过 150 行，当前 ${lines}`);
+  assert.match(skill, /主 Agent 只调度/);
+  assert.doesNotMatch(skill, /```jsonl/);
+  assert.doesNotMatch(skill, /## Tier 分级|## 5 级可信度/);
+});
+
+test('SKILL.md 的机器步骤顺序完整', () => {
+  const skill = read('SKILL.md');
+  const commands = ['check-deps.mjs', 'spawn-subagent.mjs --role scout', '--phase 1.5', '--phase 2', '--phase 2-typecheck', '--role search', '--phase 3-raw', 'normalize.mjs', 'check-depth.mjs', '--phase 3-findings', 'calc-novelty.mjs', '--role boundary', '--phase 4', 'inject-hints.mjs', '--phase 7-ready', '--role synthesize', '--phase 7-draft', '--role review', '--phase 8-audit'];
+  let cursor = -1;
+  for (const command of commands) {
+    const next = skill.indexOf(command, cursor + 1);
+    assert.ok(next > cursor, `${command} 缺失或顺序错误`);
+    cursor = next;
   }
 });
 
-test('tool-guide.md preserved as independent file', () => {
-  assert.ok(existsSync(join(REFERENCES, 'tool-guide.md')), 'tool-guide.md must exist');
-  const tool = readFileSync(join(REFERENCES, 'tool-guide.md'), 'utf8');
-  assert.match(tool, /pushstate/, 'must contain SPA pushstate command');
-  assert.match(tool, /frame/, 'must contain iframe frame command');
-  assert.match(tool, /network requests/, 'must contain network requests command');
-  assert.match(tool, /keyboard type|mouse move/, 'must contain low-level mouse/keyboard');
-  assert.match(tool, /find text|find role|find label/, 'must contain find by text/role/label');
+test('SKILL.md 不自动启动 Chrome，并保留安全边界', () => {
+  const skill = read('SKILL.md');
+  assert.match(skill, /禁止自动运行 `launch-chrome\.mjs`/);
+  assert.match(skill, /最多并行 5/);
+  assert.match(skill, /改变范围前必须询问用户/);
+  assert.match(skill, /只有 `8-audit` 通过才能交付/);
 });
 
-test('SKILL.md references search.md + boundary.md + review.md + tool-guide.md', () => {
-  // SKILL.md 精简后不再显式列 references 表——引用关系通过 spawn-subagent.mjs 的 prompt 模板保证
-  // 子 Agent prompt 里写"读 references/X.md"，那才是真正的引用点
-  const spawn = readFileSync(join(ROOT, 'scripts/spawn-subagent.mjs'), 'utf8');
-  assert.match(spawn, /references\/search\.md/, 'spawn-subagent must reference search.md');
-  assert.match(spawn, /references\/boundary\.md/, 'must reference boundary.md');
-  assert.match(spawn, /references\/review\.md/, 'must reference review.md');
-  assert.match(spawn, /references\/scout\.md/, 'must reference scout.md');
+test('search.md 定义可审计的多来源 finding', () => {
+  const search = read('references/search.md');
+  for (const field of ['claim_key', 'subquestion_ids', 'fields_covered', 'sources', 'source_date', 'observed_at', 'context_links']) {
+    assert.match(search, new RegExp(field));
+  }
+  assert.match(search, /禁止只保留一个网址/);
+  assert.match(search, /red_flag.*sources/);
+  assert.match(search, /禁止只把 URL 塞在 reason/);
 });
 
-test('root AGENTS.md points to new references structure', () => {
-  const agents = readRel('AGENTS.md');
-  assert.match(agents, /references\/search\.md/);
-  assert.match(agents, /references\/boundary\.md/);
-  assert.match(agents, /references\/review\.md/);
-  assert.match(agents, /references\/tool-guide\.md/);
-  assert.doesNotMatch(agents, /references\/synthesis\.md/);
-});
-
-test('README.md directory tree lists all 4 references', () => {
-  const readme = readRel('README.md');
-  assert.match(readme, /search\.md/);
-  assert.match(readme, /boundary\.md/);
-  assert.match(readme, /review\.md/);
-  assert.match(readme, /tool-guide\.md/);
-  assert.doesNotMatch(readme, /synthesis\.md/);
-});
-
-test('references/AGENTS.md lists all 4 references', () => {
-  const meta = readFileSync(join(REFERENCES, 'AGENTS.md'), 'utf8');
-  assert.match(meta, /search\.md/);
-  assert.match(meta, /boundary\.md/);
-  assert.match(meta, /review\.md/);
-  assert.match(meta, /tool-guide\.md/);
-  assert.doesNotMatch(meta, /synthesis\.md/);
-});
-
-// ===== search.md 内容 =====
-
-test('search.md covers required content blocks', () => {
-  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
-  assert.match(search, /## 1\. 必搜 vs 必不搜/);
-  assert.match(search, /## 2\. 起步查询规则/);
-  assert.match(search, /## 3\. 工具选择决策树/);
-  assert.match(search, /## 4\. 核心循环/);
-  assert.match(search, /## 5\. 终止信号/);
-  assert.match(search, /失败兜底/);
-  assert.match(search, /视频|音频|PDF|图片/);
-});
-
-test('search.md requires dimensions_seen in JSONL output', () => {
-  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
-  assert.match(search, /dimensions_seen/);
-});
-
-// ===== boundary.md 内容 =====
-
-test('boundary.md has 4 fixed dimensions + terminate_recommended + output schema', () => {
-  const boundary = readFileSync(join(REFERENCES, 'boundary.md'), 'utf8');
-  assert.match(boundary, /来源类型多样性/);
-  assert.match(boundary, /视角覆盖/);
-  assert.match(boundary, /时间覆盖/);
-  assert.match(boundary, /地域\/语境覆盖/);
-  assert.match(boundary, /terminate_recommended/);
-  assert.match(boundary, /uncovered_dimensions/);
-  assert.match(boundary, /所有 uncovered priority 均为.*low/, 'must have low-priority termination rule');
-});
-
-// ===== review.md 内容 =====
-
-test('review.md has 4 audit items + Tier grading + layered sampling + 5-level confidence', () => {
-  const review = readFileSync(join(REFERENCES, 'review.md'), 'utf8');
-  assert.match(review, /缺源 claim/);
-  assert.match(review, /幻觉 URL/);
-  assert.match(review, /抹平冲突/);
-  assert.match(review, /可信度分级错误/);
-  assert.match(review, /Tier 1.*抽 5-10/);
-  assert.match(review, /Tier 2.*抽 50%/);
-  assert.match(review, /Tier 3.*100%/);
-  assert.match(review, /已验证事实/);
-  assert.match(review, /高置信推断/);
-  assert.match(review, /sampled_stats/);
-  assert.match(review, /允许网页读取工具验证已有 URL/);
-});
-
-// ===== SKILL.md 结构 =====
-
-test('SKILL.md has operation-manual structure (第 0-7 步)', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /## 第 0 步.*环境检查/);
-  assert.match(skill, /## 第 1 步.*判断任务复杂度/);
-  assert.match(skill, /## 第 2 步.*task_spec/);
-  assert.match(skill, /## 第 3 步.*派搜索 Agent/);
-  assert.match(skill, /## 第 4 步.*派边界 Agent/);
-  assert.match(skill, /## 第 5 步.*检查终止信号/);
-  assert.match(skill, /## 第 6 步.*混合派发/);
-  assert.match(skill, /## 第 7 步.*合成.*审查/);
-  assert.match(skill, /task_spec\.md/);
-  assert.match(skill, /findings\.jsonl/);
-  assert.match(skill, /directions\.json/);
-});
-
-test('synthesize template has synthesis rules (T1/T2/T3 + 5-level + conflict + citation + PRD)', () => {
-  // 合成规则从 SKILL.md 移到 spawn-subagent.mjs 的 synthesize 模板（规则 2：子 Agent 职责不写 SKILL.md）
-  const spawn = readFileSync(join(ROOT, 'scripts/spawn-subagent.mjs'), 'utf8');
-  assert.match(spawn, /T1.*官方/, 'must have T1 tier');
-  assert.match(spawn, /T2.*行业/, 'must have T2 tier');
-  assert.match(spawn, /T3.*搜索摘要/, 'must have T3 tier');
-  assert.match(spawn, /已验证事实/);
-  assert.match(spawn, /冲突/);
-  assert.match(spawn, /引用纪律/);
-  assert.match(spawn, /PRD/);
-});
-
-test('search.md + normalize.mjs have claim_id + round + directions schema', () => {
-  // claim_id 由 normalize.mjs 产出，round 在 spawn-subagent 派发时传入，directions.json 在 search.md
-  const normalize = readFileSync(join(ROOT, 'scripts/normalize.mjs'), 'utf8');
-  assert.match(normalize, /claim_id/, 'normalize must produce claim_id');
-  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
-  assert.match(search, /directions\.json/, 'search.md must document directions.json');
-  // SKILL.md 仍有收敛检查（Rule A/B）
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /Rule A/, 'must have convergence Rule A');
-});
-
-// ===== M4: findings.jsonl schema completeness =====
-
-test('search.md documents finding types', () => {
-  // schema 在 search.md
-  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
-  assert.match(search, /finding/);
-  assert.match(search, /gap/);
-  assert.match(search, /red_flag/);
-});
-
-test('SKILL.md has goal-oriented prompt principle', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /说要什么，不说怎么做/);
-  assert.match(skill, /must-verify/);
-  assert.match(skill, /spawn-subagent\.mjs/);
-});
-
-test('SKILL.md has "长程任务行为" section with 3 behavioral constraints', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /## 长程任务行为/);
-  assert.match(skill, /零交互/);
-  assert.match(skill, /就绪即执行/);
-  assert.match(skill, /状态持久化/);
-  assert.match(skill, /认知循环/);
-});
-
-test('SKILL.md does NOT contain system-layer framework details (v2: progress.json/stale_count now allowed)', () => {
-  const skill = readRel('SKILL.md');
-  // v2 引入了 progress.json + stale_count（calc-novelty.mjs 输出），这些是允许的
-  assert.doesNotMatch(skill, /心跳看门狗|heartbeat watchdog/);
-  assert.doesNotMatch(skill, /iteration_log/);
-  assert.doesNotMatch(skill, /L0.*L1.*L2|三层相互校验/);
-  assert.doesNotMatch(skill, /\/loop 2h|cron|resident shell|hourly patrol/);
-});
-
-test('SKILL.md has CHECKPOINT for entity abandonment (v2: AOP fix)', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /任务范围变更/, 'must have entity abandonment CHECKPOINT rule');
-  assert.match(skill, /不许单方面放弃/, 'must prohibit unilateral entity abandonment');
-});
-
-test('SKILL.md has main agent prohibition list (v2: §16)', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /主 Agent 不许做的事/, 'must have prohibition list');
-  assert.match(skill, /不许手拼子 Agent/, 'must prohibit hand-built prompts');
-  assert.match(skill, /不许自己做合成/, 'must prohibit main agent synthesis');
-  assert.match(skill, /不许编造数字/, 'must prohibit fabricated numbers');
-  assert.match(skill, /不许凭印象标 task_spec/, 'must prohibit guessing [x] status');
-  assert.match(skill, /不许跳过 normalize/, 'must prohibit skipping normalizer');
-  // 反认知循环规则在长程任务行为段
-  assert.match(skill, /连续 2 轮.*换路|强制换路/, 'must prohibit same-direction redispatch');
-});
-
-test('boundary.md and review.md do NOT duplicate tool-guide.md commands', () => {
-  const boundary = readFileSync(join(REFERENCES, 'boundary.md'), 'utf8');
-  assert.doesNotMatch(boundary, /pushstate/);
-  assert.doesNotMatch(boundary, /frame "#iframe-selector"|frame main/);
-  assert.doesNotMatch(boundary, /network requests/);
-
-  const review = readFileSync(join(REFERENCES, 'review.md'), 'utf8');
-  assert.doesNotMatch(review, /pushstate/);
-  assert.doesNotMatch(review, /frame "#iframe-selector"|frame main/);
-  assert.doesNotMatch(review, /network requests/);
-});
-
-test('references/ do NOT contain system-layer scheduling details', () => {
-  for (const f of ['search.md', 'boundary.md', 'review.md', 'tool-guide.md']) {
-    const content = readFileSync(join(REFERENCES, f), 'utf8');
-    assert.doesNotMatch(content, /心跳看门狗|heartbeat watchdog/);
-    assert.doesNotMatch(content, /stale_count/);
-    assert.doesNotMatch(content, /L0.*L1.*L2|三层相互校验/);
+test('search.md 保留搜索判断、失败处理与多模态流程', () => {
+  const search = read('references/search.md');
+  for (const section of ['必搜 vs 必不搜', '起步查询规则', '工具选择决策树', '核心循环', '终止信号', '失败兜底', '视频', '音频', 'PDF', '图片']) {
+    assert.match(search, new RegExp(section));
   }
 });
 
-test('references/ do NOT reference SKILL.md (self-contained for sub-agents)', () => {
-  for (const f of ['search.md', 'boundary.md', 'review.md', 'tool-guide.md']) {
-    const content = readFileSync(join(REFERENCES, f), 'utf8');
-    assert.doesNotMatch(content, /SKILL\.md/, `${f} must not reference SKILL.md (sub-agents can't read it)`);
+test('boundary.md 支持 7 种深度类型和跨 Agent 证据连接', () => {
+  const boundary = read('references/boundary.md');
+  for (const type of ['comparison', 'deep_dive', 'timeline', 'causal', 'problem_solving', 'enumeration', 'debate']) {
+    assert.match(boundary, new RegExp(type));
+  }
+  assert.match(boundary, /source_claim_keys/);
+  assert.match(boundary, /evidence_map/);
+  assert.match(boundary, /boundary-report\.json/);
+  assert.doesNotMatch(boundary, /```yaml/);
+});
+
+test('boundary.md 保留覆盖、偏移、实体和追问四项检查', () => {
+  const boundary = read('references/boundary.md');
+  for (const item of ['覆盖度', '方向偏移', '实体准确', 'Follow-ups 状态', 'entity_mismatch', 'follow_ups_unresolved']) {
+    assert.match(boundary, new RegExp(item));
   }
 });
 
-// ===== M4: Schema 归一化巩固 =====
-
-test('search.md §4.3 has hard constraint language for type/confidence/tier', () => {
-  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
-  assert.match(search, /硬约束.*不允许自创/, 'must have hard constraint language');
-  assert.match(search, /只允许以下 3 个值/, 'must enumerate allowed type values on one line');
-  assert.match(search, /整数不接受/, 'must reject integer tier values');
-});
-
-test('SKILL.md §3.3 has normalization step (v2: calls normalize.mjs)', () => {
-  const skill = readRel('SKILL.md');
-  // v2: 归一化逻辑移到 normalize.mjs 脚本，SKILL.md 只说「跑 normalize.mjs」
-  assert.match(skill, /normalize\.mjs/, 'must call normalize.mjs');
-  assert.match(skill, /stats-summary\.json/, 'must output stats-summary.json');
-  assert.match(skill, /不读 findings\.jsonl 全文/, 'must state main agent does not read findings full text');
-});
-
-// ===== M6: 并发控制 =====
-
-test('SKILL.md has concurrency cap of 5', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /最多并行 5/, 'must have ≤5 concurrency cap');
-  assert.match(skill, /分两批/, 'must have batching strategy');
-});
-
-// ===== M7: 合成（v2: 由合成 Agent 做，不是主 Agent）=====
-
-test('SKILL.md §7 delegates synthesis to synthesize Agent (v2)', () => {
-  const skill = readRel('SKILL.md');
-  // v2: 主 Agent 不做合成，派合成 Agent
-  assert.match(skill, /synthesize/, 'must reference synthesize role');
-  assert.match(skill, /你不做合成.*派合成 Agent/, 'must state main agent delegates synthesis');
-  assert.match(skill, /--role synthesize/, 'must show synthesize dispatch command');
-});
-
-// ===== M9: 截图/视频工作流 =====
-
-test('tool-guide.md has correct screenshot save workflow', () => {
-  const tool = readFileSync(join(REFERENCES, 'tool-guide.md'), 'utf8');
-  assert.match(tool, /截图默认存到.*agent-browser.*tmp/, 'must document default save path');
-  assert.match(tool, /不要用.*--file/, 'must warn against --file flag');
-});
-
-test('tool-guide.md uses t0/t1/t2 tab format (not raw integers)', () => {
-  const tool = readFileSync(join(REFERENCES, 'tool-guide.md'), 'utf8');
-  assert.match(tool, /tab t2/, 'must use t0/t1/t2 format');
-  assert.doesNotMatch(tool, /tab 2\s/, 'must not show raw integer tab switching');
-});
-
-test('search.md §6.2 has screenshot→analyze→embed workflow', () => {
-  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
-  assert.match(search, /截图.*分析.*内嵌/, 'must have screenshot→analyze→embed flow');
-  assert.match(search, /vision 工具分析/, 'must mention vision tool analysis');
-});
-
-// ===== M1: Scout Agent =====
-
-test('search.md has no scout-specific content (scout reads search.md §2+§3 only)', () => {
-  // scout prompt is generated by spawn-subagent.mjs, not stored in search.md
-  // this test just verifies search.md §2+§3 exist for scout to read
-  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
-  assert.match(search, /## 2\. 起步查询规则/, 'scout reads §2');
-  assert.match(search, /## 3\. 工具选择决策树/, 'scout reads §3');
-});
-
-// ===== M2: Search self-iteration =====
-
-test('search.md §4 has hard loop constraint — no single-round return', () => {
-  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
-  assert.match(search, /不允许搜一轮就返回/, 'must prohibit single-round return');
-  assert.match(search, /硬约束/, 'must be labeled as hard constraint');
-});
-
-test('search.md §4 has explicit exit conditions with depth requirement', () => {
-  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
-  assert.match(search, /退出条件/, 'must have exit conditions');
-  assert.match(search, /200 字符/, 'must have finding depth requirement (≥200 chars)');
-});
-
-test('search.md §4.5 has cleanup step with follow_up_questions', () => {
-  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
-  assert.match(search, /### 4\.5 返回前 cleanup/, 'must have §4.5 cleanup section');
-  assert.match(search, /follow_up_questions/, 'must mention follow_up_questions');
-  assert.match(search, /不返回 raw HTML/, 'must prohibit returning raw content');
-});
-
-// ===== M3: follow_ups 机制 =====
-
-test('search.md §4.3 JSONL has follow_up_questions field', () => {
-  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
-  assert.match(search, /follow_up_questions.*Genesys/, 'JSONL example must have follow_up_questions');
-});
-
-test('search.md has follow_ups.json schema', () => {
-  // follow_ups schema 在 search.md + boundary.md，不在 SKILL.md（精简后 state schema 段移除）
-  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
-  assert.match(search, /follow_up/);
-  const boundary = readFileSync(join(REFERENCES, 'boundary.md'), 'utf8');
-  assert.match(boundary, /follow_ups_unresolved/);
-});
-
-test('SKILL.md §6 references follow_ups as direction source', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /follow_up/, 'must reference follow_ups');
-  assert.match(skill, /P1.*follow_up|follow_up.*P1/, 'P1 vertical deep-dive uses follow_ups');
-});
-
-// ===== M5: 边界重定义 =====
-
-test('boundary.md has 4 check dimensions', () => {
-  const boundary = readFileSync(join(REFERENCES, 'boundary.md'), 'utf8');
-  assert.match(boundary, /覆盖度.*Coverage/);
-  assert.match(boundary, /方向偏移.*Direction Drift/);
-  assert.match(boundary, /实体准确.*Entity Accuracy/);
-  assert.match(boundary, /Follow-ups 状态/);
-});
-
-test('boundary.md output schema has direction_drift + entity_mismatch + follow_ups_unresolved', () => {
-  const boundary = readFileSync(join(REFERENCES, 'boundary.md'), 'utf8');
-  assert.match(boundary, /direction_drift:/);
-  assert.match(boundary, /entity_mismatch:/);
-  assert.match(boundary, /follow_ups_unresolved:/);
-});
-
-test('boundary.md entity_mismatch forces no-terminate', () => {
-  const boundary = readFileSync(join(REFERENCES, 'boundary.md'), 'utf8');
-  assert.match(boundary, /entity_mismatch.*强制不终止/);
-});
-
-// ===== M8: 审计分级 =====
-
-test('review.md has critical / non_critical grading', () => {
-  const review = readFileSync(join(REFERENCES, 'review.md'), 'utf8');
+test('review.md 使用 JSON 审计并规定抽样率', () => {
+  const review = read('references/review.md');
+  assert.match(review, /audit-report\.json/);
   assert.match(review, /critical/);
   assert.match(review, /non_critical/);
-  assert.match(review, /回 LOOP/);
+  assert.match(review, /Tier 2.*50%/);
+  assert.match(review, /Tier 3.*100%/);
+  assert.match(review, /都为空时.*passed.*true/);
+  assert.doesNotMatch(review, /```yaml/);
 });
 
-test('SKILL.md §7.8 has re-loop trigger with hard cap 3', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /critical.*回 LOOP/);
-  assert.match(skill, /最多 3 次/);
+test('scout 和 tool guide 的职责不重叠', () => {
+  const scout = read('references/scout.md');
+  const tool = read('references/tool-guide.md');
+  assert.match(scout, /不开浏览器/);
+  assert.match(tool, /pushstate/);
+  assert.match(tool, /network requests/);
+  assert.match(tool, /截图默认存到/);
+  assert.match(tool, /不要用.*--file/);
 });
 
-// ===== M12: task_spec 动态格式 =====
-
-test('SKILL.md task_spec has status tracking + hierarchy', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /\[ \]/, 'task_spec must use [ ] status prefix');
-  assert.match(skill, /\[x\]/, 'task_spec must show [x] done format');
-  assert.match(skill, /follow_up/, 'task_spec must support follow_up sub-nodes');
+test('references 不反向引用 SKILL.md', () => {
+  for (const file of ['search.md', 'boundary.md', 'review.md', 'scout.md', 'tool-guide.md']) {
+    assert.doesNotMatch(read(`references/${file}`), /SKILL\.md/, file);
+  }
 });
 
-test('SKILL.md has task_spec operation rules (mark/attach/add/merge)', () => {
-  const skill = readRel('SKILL.md');
-  // 精简后操作规则浓缩，但核心动作要存在
-  assert.match(skill, /\[x\]/, 'must have mark-done');
-  assert.match(skill, /follow_up/, 'must have follow_up handling');
-});
-
-// ===== M13: task_spec 每轮更新 =====
-
-test('SKILL.md has task_spec update step before boundary', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /更新 task_spec 状态/, 'must have task_spec update step');
-  assert.match(skill, /派边界 Agent 之前/, 'must run before boundary');
-});
-
-// ===== M14: 边界加完成度检查 =====
-
-test('boundary.md has task_spec completion check', () => {
-  const boundary = readFileSync(join(REFERENCES, 'boundary.md'), 'utf8');
-  assert.match(boundary, /task_spec 完成度.*Task Spec Completion/, 'must have completion dimension');
-  assert.match(boundary, /uncovered_subquestions/, 'must output uncovered subquestions');
-  assert.match(boundary, /uncovered_subquestions.*强制不终止/, 'uncovered subquestions must block termination');
-});
-
-// ===== M15: 终止条件含完成度前置 =====
-
-test('SKILL.md termination has task_spec completion precondition', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /前置.*task_spec.*\[x\]|task_spec 所有子问题.*\[x\]/, 'must have completion precondition');
-  assert.match(skill, /第 6 步/, 'unchecked items must go to step 6');
-});
-
-// ===== M16: 混合派发 =====
-
-test('SKILL.md has mixed dispatch strategy', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /P1 垂直深挖/, 'must have P1 vertical deep-dive');
-  assert.match(skill, /P2 广度推进/, 'must have P2 breadth advance');
+test('README、AGENTS 和 CLAUDE 引用的核心文件都存在', () => {
+  for (const doc of ['README.md', 'AGENTS.md', 'CLAUDE.md']) {
+    const text = read(doc);
+    for (const match of text.matchAll(/`((?:scripts|references)\/[A-Za-z0-9_./-]+\.(?:mjs|md))`/g)) {
+      assert.ok(existsSync(path.join(ROOT, match[1])), `${doc} 引用了不存在的 ${match[1]}`);
+    }
+  }
 });

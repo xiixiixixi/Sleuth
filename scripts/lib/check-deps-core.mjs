@@ -9,12 +9,9 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { getWebSocketUrl } from './browser-discovery.mjs';
 import { resolveOutputDir, ensureOutputDir } from './output.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const ROOT = path.resolve(path.dirname(__filename), '../..');
 const SITE_PATTERNS_DIR = path.join(os.homedir(), '.sleuth', 'site-patterns');
 
 function checkAgentBrowser() {
@@ -23,7 +20,9 @@ function checkAgentBrowser() {
       encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000,
     }).trim();
     const match = version.match(/(\d+\.\d+\.\d+)/);
-    return { status: 'ok', version: match ? `v${match[1]}` : version };
+    const parsed = match ? match[1].split('.').map(Number) : null;
+    const supported = parsed && (parsed[0] > 0 || parsed[1] >= 28);
+    return { status: supported ? 'ok' : 'outdated', version: match ? `v${match[1]}` : version, minimum: 'v0.28.0' };
   } catch {
     return { status: 'not-found', version: null };
   }
@@ -51,18 +50,16 @@ function listSitePatterns() {
 
 export async function main(options = {}) {
   const results = {};
+  const mode = options.mode || 'light';
+  results.mode = mode;
 
-  // 1. agent-browser（必需）
+  // 1. agent-browser（只有 full 模式必需）
   const ab = checkAgentBrowser();
   results.agentBrowser = ab;
-  if (ab.status !== 'ok') {
-    console.error('agent-browser: not found — npm i -g agent-browser && agent-browser install');
-    process.exit(1);
-  }
-  if (!options.json) console.log(`agent-browser: ok (${ab.version})`);
+  if (!options.json) console.log(`agent-browser: ${ab.status}${ab.version ? ` (${ab.version})` : ''}`);
 
-  // 2. Chrome toggle（必需）—— 只走 approval mode 一条路
-  const wsInfo = await getWebSocketUrl();
+  // 2. Chrome toggle（只有 full 模式必需）——不启动或关闭 Chrome
+  const wsInfo = mode === 'full' && ab.status === 'ok' ? await getWebSocketUrl() : null;
   if (wsInfo) {
     if (!options.json) {
       console.log(`chrome-cdp: ok (${wsInfo.label}, port ${wsInfo.port})`);
@@ -77,18 +74,23 @@ export async function main(options = {}) {
       auth_state: 'unknown',
     };
   } else {
-    if (!options.json) {
+    if (!options.json && mode === 'full') {
       console.log('chrome: 未发现可连的浏览器');
-      console.log('  推荐：chrome://inspect/#remote-debugging 勾 toggle（Chrome 144+）');
+      console.log('  如本任务需要浏览器：打开 chrome://inspect/#remote-debugging 并勾选开关');
     }
     results.cdp = {
-      browser_mode: 'unavailable',
+      browser_mode: mode === 'light' ? 'not-checked' : 'unavailable',
       cdp_port: null,
       cdp_ws: null,
       browser_label: null,
       auth_state: 'unknown',
     };
   }
+
+  results.ready = mode === 'light' || (ab.status === 'ok' && Boolean(wsInfo));
+  if (mode === 'full' && ab.status === 'not-found' && !options.json) console.error('full 模式需要 agent-browser >= 0.28：npm i -g agent-browser@latest');
+  if (mode === 'full' && ab.status === 'outdated' && !options.json) console.error(`agent-browser ${ab.version} 过旧，至少需要 v0.28.0`);
+  if (mode === 'full' && !wsInfo && !options.json) console.error('full 模式需要用户先允许 Chrome 远程调试；Sleuth 不会自行启动或关闭 Chrome');
 
   // 3. 输出目录
   // 3. 输出目录（任务模式优先于日期模式）
@@ -117,15 +119,15 @@ export async function main(options = {}) {
 
   // 6. JSON 输出
   if (options.json) {
-    const jsonOut = { ...results.cdp, outputDir: results.outputDir, sitePatterns: results.sitePatterns, optionalDeps: results.optionalDeps };
+    const jsonOut = { ready: results.ready, mode, agentBrowser: results.agentBrowser, ...results.cdp, outputDir: results.outputDir, sitePatterns: results.sitePatterns, optionalDeps: results.optionalDeps };
     console.log(JSON.stringify(jsonOut, null, 2));
   }
 
+  if (!results.ready) process.exitCode = 1;
   return results;
 }
 
 export {
-  main as ensureCDP,
   checkAgentBrowser,
   listSitePatterns,
   resolveOutputDir,
