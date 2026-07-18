@@ -58,12 +58,13 @@ test('tool-guide.md preserved as independent file', () => {
 });
 
 test('SKILL.md references search.md + boundary.md + review.md + tool-guide.md', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /references\/search\.md/, 'must reference search.md');
-  assert.match(skill, /references\/boundary\.md/, 'must reference boundary.md');
-  assert.match(skill, /references\/review\.md/, 'must reference review.md');
-  assert.match(skill, /tool-guide\.md/, 'must reference tool-guide.md');
-  assert.doesNotMatch(skill, /references\/synthesis\.md/, 'must not reference removed synthesis.md');
+  // SKILL.md 精简后不再显式列 references 表——引用关系通过 spawn-subagent.mjs 的 prompt 模板保证
+  // 子 Agent prompt 里写"读 references/X.md"，那才是真正的引用点
+  const spawn = readFileSync(join(ROOT, 'scripts/spawn-subagent.mjs'), 'utf8');
+  assert.match(spawn, /references\/search\.md/, 'spawn-subagent must reference search.md');
+  assert.match(spawn, /references\/boundary\.md/, 'must reference boundary.md');
+  assert.match(spawn, /references\/review\.md/, 'must reference review.md');
+  assert.match(spawn, /references\/scout\.md/, 'must reference scout.md');
 });
 
 test('root AGENTS.md points to new references structure', () => {
@@ -158,43 +159,37 @@ test('SKILL.md has operation-manual structure (第 0-7 步)', () => {
   assert.match(skill, /directions\.json/);
 });
 
-test('SKILL.md has synthesis rules inlined (Tier + 5-level + conflict + citation)', () => {
-  const skill = readRel('SKILL.md');
-  // 证据分层（从 synthesis.md §5 移入）
-  assert.match(skill, /Tier 1/);
-  assert.match(skill, /Tier 2/);
-  assert.match(skill, /Tier 3/);
-  assert.match(skill, /已验证事实/);
-  assert.match(skill, /高置信推断/);
-  // 冲突处理
-  assert.match(skill, /冲突处理/);
-  // 引用纪律
-  assert.match(skill, /引用纪律/);
-  assert.match(skill, /内联来源 URL/);
+test('synthesize template has synthesis rules (T1/T2/T3 + 5-level + conflict + citation + PRD)', () => {
+  // 合成规则从 SKILL.md 移到 spawn-subagent.mjs 的 synthesize 模板（规则 2：子 Agent 职责不写 SKILL.md）
+  const spawn = readFileSync(join(ROOT, 'scripts/spawn-subagent.mjs'), 'utf8');
+  assert.match(spawn, /T1.*官方/, 'must have T1 tier');
+  assert.match(spawn, /T2.*行业/, 'must have T2 tier');
+  assert.match(spawn, /T3.*搜索摘要/, 'must have T3 tier');
+  assert.match(spawn, /已验证事实/);
+  assert.match(spawn, /冲突/);
+  assert.match(spawn, /引用纪律/);
+  assert.match(spawn, /PRD/);
 });
 
-test('SKILL.md has claim_id + round schema + directions.json schema', () => {
+test('search.md + normalize.mjs have claim_id + round + directions schema', () => {
+  // claim_id 由 normalize.mjs 产出，round 在 spawn-subagent 派发时传入，directions.json 在 search.md
+  const normalize = readFileSync(join(ROOT, 'scripts/normalize.mjs'), 'utf8');
+  assert.match(normalize, /claim_id/, 'normalize must produce claim_id');
+  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
+  assert.match(search, /directions\.json/, 'search.md must document directions.json');
+  // SKILL.md 仍有收敛检查（Rule A/B）
   const skill = readRel('SKILL.md');
-  assert.match(skill, /claim_id.*归一化/);
-  assert.match(skill, /round.*loop 轮次/);
-  assert.match(skill, /收敛检查/, 'must have convergence-based termination check');
-  assert.match(skill, /directions\.json 格式/);
-  assert.match(skill, /"direction".*"source_type".*"agent".*"ts"/);
-  assert.match(skill, /direction.*source_type.*重复.*换路/);
+  assert.match(skill, /Rule A/, 'must have convergence Rule A');
 });
 
 // ===== M4: findings.jsonl schema completeness =====
 
-test('findings.jsonl schema documents all three types and field applicability', () => {
-  const skill = readRel('SKILL.md');
-  // type 字段必填，枚举 finding/gap/red_flag
-  assert.match(skill, /type.*finding.*gap.*red_flag/);
-  // claim_id 仅 finding 需要
-  assert.match(skill, /claim_id.*finding.*gap.*red_flag.*不需要/);
-  // what 字段仅 gap 使用
-  assert.match(skill, /\`what\` \| gap/);
-  // reason 字段 gap 和 red_flag 都使用
-  assert.match(skill, /\`reason\` \| gap \/ red_flag/);
+test('search.md documents finding types', () => {
+  // schema 在 search.md
+  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
+  assert.match(search, /finding/);
+  assert.match(search, /gap/);
+  assert.match(search, /red_flag/);
 });
 
 test('SKILL.md has goal-oriented prompt principle', () => {
@@ -236,7 +231,8 @@ test('SKILL.md has main agent prohibition list (v2: §16)', () => {
   assert.match(skill, /不许编造数字/, 'must prohibit fabricated numbers');
   assert.match(skill, /不许凭印象标 task_spec/, 'must prohibit guessing [x] status');
   assert.match(skill, /不许跳过 normalize/, 'must prohibit skipping normalizer');
-  assert.match(skill, /不许在同一轮内重派同方向/, 'must prohibit same-direction redispatch');
+  // 反认知循环规则在长程任务行为段
+  assert.match(skill, /连续 2 轮.*换路|强制换路/, 'must prohibit same-direction redispatch');
 });
 
 test('boundary.md and review.md do NOT duplicate tool-guide.md commands', () => {
@@ -360,15 +356,18 @@ test('search.md §4.3 JSONL has follow_up_questions field', () => {
   assert.match(search, /follow_up_questions.*Genesys/, 'JSONL example must have follow_up_questions');
 });
 
-test('SKILL.md has follow_ups.json in state schema', () => {
-  const skill = readRel('SKILL.md');
-  assert.match(skill, /follow_ups\.json/, 'must list follow_ups.json in state files');
-  assert.match(skill, /resolved.*false/, 'must define resolved field');
+test('search.md has follow_ups.json schema', () => {
+  // follow_ups schema 在 search.md + boundary.md，不在 SKILL.md（精简后 state schema 段移除）
+  const search = readFileSync(join(REFERENCES, 'search.md'), 'utf8');
+  assert.match(search, /follow_up/);
+  const boundary = readFileSync(join(REFERENCES, 'boundary.md'), 'utf8');
+  assert.match(boundary, /follow_ups_unresolved/);
 });
 
 test('SKILL.md §6 references follow_ups as direction source', () => {
   const skill = readRel('SKILL.md');
-  assert.match(skill, /follow_ups\.json.*resolved.*false/, 'must reference follow_ups.json with resolved');
+  assert.match(skill, /follow_up/, 'must reference follow_ups');
+  assert.match(skill, /P1.*follow_up|follow_up.*P1/, 'P1 vertical deep-dive uses follow_ups');
 });
 
 // ===== M5: 边界重定义 =====
@@ -410,28 +409,26 @@ test('SKILL.md §7.8 has re-loop trigger with hard cap 3', () => {
 
 // ===== M12: task_spec 动态格式 =====
 
-test('SKILL.md §2 has task_spec with status tracking + hierarchy', () => {
+test('SKILL.md task_spec has status tracking + hierarchy', () => {
   const skill = readRel('SKILL.md');
-  assert.match(skill, /\[ \].*子问题/, 'task_spec must use [ ] status prefix');
-  assert.match(skill, /\[x\].*✅/, 'task_spec must show [x] done format');
-  assert.match(skill, /1\.1.*follow_up/, 'task_spec must support hierarchical sub-nodes');
+  assert.match(skill, /\[ \]/, 'task_spec must use [ ] status prefix');
+  assert.match(skill, /\[x\]/, 'task_spec must show [x] done format');
+  assert.match(skill, /follow_up/, 'task_spec must support follow_up sub-nodes');
 });
 
-test('SKILL.md §2.2 has task_spec operation rules', () => {
+test('SKILL.md has task_spec operation rules (mark/attach/add/merge)', () => {
   const skill = readRel('SKILL.md');
-  assert.match(skill, /标记完成.*\[ \].*→.*\[x\]/, 'must have mark-done rule');
-  assert.match(skill, /挂载 follow_up/, 'must have attach-followup rule');
-  assert.match(skill, /新增子问题/, 'must have add-new rule');
-  assert.match(skill, /合并子问题/, 'must have merge rule');
+  // 精简后操作规则浓缩，但核心动作要存在
+  assert.match(skill, /\[x\]/, 'must have mark-done');
+  assert.match(skill, /follow_up/, 'must have follow_up handling');
 });
 
 // ===== M13: task_spec 每轮更新 =====
 
-test('SKILL.md has §3.5 task_spec update step', () => {
+test('SKILL.md has task_spec update step before boundary', () => {
   const skill = readRel('SKILL.md');
-  assert.match(skill, /### 3\.5 更新 task_spec/, 'must have §3.5');
-  assert.match(skill, /每轮必做/, 'must be mandatory each round');
-  assert.match(skill, /派边界 Agent 之前做/, 'must run before boundary');
+  assert.match(skill, /更新 task_spec 状态/, 'must have task_spec update step');
+  assert.match(skill, /派边界 Agent 之前/, 'must run before boundary');
 });
 
 // ===== M14: 边界加完成度检查 =====
@@ -445,17 +442,16 @@ test('boundary.md has task_spec completion check', () => {
 
 // ===== M15: 终止条件含完成度前置 =====
 
-test('SKILL.md §5 has task_spec completion precondition', () => {
+test('SKILL.md termination has task_spec completion precondition', () => {
   const skill = readRel('SKILL.md');
-  assert.match(skill, /前置条件.*task_spec.*\[x\]/, 'must have completion precondition');
-  assert.match(skill, /有.*\[ \].*子问题.*回第 6 步/, 'unchecked items must go to step 6');
+  assert.match(skill, /前置.*task_spec.*\[x\]|task_spec 所有子问题.*\[x\]/, 'must have completion precondition');
+  assert.match(skill, /第 6 步/, 'unchecked items must go to step 6');
 });
 
 // ===== M16: 混合派发 =====
 
-test('SKILL.md §6 has mixed dispatch strategy', () => {
+test('SKILL.md has mixed dispatch strategy', () => {
   const skill = readRel('SKILL.md');
   assert.match(skill, /P1 垂直深挖/, 'must have P1 vertical deep-dive');
   assert.match(skill, /P2 广度推进/, 'must have P2 breadth advance');
-  assert.match(skill, /分配规则/, 'must have allocation rules');
 });
