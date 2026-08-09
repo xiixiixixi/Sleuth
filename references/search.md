@@ -42,10 +42,10 @@
 ## 3. 工具选择决策树（缺什么补什么）
 
 - **缺入口**（不知道去哪找）→ 网络搜索 发现候选来源
-- **缺正文**（知道在哪但没读内容）→ 网页读取工具先拿；拿不到或不满意 → 浏览器操控工具
+- **缺正文**（知道在哪但没读内容）→ 网页读取工具先拿；返回空、登录墙、脚本空壳或超时 → 立即用浏览器操控工具，不要对同一 URL 固定等待后反复抓
 - **缺证据强度**（需要确认真实性）→ 网页读取工具 结果只是线索；核心结论必须回原始来源验证；不确定 网页读取工具 给的是不是真的 → 浏览器
 - **缺交互 / 登录态 / 动态内容** → 浏览器
-- **其他工具都不可用**（网络搜索 被限、reader 返回空/失败）→ 必须用浏览器，不能因为没有轻量工具就放弃
+- **其他工具都不可用**（网络搜索被限，WebFetch / reader 返回空或失败）→ 必须用浏览器，不能因为没有轻量工具就放弃；浏览器未就绪时立即请求主 Agent 引导用户开启，不把它静默写成最终缺口
 
 | 能力 | 适合做什么 | 证据边界 |
 |------|------------|----------|
@@ -55,6 +55,10 @@
 | **本地历史 / 书签** | 找用户曾访问、组织内部入口 | 入口记忆，不等于事实证据 |
 
 工具证据边界见上方表格；失败兜底表见下方「失败兜底」段；具体浏览器命令见 `references/tool-guide.md`。
+
+**升级时限（硬规则）**：网络搜索失败后只允许一次有实质变化的查询改写，不允许靠 sleep 等它恢复；网页读取失败不做 2s / 5s / 10s 之类的定时重试，直接升级浏览器。浏览器是最终兜底，不是放弃信号。
+
+**登录态（硬规则）**：浏览器必须通过 `agent-browser --cdp <port> --idle-timeout 1h <command>` 连接用户当前正在使用、已经登录的 Chrome，而且 full 检查的 `browser_identity` 必须是 `verified-user-chrome`。所有命令复用默认后台服务；禁止使用 `--session` 或 `--namespace` 创建额外后台服务，禁止启动或复用其他常驻 CDP 代理。Chrome for Testing、Chrome Dev、Chromium、独立 `--user-data-dir` 或手工调试启动实例即使端口可连也不允许使用。禁止裸跑 `agent-browser open`，禁止 `--profile`，禁止运行 `agent-browser install` 下载新的测试浏览器，也禁止自动调用 `launch-chrome.mjs` 重开 Chrome。
 
 ---
 
@@ -96,7 +100,7 @@
 
 ### 4.3 中间记录格式（JSONL，直写 raw/ 文件）
 
-搜索 Agent **不返回 stdout 给主 Agent**。每搜到一条 finding/gap/red_flag，立刻写入自己独占的 `<task-dir>/raw/search-r<round>-<agent-name>.jsonl`。
+搜索 Agent **不返回 stdout 给主 Agent**。唯一例外是浏览器兜底尚未就绪时返回 `BROWSER_CONTROL_REQUIRED`，让主 Agent 取得用户动作；此时保留部分 raw 且不写 `agent_done`。正常研究中，每搜到一条 finding/gap/red_flag，立刻写入自己独占的 `<task-dir>/raw/search-r<round>-<agent-name>.jsonl`。
 
 **直写流程**（Write 工具是覆盖不是追加，所以要先 Read 再拼接）：
 1. Read 你的 raw 文件（`<task-dir>/raw/search-r<round>-<agent-name>.jsonl`，不存在则视为空）
@@ -117,11 +121,13 @@
 
 **退出前必写 agent_done sentinel**——用 Write append 最后一行：
 ```jsonl
-{"type":"agent_done","agent":"<agent-name>","lines_written":<你写的总行数>,"ts":"<当前 ISO 时间>","visual_scan":{"status":"captured 或 none_useful","candidates_seen":<各页候选合计>,"useful_saved":<visuals 总数>,"reason":"全部没有保存时说明总原因","pages":[{"url":"<被采用的来源页>","candidates_seen":<该页候选数>,"useful_saved":<该页保存数>,"reason":"该页没有保存时说明原因"}]}}
+{"type":"agent_done","agent":"<agent-name>","lines_written":<agent_done 之前的 finding/gap/red_flag 行数>,"ts":"<当前 ISO 时间>","visual_scan":{"status":"captured 或 none_useful","candidates_seen":<各页候选合计>,"useful_saved":<visuals 总数>,"reason":"全部没有保存时说明总原因","pages":[{"url":"<被采用的来源页>","candidates_seen":<该页候选数>,"useful_saved":<该页保存数>,"reason":"该页没有保存时说明原因"}]}}
 ```
+
+`lines_written` **不包含 `agent_done` 本身**。例如文件里有 4 条 finding + 1 条 agent_done，必须写 `"lines_written": 4`，不是 5。
 不写这行 = 归一化器认为你被杀了，触发重派。
 
-**不要返回 stdout 给主 Agent**——你的所有产出在 raw 文件里。归一化器（`normalize.mjs`）会从全部 raw 文件确定性重建 findings.jsonl。
+**不要返回 stdout 给主 Agent**——你的所有正常产出在 raw 文件里。唯一例外是浏览器控制未就绪时返回 `BROWSER_CONTROL_REQUIRED`；归一化器（`normalize.mjs`）会在任务真正完成后从全部 raw 文件确定性重建 findings.jsonl。
 
 **`type` 字段——只允许以下 3 个值**（加 agent_done sentinel）：
 - `finding`：已验证或已提取的事实（**不允许** `funding_round` / `valuation` / `investor` 等自定义类型——把分类信息放进 `dimensions_seen`）
@@ -284,10 +290,11 @@ reader 是线索不是证据。核心结论必须回原始来源（浏览器或�
 
 | 失败信号 | 一线修复 | 仍失败兜底 |
 |---|---|---|
-| 网络搜索 被限 / 返回空 | 换关键词、别名再搜一次 | 直接上浏览器找入口，不因没有轻量工具就放弃 |
-| 网页读取工具返回空、登录墙或疑似 JS 壳 | 升级浏览器操控工具（`--cdp`）抓真实渲染 | 仍拿不到 → 该来源标「未取得正文」写入缺口，不拿空结果当内容 |
-| 页面需登录但登录态未确认 | 用浏览器操控工具 打开登录页，让用户手动登一下，登完继续 | 仍无法确认 → 停止依赖登录态的抓取，写「登录态未验证」入缺口，不伪造 |
-| 浏览器被杀 / 会话丢失 | 重开并重新验证登录态 | 关键结论重验前不得当已确认事实 |
+| 网络搜索被限 / 返回空 / 超时 | 只改一次关键词或别名，不固定等待 | 立即用 `--cdp <port>` 连接现有 Chrome 找入口 |
+| WebFetch / reader 返回空、登录墙、疑似 JS 壳或超时 | 不重复等同一 URL，立即用 `--cdp <port>` 抓真实渲染 | 仍拿不到 → 该来源标「未取得正文」写入缺口，不拿空结果当内容 |
+| 浏览器控制未就绪 | 保留已写 raw，不写 `agent_done`；立即向主 Agent 返回 `BROWSER_CONTROL_REQUIRED: <目标 URL + 失败原因>` | 主 Agent 安装或升级 CLI、引导用户开启现有 Chrome 控制，再以同一 Agent 名续跑 |
+| 页面需登录但现有 Chrome 未登录 | 停在该页面，请用户在这个现有 Chrome 标签页手动登录，完成后继续 | 仍无法确认 → 写「登录态未验证」入缺口，不伪造；禁止另开浏览器或提取凭据 |
+| 浏览器连接丢失 | 立即返回 `BROWSER_CONTROL_REQUIRED`，让主 Agent 恢复同一个 Chrome 的控制 | 关键结论重验前不得当已确认事实；禁止自行重启 Chrome |
 | 同一路径反复失败、无新信息 | 换路：换来源 / 换工具 / 换角度 | 仍无突破 → 如实在报告里披露未解决的缺口，不盲目重试 |
 
 **失败是反馈，不是命令你原地重试。**
@@ -298,3 +305,4 @@ reader 是线索不是证据。核心结论必须回原始来源（浏览器或�
 - **只搜正面材料**——核心结论要经得起反证。对每个关键事实主动搜反证（complaint / lawsuit / limitation / vs alternative）
 - **抄源结构**——不要用 bullet list 重现原文章结构（版权问题 + 没加价值）。重新组织
 - **同一路径反复试**——连续两轮没新信息就换路（换来源类型 / 换工具 / 换角度）
+- **把浏览器没准备好当普通 gap**——这会让主 Agent 不知道需要用户动作。必须返回 `BROWSER_CONTROL_REQUIRED`，等现有登录态 Chrome 接通后续跑

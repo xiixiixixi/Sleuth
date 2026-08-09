@@ -37,7 +37,7 @@ sleuth/
 | 改子 Agent 角色 / 任务分析 / loop / 长程任务行为 | `SKILL.md` 第 1-2 步（任务分析）+ 第 3-7 步（主 Agent loop：搜索/边界/审查）+「状态文件 schema」+「长程任务行为」段 | 4 角色（主/搜索/边界/审查）+ state schema + 零交互 / 就绪即执行 |
 | 改 agent-browser 命令参考 / 反爬降级 / 特殊内容类型 | `references/tool-guide.md` | 完整命令速查 |
 | 用户主动启动带 CDP 调试的 Chrome | `scripts/launch-chrome.mjs` | 仅用户明确选择并传 `--confirm-close-browser`；主流程禁止自动运行 |
-| 压住 Chrome 144+「要允许远程调试吗?」弹窗 | `scripts/fix-chrome-debug-permission.mjs` | 一键装 RemoteDebuggingAllowed 企业策略；跨平台（osascript/pkexec/UAC 弹密码框）；支持 `--check` / `--uninstall` |
+| 检查或设置 Chrome 远程调试许可 | `scripts/fix-chrome-debug-permission.mjs` | 可选人工环境工具；不承诺免确认。macOS 改 Local State，Linux/Windows 设置策略；支持 `--check` / `--uninstall` |
 | 改环境检查 | `scripts/check-deps.mjs` + `scripts/lib/check-deps-core.mjs` | 薄 shim + 核心逻辑 |
 | 改子 Agent prompt 模板 | `scripts/spawn-subagent.mjs` | 单文件，无 lib 依赖；5 role：scout/search/boundary/review/synthesize |
 | 改任务类型初判 | `scripts/classify-task.mjs` | 规则只处理明确措辞；无信号返回 general 给主 Agent 判断 |
@@ -55,7 +55,7 @@ sleuth/
 ### 模块与代码
 
 - **ESM only**：`import` 全部带 `'node:'` 协议头；无 `require`、无 CommonJS
-- **Node ≥ 18**：README 声明，用 `node:util/parseArgs`、`node:test`、`fs.mkdirSync({ recursive: true })`
+- **基础流程 Node ≥ 18；浏览器兜底 Node ≥ 24**：`agent-browser` ≥ 0.28 的官方 `engines` 要求 Node.js ≥ 24。full 检查必须先验 Node 版本，再决定是否自动安装 CLI
 - **零 npm 依赖**：`find . -name package.json` 应该空；scripts/ 全用 `node:*` 内建
 - **薄 shim 模式**：CLI 在 `scripts/<name>.mjs`，核心逻辑在 `scripts/lib/<name>-core.mjs`（参考 `check-deps.mjs` 86 行 + `lib/check-deps-core.mjs` 133 行）
 - **路径解析**：`fileURLToPath(import.meta.url)` 不要 `__dirname`（ESM 没有它）
@@ -127,12 +127,14 @@ sleuth/
 # 跑环境检查（agent 触发 sleuth 后第一件事）
 node scripts/check-deps.mjs --mode light --check-only
 
-# check-deps 报「chrome: 未发现可连的浏览器」时，启动带 CDP 的 Chrome
-node scripts/launch-chrome.mjs --confirm-close-browser   # 仅用户明确选择；可能关闭 Chrome
+# 浏览器兜底：只连接用户当前使用、已有登录态的 Chrome
+node scripts/check-deps.mjs --mode full --check-only
 
-# Chrome 144+ 连日常 Chrome 时反复弹「要允许远程调试吗?」→ 装策略压住
-node scripts/fix-chrome-debug-permission.mjs            # 安装（弹系统密码框）
-node scripts/fix-chrome-debug-permission.mjs --check     # 只检测不安装
+# 独立诊断工具，不属于研究兜底；仅用户明确选择时运行，可能关闭 Chrome
+node scripts/launch-chrome.mjs --confirm-close-browser
+
+# 可选：检查远程调试许可。新连接仍可能要求确认一次，不是永久免弹窗
+node scripts/fix-chrome-debug-permission.mjs --check
 
 # 跑全部测试
 node --test scripts/__tests__/*.mjs
@@ -171,5 +173,6 @@ npm i -g agent-browser@latest
 - **测试数量不写死在文档里**：以 `node --test scripts/__tests__/*.mjs` 的实时输出为准。核心覆盖包括两轮确定性归一化、完成条件、7 种跨轮关系、收敛规则、边界/草稿/审查检查门和角色交接。
 - **环境脚本测试边界**：浏览器发现与“未经确认不得关闭 Chrome”可自动测；真正启动 Chrome、系统策略和真实历史数据库需要人工环境测试。
 - **agent-browser 版本敏感**：0.27.1 的 `--cdp <ws-url>` 有 HTTP 预检 403 bug，必须 0.28+
+- **浏览器兜底只连现有 Chrome**：轻量工具失败后用 `--cdp <port>` 接入用户当前登录态；禁止裸 `agent-browser open`、`agent-browser install`、`--profile` 和自动 `launch-chrome.mjs`
 - **chrome://inspect toggle 不持久**：Chrome 重启会重置，用户需重新勾选
 - **`extract-subtitles.sh` + `srt_to_transcript.py`** 在 `scripts/` 下，混语言（Node + Bash + Python），无 README 解释边界

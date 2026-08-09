@@ -27,3 +27,10 @@ for (const [expected, goal] of Object.entries(cases)) {
 test('缺 goal 返回参数错误', () => {
   assert.equal(spawnSync(process.execPath, [SCRIPT]).status, 2);
 });
+
+test('明确深度调研不会被子问题里的“区别”误判成 comparison', () => {
+  const goal = '深度调研什么叫神逻辑，并说明它与严密逻辑的区别';
+  const result = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--goal', goal], { encoding: 'utf8' }));
+  assert.equal(result.task_type, 'deep_dive');
+  assert.equal(result.matched_signal, '深度调研');
+});

@@ -30,6 +30,7 @@ test('search prompt 强制新证据 schema 与多来源', () => {
   assert.match(prompt, /visual_scan\.pages.*覆盖每个 finding 的每个来源 URL/);
   assert.match(prompt, /red_flag.*sources/);
   assert.match(prompt, /禁止只把 URL 塞进 reason/);
+  assert.match(prompt, /lines_written.*不包含 `agent_done` 本身/);
 });
 
 test('search prompt 注入 must-verify、known-clue、deliverable 和 stop', () => {
@@ -40,7 +41,32 @@ test('search prompt 注入 must-verify、known-clue、deliverable 和 stop', () 
 test('search prompt 有浏览器端口时使用字面值', () => {
   const prompt = run(SEARCH_ARGS, { SLEUTH_CDP_PORT: '9222' });
   assert.match(prompt, /--cdp 9222/);
+  assert.match(prompt, /agent-browser --cdp 9222 --idle-timeout 1h/);
   assert.doesNotMatch(prompt, /--cdp \$SLEUTH_CDP_PORT/);
+  assert.match(prompt, /用户现有的登录态 Chrome/);
+  assert.match(prompt, /独占浏览器操作权/);
+  assert.match(prompt, /tab new --label pricing/);
+  assert.match(prompt, /不要依赖 `--session` 隔离/);
+  assert.match(prompt, /禁止使用 `--session` 或 `--namespace`/);
+  assert.match(prompt, /禁止启动或复用其他常驻 CDP 代理/);
+  assert.match(prompt, /禁止裸跑 `agent-browser open`/);
+});
+
+test('search prompt 没有浏览器端口时及时交回主 Agent', () => {
+  const prompt = run(SEARCH_ARGS, { SLEUTH_CDP_PORT: '' });
+  assert.match(prompt, /BROWSER_CONTROL_REQUIRED/);
+  assert.match(prompt, /保留已经写入的 raw，不写 `agent_done`/);
+  assert.match(prompt, /唯一例外是浏览器控制未就绪/);
+  assert.match(prompt, /现有登录态 Chrome/);
+  assert.match(prompt, /只允许一次有实质变化的查询改写/);
+  assert.match(prompt, /不对同一 URL 做 2s \/ 5s \/ 10s 定时重试/);
+  assert.doesNotMatch(prompt, /WebFetch 单 URL 重试上限：3 次/);
+});
+
+test('search prompt 不会误关用户原有标签页', () => {
+  const prompt = run(SEARCH_ARGS, { SLEUTH_CDP_PORT: '9222' });
+  assert.match(prompt, /绝不使用 `close --all`/);
+  assert.match(prompt, /绝不关闭用户原有标签页/);
 });
 
 test('visual-required 形成独立硬要求', () => {

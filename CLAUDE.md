@@ -31,7 +31,7 @@ node scripts/spawn-subagent.mjs --help
 
 ## 关键约束
 
-- ESM only，Node.js ≥ 18，零 npm 依赖。
+- ESM only，基础流程 Node.js ≥ 18，浏览器兜底 Node.js ≥ 24，零项目 npm 依赖。
 - `scripts/*.mjs` 是 CLI；可复用核心逻辑放 `scripts/lib/`。
 - 测试使用 `node:test` + `node:assert`。
 - 子 Agent 不读 `SKILL.md`；任务契约由 `spawn-subagent.mjs` 生成。
@@ -39,7 +39,8 @@ node scripts/spawn-subagent.mjs --help
 - 边界和审查报告使用 JSON，禁止退回无法严格解析的 YAML 文本匹配。
 - 普通研究默认逐页检查图片；`visual_scan.pages[]` 证明检查过哪些来源页，`visuals[]` 中的图必须全部进入草稿和视觉审查。
 - 不允许重新引入 session、deliver、research-index、managed browser 或 AppleScript bridge。
-- `launch-chrome.mjs` 只允许用户主动运行并传 `--confirm-close-browser`；Sleuth 不自动启动或关闭 Chrome。
+- 研究兜底只用 `--cdp <port>` 连接用户现有登录态 Chrome；禁止裸 `agent-browser open`、`agent-browser install` 和 `--profile`。
+- `launch-chrome.mjs` 只允许用户主动运行并传 `--confirm-close-browser`；它不是研究兜底，Sleuth 不自动启动或关闭 Chrome。
 
 ## 修改位置
 

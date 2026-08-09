@@ -204,6 +204,19 @@ function mergeVisuals(items) {
   return [...byTarget.values()].sort((a, b) => String(a.image_url || a.screenshot_path).localeCompare(String(b.image_url || b.screenshot_path)));
 }
 
+function shouldReplaceClaim(existing, candidate) {
+  const seenRounds = existing.rounds_seen || (existing.round === null ? [] : [existing.round]);
+  const latestSeenRound = seenRounds.length > 0 ? Math.max(...seenRounds) : null;
+  const candidateRound = candidate.round;
+
+  if (candidateRound !== null && latestSeenRound !== null && candidateRound !== latestSeenRound) {
+    return candidateRound > latestSeenRound;
+  }
+  if (candidateRound !== null && latestSeenRound === null) return true;
+  if (candidateRound === null && latestSeenRound !== null) return false;
+  return candidate.claim.length > existing.claim.length;
+}
+
 function normalizeRow(rawLine, identity, fallbackObservedAt) {
   let parsed;
   try { parsed = JSON.parse(rawLine); } catch (error) {
@@ -294,7 +307,9 @@ function mergeFindings(rows) {
     }
 
     const existing = findings.get(key);
-    if (row.claim.length > existing.claim.length) existing.claim = row.claim;
+    // 同一 claim_key 的后续轮次代表对同一事实的修正或深化。
+    // 不能只按字数保留旧 claim，否则 R2 的更精确结论可能被 R1 长句吞掉。
+    if (shouldReplaceClaim(existing, row)) existing.claim = row.claim;
     existing.agents = [...new Set([...existing.agents, row.agent])].sort();
     existing.rounds_seen = [...new Set([...existing.rounds_seen, ...(row.round === null ? [] : [row.round])])].sort((a, b) => a - b);
     existing.round = existing.rounds_seen[0] ?? null;

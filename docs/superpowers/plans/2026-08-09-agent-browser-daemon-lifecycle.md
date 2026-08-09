@@ -13,6 +13,7 @@
 - 浏览器兜底只连接用户平时使用、已经登录的稳定版 Google Chrome。
 - 所有浏览器命令必须使用 `agent-browser --cdp <port> --idle-timeout 1h <command>`。
 - 禁止使用 `--session` 或 `--namespace` 创建额外后台服务。
+- 禁止启动或复用其他常驻 CDP 代理。
 - 禁止使用 `agent-browser close` 或 `close --all` 结束用户 Chrome；只能关闭本任务明确创建的标签页。
 - 浏览器操作必须串行，同一时刻只把端口交给一个搜索角色。
 - 不自动启动、关闭、重启或替换 Chrome，不恢复 `~/.sleuth/chrome-live`。
@@ -37,6 +38,7 @@
 ```js
 assert.match(prompt, /agent-browser --cdp 9222 --idle-timeout 1h/);
 assert.match(prompt, /不要使用 `--session` 或 `--namespace`/);
+assert.match(prompt, /禁止启动或复用其他常驻 CDP 代理/);
 ```
 
 - [ ] **Step 2: 给文档契约增加失败断言**
@@ -47,6 +49,7 @@ assert.match(prompt, /不要使用 `--session` 或 `--namespace`/);
 assert.match(skill, /--idle-timeout 1h/);
 assert.match(tool, /--idle-timeout 1h/);
 assert.match(tool, /禁止使用 `--session` 或 `--namespace`/);
+assert.match(tool, /禁止启动或复用其他常驻 CDP 代理/);
 assert.match(tool, /禁止使用 `agent-browser close` 或 `close --all`/);
 ```
 
@@ -135,11 +138,11 @@ Expected: PASS，0 failed。
 agent-browser --cdp 9222 --idle-timeout 1h get title
 ```
 
-并检查连续命令复用同一个后台进程、不产生额外命名会话。
+并检查连续命令复用同一个后台进程、不产生额外命名会话，也没有其他常驻 CDP 客户端连接 9222。
 
 - [ ] **Step 2: 更新问题账本**
 
-新增问题记录：多个旧 `agent-browser` 后台服务不会默认闲置退出，导致 Chrome 重复授权。记录根因证据、即时清理结果、代码修复和真实测试结果；把 #032 的“当前仍是 chrome-live”改为历史事实，明确当前日常 Chrome 已通过身份检查和 Google 登录态现场验证。
+新增问题记录：多个旧 `agent-browser` 后台服务不会默认闲置退出，同时还有一个运行 21 天的 Node CDP 代理保持连接，导致 Chrome 重复授权。记录根因证据、即时清理结果、代码修复和真实测试结果；把 #032 的“当前仍是 chrome-live”改为历史事实，明确当前日常 Chrome 已通过身份检查和 Google 登录态现场验证。
 
 - [ ] **Step 3: 运行文档检查**
 
@@ -215,7 +218,7 @@ agent-browser --cdp 9222 --idle-timeout 1h get title
 agent-browser --cdp 9222 --idle-timeout 1h get url
 ```
 
-然后用 `ps` 与 `lsof` 验证只存在一个默认 `agent-browser` 后台服务和一条已建立的 9222 连接；不得出现任务命名的 `.sock` 会话。
+然后用 `ps` 与 `lsof` 验证只存在一个默认 `agent-browser` 后台服务和一条已建立的 9222 连接；不得出现任务命名的 `.sock` 会话，也不得有其他常驻 CDP 客户端连接 9222。
 
 - [ ] **Step 6: 写入真实测试结果并完成审计**
 

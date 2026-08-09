@@ -40,17 +40,23 @@ Sleuth 不是搜索工具，而是研究判断层。它把搜索摘要当线索�
 npx skills add xiixiixixi/Sleuth
 ```
 
-基础要求：Node.js ≥ 18。只有需要动态页面、登录态或交互时，才需要 `agent-browser` ≥ 0.28 和 Chrome。
+基础研究要求 Node.js ≥ 18。需要动态页面、登录态或交互时，`agent-browser` ≥ 0.28 官方要求 Node.js ≥ 24，因此浏览器兜底还要求 Node.js ≥ 24 和 Chrome；版本不足时 full 检查会先明确报错，不会盲目安装。
 
 ```bash
 # 普通研究检查
 node scripts/check-deps.mjs --mode light --check-only
 
 # 确实需要浏览器时
-node scripts/check-deps.mjs --mode full --check-only
+node scripts/check-deps.mjs --mode full
 ```
 
-Sleuth 不会自行启动或关闭 Chrome。`scripts/launch-chrome.mjs` 只能由用户明确运行，并要求 `--confirm-close-browser`；脚本不会强制结束未正常退出的日常 Chrome。
+网络搜索失败后只改写一次查询；网页读取返回空、登录墙、脚本空壳或超时后不原地等待，浏览器是最终兜底。full 执行模式缺少或版本过旧时会自动运行：
+
+```bash
+npm i -g agent-browser@latest
+```
+
+这里只安装 CLI，不会下载测试浏览器；`--check-only` 仍是纯诊断。Sleuth 只通过 `--cdp <port>` 连接用户当前使用、已经登录的 Chrome，并核对端口背后的程序身份。Chrome for Testing、Chrome Dev、Chromium、独立用户目录或手工调试启动实例即使端口可连也会被拒绝。用户在日常 Chrome 打开 `chrome://inspect/#remote-debugging` 开启控制即可；所有命令复用同一个默认后台服务并带 `--idle-timeout 1h`，闲置后只断开控制，不关闭 Chrome。禁止使用 `--session` 或 `--namespace` 另建后台服务，也禁止启动或复用其他常驻 CDP 代理；不会裸跑 `agent-browser open`，不会运行 `agent-browser install` 下载另一个浏览器，也不会自动启动、关闭或重启 Chrome。`scripts/launch-chrome.mjs` 只保留为用户主动选择的独立诊断工具，不属于研究兜底路径。
 
 ## 测试
 

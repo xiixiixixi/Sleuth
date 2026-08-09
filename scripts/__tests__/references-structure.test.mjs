@@ -50,6 +50,23 @@ test('SKILL.md 不自动启动 Chrome，并保留安全边界', () => {
   assert.match(skill, /只有 `8-audit` 通过才能交付/);
 });
 
+test('SKILL.md 把现有登录态 Chrome 定义为及时且唯一的浏览器兜底', () => {
+  const skill = read('SKILL.md');
+  assert.match(skill, /最终兜底/);
+  assert.match(skill, /最多改写一次查询/);
+  assert.match(skill, /npm i -g agent-browser@latest/);
+  assert.match(skill, /平时使用、已经登录的 Chrome/);
+  assert.match(skill, /BROWSER_CONTROL_REQUIRED/);
+  assert.match(skill, /SLEUTH_CDP_PORT=<port>/);
+  assert.match(skill, /同一时刻只给一个搜索 Agent 注入 `SLEUTH_CDP_PORT`/);
+  assert.match(skill, /禁止依赖 `--session` 隔离/);
+  assert.match(skill, /--idle-timeout 1h/);
+  assert.match(skill, /禁止使用 `--session` 或 `--namespace`/);
+  assert.match(skill, /禁止启动或复用其他常驻 CDP 代理/);
+  assert.match(skill, /禁止裸跑 `agent-browser open`/);
+  assert.match(skill, /禁止运行 `agent-browser install`/);
+});
+
 test('search.md 定义可审计的多来源 finding', () => {
   const search = read('references/search.md');
   for (const field of ['claim_key', 'subquestion_ids', 'fields_covered', 'sources', 'source_date', 'observed_at', 'context_links', 'visuals', 'image_url', 'source_page_url', 'visual_scan']) {
@@ -58,6 +75,7 @@ test('search.md 定义可审计的多来源 finding', () => {
   assert.match(search, /禁止只保留一个网址/);
   assert.match(search, /red_flag.*sources/);
   assert.match(search, /禁止只把 URL 塞在 reason/);
+  assert.match(search, /lines_written.*不包含 `agent_done` 本身/);
 });
 
 test('search.md 保留搜索判断、失败处理与多模态流程', () => {
@@ -65,6 +83,17 @@ test('search.md 保留搜索判断、失败处理与多模态流程', () => {
   for (const section of ['必搜 vs 必不搜', '起步查询规则', '工具选择决策树', '核心循环', '终止信号', '失败兜底', '视频', '音频', 'PDF', '图片']) {
     assert.match(search, new RegExp(section));
   }
+});
+
+test('search.md 失败时不固定等待并交接现有 Chrome', () => {
+  const search = read('references/search.md');
+  assert.match(search, /只允许一次有实质变化的查询改写/);
+  assert.match(search, /网页读取失败不做 2s \/ 5s \/ 10s/);
+  assert.match(search, /BROWSER_CONTROL_REQUIRED/);
+  assert.match(search, /现有登录态 Chrome/);
+  assert.match(search, /--idle-timeout 1h/);
+  assert.match(search, /禁止启动或复用其他常驻 CDP 代理/);
+  assert.match(search, /禁止裸跑 `agent-browser open`/);
 });
 
 test('boundary.md 支持 7 种深度类型和跨 Agent 证据连接', () => {
@@ -109,6 +138,22 @@ test('scout 和 tool guide 的职责不重叠', () => {
   assert.match(tool, /原图清晰且 URL 稳定/);
 });
 
+test('tool guide 只连接现有 Chrome，不下载或误关用户浏览器', () => {
+  const tool = read('references/tool-guide.md');
+  assert.match(tool, /npm i -g agent-browser@latest/);
+  assert.match(tool, /用户平时使用、已经登录的 Chrome/);
+  assert.match(tool, /`agent-browser install`.*禁止运行/);
+  assert.match(tool, /不带 --cdp 会启动另一个无登录态浏览器/);
+  assert.match(tool, /最多一次；不能拿它重试失败工具/);
+  assert.match(tool, /浏览器操作必须串行/);
+  assert.match(tool, /--idle-timeout 1h/);
+  assert.match(tool, /禁止使用 `--session` 或 `--namespace`/);
+  assert.match(tool, /禁止启动或复用其他常驻 CDP 代理/);
+  assert.match(tool, /禁止使用 `agent-browser close` 或 `close --all`/);
+  assert.match(tool, /tab new --label <agent-name>/);
+  assert.match(tool, /about:blank/);
+});
+
 test('references 不反向引用 SKILL.md', () => {
   for (const file of ['search.md', 'boundary.md', 'review.md', 'scout.md', 'tool-guide.md']) {
     assert.doesNotMatch(read(`references/${file}`), /SKILL\.md/, file);
@@ -122,4 +167,19 @@ test('README、AGENTS 和 CLAUDE 引用的核心文件都存在', () => {
       assert.ok(existsSync(path.join(ROOT, match[1])), `${doc} 引用了不存在的 ${match[1]}`);
     }
   }
+});
+
+test('当前 docs 随仓维护，只忽略 docs/local 个人草稿', () => {
+  const gitignore = read('.gitignore');
+  assert.doesNotMatch(gitignore, /^docs\/$/m);
+  assert.match(gitignore, /^docs\/local\/$/m);
+});
+
+test('用户文档统一说明现有 Chrome 的单后台服务和闲置退出', () => {
+  for (const file of ['README.md', 'docs/CHROME-DEBUG-ISSUE.md', 'docs/DESIGN-v3.md', 'docs/TESTING.md']) {
+    assert.match(read(file), /--idle-timeout 1h/, `${file} 缺少显式闲置退出规则`);
+  }
+  const issue = read('docs/CHROME-DEBUG-ISSUE.md');
+  assert.match(issue, /后台服务默认不会.*闲置退出/);
+  assert.match(issue, /复用同一个默认后台服务/);
 });

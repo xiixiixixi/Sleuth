@@ -10,8 +10,8 @@ import { main } from './lib/check-deps-core.mjs';
 const HELP = `用法: node check-deps.mjs [选项]
 
 选项:
-  --check-only              非破坏性诊断（不写运行目录）
-  --mode <light|full>       light 只检查基础研究；full 额外要求浏览器可连接
+  --check-only              非破坏性诊断（不写运行目录、不自动安装 CLI）
+  --mode <light|full>       light 只检查基础研究；full 自动补齐 CLI 并要求用户 Chrome 可连接
   --task-name <name>        按任务名创建/解析输出目录（多 Agent 协作需独立目录）
   --json                    输出机器可读 JSON
   --help, -h                显示此帮助

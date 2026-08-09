@@ -21,6 +21,9 @@ function walk(relative = '') {
 walk();
 
 const errors = [];
+const gitignoreText = fs.readFileSync(path.join(root, '.gitignore'), 'utf8');
+if (/^docs\/$/m.test(gitignoreText)) errors.push('.gitignore 不得忽略整个 docs/；当前文档必须随仓维护');
+if (!/^docs\/local\/$/m.test(gitignoreText)) errors.push('.gitignore 必须只忽略 docs/local/ 个人草稿');
 const staleNames = ['boundary-report' + '.yaml', 'audit_report' + '.yaml'];
 for (const file of markdown) {
   const text = fs.readFileSync(path.join(root, file), 'utf8');

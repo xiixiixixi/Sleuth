@@ -16,7 +16,7 @@ scripts/
 ├── inject-hints.mjs        boundary hints → 下一轮 --known-clue
 ├── audit-run.mjs           对一个任务目录分阶段执行完整验收
 ├── find-url.mjs            本地 Chrome 书签/历史检索（341 行，单体无 lib，未测试）
-├── fix-chrome-debug-permission.mjs  Chrome 144+ 远程调试弹窗修复（跨平台装 RemoteDebuggingAllowed 策略）
+├── fix-chrome-debug-permission.mjs  可选的远程调试许可工具（不承诺免授权确认）
 ├── extract-subtitles.sh    YouTube 字幕抓取（bash + yt-dlp）
 ├── srt_to_transcript.py    SRT → transcript 转换（Python）
 ├── lib/
@@ -68,6 +68,8 @@ scripts/
 
 - **`find-url.mjs` 的真实数据库路径仍需人工测**：参数与无数据路径可自动测，跨平台 SQLite/历史锁行为需真实 Chrome 环境
 - **agent-browser 0.27.1 bug**：`--cdp "ws://..."` 有 HTTP 预检 403，必须 0.28+；`tool-guide.md` 已写明
+- **浏览器兜底要求 Node.js 24+**：`agent-browser` 0.28+ 到当前 latest 的 `engines` 都要求 Node.js ≥ 24；full 自动安装前必须先验 Node 版本
+- **CLI 和浏览器不是一回事**：缺 CLI 时用 `npm i -g agent-browser@latest`；禁止用 `agent-browser install` 下载另一个浏览器。研究兜底只通过 `--cdp <port>` 连接用户现有登录态 Chrome
 - **`extract-subtitles.sh` 和 `srt_to_transcript.py` 是辅助工具**：混语言存在，没有 README 解释何时用哪个——SKILL.md / references/ 里也几乎没引用
 - **`output.mjs` 的 task-name 模式（2026-06-19）**：默认行为不变（按 YYYY-MM-DD，向后兼容）；`--task-name <name>` 模式按任务名创建子目录，用于多 Agent 协作的独立 task 目录。`sanitizeTaskName` 拒绝路径分隔符 / `..` / 特殊字符（只允许 `[a-zA-Z0-9-_.]`），防注入。空字符串视为"已传入但非法"会抛错（`if (taskName !== undefined)` 而不是 truthy 检查）。
 - **`spawn-subagent.mjs` 的 5 role 模板**：`scout` / `search` / `boundary` / `review` / `synthesize`。子 Agent 不读 SKILL.md。产出分别直写 landscape.json / raw JSONL / boundary-report.json / audit-report.json / draft.md；边界与审查使用可严格解析的 JSON。

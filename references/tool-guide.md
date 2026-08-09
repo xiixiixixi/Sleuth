@@ -2,19 +2,31 @@
 
 ## 连接
 
-前提：浏览器已通过 `scripts/check-deps.mjs` 就绪。`check-deps` 输出会告诉你当前端口和环境变量。
+前提：浏览器已通过 `scripts/check-deps.mjs --mode full` 就绪，而且输出中的 `browser_identity` 是 `verified-user-chrome`。这里连接的是用户平时使用、已经登录的 Chrome，不是由工具新开的浏览器。`check-deps` 输出会告诉你当前端口。
+
+浏览器兜底要求 Node.js ≥ 24，因为当前支持的 `agent-browser` 版本都声明这个运行要求。full 检查会先验 Node 版本；合格后发现 CLI 缺失或过旧才会自动运行：
+
+```bash
+npm i -g agent-browser@latest
+```
+
+这条命令只安装或升级 CLI，不下载测试浏览器。`--check-only` 是不改环境的诊断模式，只报告问题，不自动安装。然后让用户在**现有 Chrome** 打开 `chrome://inspect/#remote-debugging` 并开启控制，再重跑 full 检查。`agent-browser install` 的含义是下载另一个浏览器二进制，研究兜底中禁止运行。
+
+检查还必须核对监听端口进程的真实可执行文件和用户目录。Chrome for Testing、Chrome Dev、Chromium、`~/.sleuth/chrome-live` 等独立用户目录，哪怕端口能连也必须拒绝；普通程序即使把 Chrome 路径放进自己的参数也不能通过。不能把 `connected:true` 当成“已经接入用户登录态 Chrome”。
 
 ```bash
 # check-deps 输出的 SLEUTH_CDP_PORT 变量
 
 # 正确用法
-agent-browser --cdp $SLEUTH_CDP_PORT open https://example.com
+agent-browser --cdp $SLEUTH_CDP_PORT --idle-timeout 1h open https://example.com
 
-# 错误：启动无登录态的 Chrome for Testing
+# 错误：不带 --cdp 会启动另一个无登录态浏览器
 agent-browser open https://example.com
 ```
 
-> 以下所有命令省略 `--cdp $SLEUTH_CDP_PORT` 前缀，实际调用时必须带上（端口号用字面值，不是 shell 变量）。不要用 `--profile`（与 `--cdp` 互斥）。
+连接用户现有 Chrome 的 `agent-browser` 后台服务默认不会按普通闲置规则退出，所以所有命令必须复用默认后台服务并显式带 `--idle-timeout 1h`。禁止使用 `--session` 或 `--namespace` 创建额外后台服务，禁止启动或复用其他常驻 CDP 代理。任务结束只关闭本任务明确新建的标签页；禁止使用 `agent-browser close` 或 `close --all`，避免关闭用户 Chrome。
+
+> 以下所有命令省略 `agent-browser --cdp $SLEUTH_CDP_PORT --idle-timeout 1h` 前缀，实际调用时必须带上（端口号用字面值，不是 shell 变量）。不要用 `--profile`（与 `--cdp` 互斥），不要用 `--auto-connect` 猜浏览器，不要调用 `launch-chrome.mjs` 重开 Chrome。
 
 ## 核心姿势
 
@@ -76,7 +88,7 @@ wait @e1                  # 等元素出现
 wait --text "Success"     # 等文本
 wait --url "**/dashboard" # 等 URL 变化
 wait --load networkidle   # 等网络空闲
-wait 2000                 # 固定等待（最后手段）
+wait 2000                 # 只用于已确认的页面动画，最多一次；不能拿它重试失败工具
 ```
 
 ### 滚动
@@ -103,6 +115,20 @@ tab t2                    # 切换（用 t0/t1/t2 格式，不接受纯数字）
 tab close t2              # 关闭
 ```
 
+### 多 Agent 并发时的标签边界
+
+同一个现有 Chrome 的 CDP 连接会共享“当前标签页”。在最低支持版本 agent-browser 0.28.0 的真实测试中，两个 `--session` 连接仍会读到后一个连接切换的页面，因此**浏览器操作必须串行**：主 Agent 同一时刻只把 CDP 端口交给一个搜索 Agent，不能让多个 Agent 并发执行 `open / eval / snapshot / click`。禁止使用 `--session` 或 `--namespace` 另建后台服务规避串行限制。
+
+拿到浏览器操作权的 Agent 必须用自己的唯一名字标记标签，并分三步执行：
+
+```bash
+tab new --label <agent-name>   # 只创建自己的空白标签
+tab <agent-name>               # 明确切换到自己的标签
+open <url>                     # 再单独导航，并用 get url / get title 核验
+```
+
+不要依赖 `tab new --label <name> <url>` 一步完成导航：agent-browser 0.28.0 连接现有 Chrome 时实测可能仍停在 `about:blank`。任务结束只运行 `tab close <agent-name>`，禁止关闭别人的标签。
+
 ### 状态检查
 
 ```bash
@@ -122,7 +148,7 @@ screenshot --annotate     # 带 @ref 标注
 
 ```bash
 # 截图后搬到 output 目录
-agent-browser screenshot --cdp $SLEUTH_CDP_PORT
+agent-browser --cdp $SLEUTH_CDP_PORT --idle-timeout 1h screenshot
 cp ~/.agent-browser/tmp/screenshots/screenshot-*.png <outputDir>/screenshots/
 ```
 
@@ -134,17 +160,19 @@ cp ~/.agent-browser/tmp/screenshots/screenshot-*.png <outputDir>/screenshots/
 
 通过 CDP 连接真实 Chrome，不会被 `navigator.webdriver` 检测。但部分站点有更深层行为检测。
 
-**降级优先级（从轻到重）：**
+进入本段前，网络搜索和网页读取已经失败，当前已经连接现有 Chrome。不要再用长等待假装处理反爬，也不要改开新的浏览器。
+
+**浏览器内换路优先级（从轻到重）：**
 
 | 级别 | 策略 | 操作 |
 |------|------|------|
-| 1 | 换入口 | WebFetch / reader 先试 |
-| 2 | 降频 | `wait 1500`~`wait 3000` |
-| 3 | 模拟真实交互 | `hover @e1` → `wait 1000` → `click` |
+| 1 | 看失败位置 | `network requests` + `eval` 判断是正文没渲染还是请求被拦 |
+| 2 | 换站内入口 | 从首页、帮助中心或已登录后台内导航到目标页 |
+| 3 | 模拟真实交互 | `hover @e1` → 最多一次短等待 → `click` |
 | 4 | 逐键输入 | `keyboard type` 代替 `fill` |
-| 5 | SPA 内跳转 | `pushstate` 代替 `open` |
-| 6 | 换来源 | WebSearch 缓存页 / API / 聚合 |
-| 7 | 标记缺口 | 记录为 anti_bot |
+| 5 | SPA 内跳转 | `pushstate` 代替 `open`，保留当前登录态 |
+| 6 | 换一手来源 | 在同一现有 Chrome 中改查官方文档、API 或帮助中心 |
+| 7 | 标记缺口 | 记录为 anti_bot，不继续重复等待 |
 
 **级别 3 的底层鼠标（hover/click 被检测时）：**
 

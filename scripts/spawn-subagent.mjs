@@ -109,10 +109,10 @@ if (!VALID_ROLES.has(role)) {
 
 // --- helpers ---
 
-function cdpSection() {
+function cdpSection(agentName) {
   return CDP_PORT
-    ? `【agent-browser 端口】所有 agent-browser 命令用字面值 \`--cdp ${CDP_PORT}\`，**不要**用 \`\$SLEUTH_CDP_PORT\` shell 变量——你的运行时可能没有这个环境变量。references/tool-guide.md 中出现的 \`\$SLEUTH_CDP_PORT\` 是文档写法，执行时替换为 \`${CDP_PORT}\`。`
-    : '【agent-browser 端口】Chrome 调试端口未设置——所有 agent-browser 命令不可用，不要尝试。';
+    ? `【agent-browser 端口】当前已连接用户现有的登录态 Chrome，且主 Agent 已把本时段的独占浏览器操作权交给你。所有命令使用 \`agent-browser --cdp ${CDP_PORT} --idle-timeout 1h <command>\` 并复用默认后台服务，**不要**用 \`\$SLEUTH_CDP_PORT\` shell 变量——你的运行时可能没有这个环境变量。禁止使用 \`--session\` 或 \`--namespace\` 创建额外后台服务，禁止启动或复用其他常驻 CDP 代理；同一个 CDP 连接会共享“当前标签页”，不要依赖 \`--session\` 隔离；发现别的 Agent 也在操作时立即交回主 Agent，不要并发抢标签。先执行 \`tab new --label ${agentName}\`，再执行 \`tab ${agentName}\`，最后单独 \`open <url>\` 并用 \`get url\` 或 \`get title\` 核验；不要把 URL 直接跟在 \`tab new --label\` 后面，0.28.0 实测可能仍停在 about:blank。references/tool-guide.md 中出现的 \`\$SLEUTH_CDP_PORT\` 是文档写法，执行时替换为 \`${CDP_PORT}\`。禁止裸跑 \`agent-browser open\`，禁止 \`--profile\`，禁止 \`agent-browser install\`，禁止关闭任何任务开始前已经存在的标签页。`
+    : `【浏览器兜底尚未就绪】如果网络搜索或 WebFetch / reader 失败，不要继续等待，也不要把它静默写成最终 gap。保留已经写入的 raw，不写 \`agent_done\`，立即向主 Agent 返回一行：\`BROWSER_CONTROL_REQUIRED: <目标 URL + 失败原因>\`。主 Agent 会安装或升级 agent-browser CLI，并引导用户在现有登录态 Chrome 开启控制；恢复后你用同一 Agent 名续跑。禁止裸跑 \`agent-browser open\`、\`agent-browser install\`、\`--profile\` 或自行启动 Chrome。`;
 }
 
 // --- search role ---
@@ -157,7 +157,7 @@ function buildSearchContract(v) {
 **本 skill 根目录**：
 - \`${SKILL_ROOT}\`
 - 文档在 \`${SKILL_ROOT}/references/\` 子目录下
-${CDP_PORT ? `- Chrome 调试端口：\`${CDP_PORT}\`（agent-browser 命令带 \`--cdp ${CDP_PORT}\`）` : '- Chrome 调试端口：**未设置**——agent-browser 命令不可用'}
+${CDP_PORT ? `- Chrome 调试端口：\`${CDP_PORT}\`（命令前缀为 \`agent-browser --cdp ${CDP_PORT} --idle-timeout 1h\`）` : '- Chrome 调试端口：**未设置**——agent-browser 命令不可用'}
 - 文档里的相对路径（如 \`references/tool-guide.md\`）都相对于本 skill 根目录，用 Read 工具时拼上根目录路径
 - 文档中的工具名是**能力描述**——使用你运行时对应的工具。浏览器操控命令参考见 \`references/tool-guide.md\`
 
@@ -170,9 +170,10 @@ ${CDP_PORT ? `- Chrome 调试端口：\`${CDP_PORT}\`（agent-browser 命令带 
 - 🔴 产生状态变更的操作（提交表单 / 下单 / 发帖 / 改配置 / 点"确认/删除"）执行前必须先停下问——只读浏览无需确认
 
 **网络失败处理**（避免无谓重试和无限卡死）：
-- WebFetch 单 URL 重试上限：3 次（间隔 2s / 5s / 10s）。3 次都失败 → 写 gap 到 raw/，不阻塞
-- WebSearch 连续 2 次返回空 → 换关键词或换工具（agent-browser）
-- agent-browser 超时 → 写 red_flag 到 raw/，明示"该来源未能验证"，不伪装成已验证
+- WebSearch 返回空、受限或超时 → 只允许一次有实质变化的查询改写，不固定等待；仍失败就立即升级 agent-browser
+- WebFetch / reader 返回空、登录墙、脚本空壳或超时 → 不对同一 URL 做 2s / 5s / 10s 定时重试，立即升级 agent-browser
+- 有 CDP 端口时，只用 \`agent-browser --cdp <字面端口> --idle-timeout 1h <command>\` 连接用户现有登录态 Chrome；没有端口时按下方 \`BROWSER_CONTROL_REQUIRED\` 交接，不能自行新开浏览器
+- agent-browser 超时 → 只做一次 eval / network 诊断，然后换同一 Chrome 内的入口或一手来源；仍失败才写 gap，明示"该来源未能验证"，不伪装成已验证
 - 整体退出条件（必须满足第 1 条，或第 2+3 条同时成立）：
   1. 所有 must-verify 项已验证（回原始来源确认，不是 WebSearch snippet）
   2. 连续 2 次搜索返回类似信息（无新 claim 产出）
@@ -233,17 +234,18 @@ finding 示例：
 - ts / round / agent / claim_id / confidence 由归一化器补，不要写。
 
 **退出前必做**：用 Write append 最后一行到你的 raw 文件：
-\`{"type":"agent_done","agent":"${agentName}","lines_written":<你写的总行数>,"ts":"<当前 ISO 时间>","visual_scan":{"status":"captured 或 none_useful","candidates_seen":<各页候选合计>,"useful_saved":<visuals 总数>,"reason":"全部没有保存时说明总原因","pages":[{"url":"<被采用的来源页>","candidates_seen":<该页候选数>,"useful_saved":<该页保存数>,"reason":"该页没有保存时说明原因"}]}}\`
+\`{"type":"agent_done","agent":"${agentName}","lines_written":<agent_done 之前的 finding/gap/red_flag 行数>,"ts":"<当前 ISO 时间>","visual_scan":{"status":"captured 或 none_useful","candidates_seen":<各页候选合计>,"useful_saved":<visuals 总数>,"reason":"全部没有保存时说明总原因","pages":[{"url":"<被采用的来源页>","candidates_seen":<该页候选数>,"useful_saved":<该页保存数>,"reason":"该页没有保存时说明原因"}]}}\`
+- \`lines_written\` 不包含 \`agent_done\` 本身。例如 4 条 finding + 1 条 agent_done，必须写 4，不是 5。
 - \`visual_scan.pages\` 必须覆盖每个 finding 的每个来源 URL；即使某页没有图片，也要写 candidates_seen: 0 和具体 reason。总数必须等于 pages 合计。
 不写这行 = 主 Agent 会认为你被杀了，重派你。
 
-**不要返回 stdout 给主 Agent**——你的所有产出在 raw 文件里。
+**不要返回 stdout 给主 Agent**——你的所有正常产出在 raw 文件里。唯一例外是浏览器控制未就绪时返回 \`BROWSER_CONTROL_REQUIRED\`；此时保留部分 raw 且不写 \`agent_done\`。
 
 【完成标准】
 - 核心事实已验证（回原始来源）
-- 关闭你自己创建的浏览器 tab（\`agent-browser close --all\` 兜底也行）
+- 只关闭你在本任务中新建且能明确识别的标签页；绝不使用 \`close --all\`，绝不关闭用户原有标签页
 
-${cdpSection()}
+${cdpSection(agentName)}
 
 【启动检查清单——收到任务后，先按序完成，不跳过】：
 1. Read \`${SKILL_ROOT}/references/search.md\`（搜索逻辑 + 返回格式）

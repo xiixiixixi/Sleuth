@@ -84,6 +84,28 @@ test('两轮同一 claim_key 合并来源，并保留 rounds_seen', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('同一 claim_key 的后续轮次会替换更长但陈旧的 claim', () => {
+  const dir = makeDir();
+  writeSpec(dir);
+  const oldClaim = '第一轮只能把可核验时间下限写到 2013 年；这是一条刻意写得更长的旧结论，用来证明归一化器不能继续只按字数选择正文。';
+  const updatedClaim = '第二轮把现存页面下限推进到 2012 年。';
+  writeRaw(dir, 'search-r1-a.jsonl', [finding({
+    claim: oldClaim,
+    sources: [{ url: 'https://old.example/2013', tier: 'T2', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' }],
+  })], 'a');
+  writeRaw(dir, 'search-r2-b.jsonl', [finding({
+    claim: updatedClaim,
+    sources: [{ url: 'https://new.example/2012', tier: 'T1', stance: 'supports', observed_at: '2026-07-18T00:00:00Z' }],
+    context_links: [{ claim_key: '1:entity:field', relationship: 'extends' }],
+  })], 'b');
+  run(dir);
+  const [row] = jsonl(dir);
+  assert.equal(row.claim, updatedClaim);
+  assert.deepEqual(row.rounds_seen, [1, 2]);
+  assert.equal(row.sources.length, 2);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('完成条件只认 subquestion_ids 和 fields_covered，不猜中文标题', () => {
   const dir = makeDir();
   writeSpec(dir);

@@ -303,10 +303,8 @@ function launchChrome() {
 function writeDevToolsPort(wsUrl) {
   const wsPath = wsUrl.split(`:${DEBUG_PORT}`)[1];
   const data = `${DEBUG_PORT}\n${wsPath}\n`;
-  // Chrome 将此文件写在 --user-data-dir（即 LINK_DIR）下；
-  // browser-discovery.mjs 读的是 DEFAULT_DATA。两处都写，新旧兼容。
+  // 独立诊断实例只能写自己的目录，绝不伪装成用户日常 Chrome。
   fs.writeFileSync(path.join(LINK_DIR, 'DevToolsActivePort'), data);
-  try { fs.writeFileSync(path.join(DEFAULT_DATA, 'DevToolsActivePort'), data); } catch {}
 }
 
 // ═══ 主流程 ════════════════════════════════════════════════

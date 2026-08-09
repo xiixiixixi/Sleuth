@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * fix-chrome-debug-permission.mjs — 压住 Chrome 144+ 的「要允许远程调试吗?」弹窗。
+ * fix-chrome-debug-permission.mjs — 检查或设置 Chrome 远程调试许可。
  *
- * Chrome 144+ 每次有程序通过调试端口连日常 Chrome 都会弹许可框。
- * sleuth 需要带着用户登录态操作浏览器，必须连日常 Chrome，
- * 所以每个 Chrome 144+ 用户都需要设置这个授权。
+ * 重要：这个配置只表示允许进入远程调试流程，不会自动批准每个新连接。
+ * Chrome 144+ 对新调试连接仍可能弹一次授权框；同一连接内反复弹才异常。
+ * Sleuth 研究主流程不自动运行本脚本，只引导用户在现有登录态 Chrome
+ * 打开 chrome://inspect/#remote-debugging。
  *
  * 平台方案（2026-07-14 更新）：
  *   macOS  → Chrome Local State: devtools.remote_debugging.user-enabled = true
@@ -314,8 +315,8 @@ function uninstallWindows() {
 
 function install() {
   log('');
-  log('安装 Chrome 远程调试策略 (RemoteDebuggingAllowed = true)');
-  log('作用：压住 Chrome 144+ 的「要允许远程调试吗?」弹窗');
+  log('设置 Chrome 远程调试许可');
+  log('作用：允许进入远程调试流程；新连接仍可能需要用户确认一次');
   log('');
 
   switch (PLATFORM) {
@@ -337,7 +338,7 @@ function install() {
   if (PLATFORM === 'darwin') {
     log('⚠ 现在重新打开 Chrome 即可生效（Local State 已改好）。');
     log('  macOS 方案不显示在 chrome://policy 页面（那是企业策略页，用户配置不在那）。');
-    log('  验证方式：重新打开 Chrome 后连调试端口，不再弹「要允许远程调试吗?」即成功。');
+    log('  验证方式：重新打开 Chrome 后运行 full 检查；新连接仍可能弹一次授权确认。');
   } else {
     log('⚠ 重要：需要完全重启 Chrome 才能生效。');
     log('  1. 完全退出 Chrome（Windows: 关闭所有窗口 / Linux: 退出进程）');
@@ -385,9 +386,9 @@ if (isHelp) {
   log('  node scripts/fix-chrome-debug-permission.mjs --check     只检测是否已安装');
   log('  node scripts/fix-chrome-debug-permission.mjs --uninstall 卸载策略');
   log('');
-  log('作用：安装 Chrome 企业策略 RemoteDebuggingAllowed = true，');
-  log('      压住 Chrome 144+ 的「要允许远程调试吗?」弹窗。');
-  log('      macOS 用 osascript / Linux 用 pkexec / Windows 用 UAC 弹密码框。');
+  log('作用：设置 Chrome 远程调试许可。');
+  log('      这不会自动批准每个新连接；Chrome 144+ 仍可能要求确认一次。');
+  log('      macOS 修改 Local State / Linux 用 pkexec / Windows 用 UAC。');
   process.exit(0);
 }
 
@@ -407,12 +408,12 @@ if (isCheck) {
   log('');
   const { installed, detail } = checkInstalled();
   if (installed) {
-    log(`✓ 已安装：${detail}`);
-    log('  Chrome 144+ 的调试弹窗应该已被压住。');
+    log(`✓ 已允许远程调试：${detail}`);
+    log('  注意：新调试连接仍可能弹一次授权确认，这属于正常安全机制。');
   } else {
-    log(`✗ 未安装：${detail}`);
-    log('  Chrome 144+ 用户连日常 Chrome 时会反复弹「要允许远程调试吗?」');
-    log('  跑 node scripts/fix-chrome-debug-permission.mjs 安装策略。');
+    log(`✗ 尚未设置：${detail}`);
+    log('  研究任务优先在现有 Chrome 打开 chrome://inspect/#remote-debugging。');
+    log('  本脚本是可选的手动环境工具，不是免确认方案。');
   }
   process.exit(installed ? 0 : 1);
 }
@@ -431,7 +432,8 @@ if (isUninstall) {
 const { installed, detail } = checkInstalled();
 if (installed) {
   log('');
-  log(`✓ 策略已安装（${detail}），无需重复安装。`);
+  log(`✓ 远程调试许可已设置（${detail}），无需重复设置。`);
+  log('  新连接仍可能需要用户确认一次；本配置不等于永久批准。');
   log('  如需卸载：node scripts/fix-chrome-debug-permission.mjs --uninstall');
   process.exit(0);
 }
