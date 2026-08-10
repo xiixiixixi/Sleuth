@@ -32,7 +32,7 @@
 - Consumes: 环境变量 `SLEUTH_CDP_PORT: string`、`SLEUTH_CDP_WS: string`。
 - Produces: `resolveCdpTarget(): { port: string, wsUrl: string, commandTarget: string } | null`；搜索提示中的固定命令前缀 `agent-browser --cdp '<ws-url>' --idle-timeout 1h`。
 
-- [ ] **Step 1: 写完整地址成功路径的失败测试**
+- [x] **Step 1: 写完整地址成功路径的失败测试**
 
 在测试文件定义可复用夹具，并把现有所有使用 `{ SLEUTH_CDP_PORT: '9222' }` 的合法浏览器测试改成同一个 `CDP_ENV`，包括“使用字面值”和“不会误关用户标签页”两项，避免旧夹具制造无关失败：
 
@@ -51,7 +51,7 @@ test('search prompt 使用 full 检查核验后的完整本机调试地址', () 
 });
 ```
 
-- [ ] **Step 2: 运行成功路径测试并确认按预期失败**
+- [x] **Step 2: 运行成功路径测试并确认按预期失败**
 
 Run:
 
@@ -61,7 +61,7 @@ node --test --test-name-pattern='完整本机调试地址' scripts/__tests__/spa
 
 Expected: FAIL，当前提示仍生成 `--cdp 9222`，没有内联完整地址。
 
-- [ ] **Step 3: 写拒绝不完整或不安全目标的失败测试**
+- [x] **Step 3: 写拒绝不完整或不安全目标的失败测试**
 
 ```js
 test('search prompt 拒绝不完整或不安全的浏览器目标', () => {
@@ -84,7 +84,7 @@ test('search prompt 拒绝不完整或不安全的浏览器目标', () => {
 });
 ```
 
-- [ ] **Step 4: 运行拒绝路径测试并确认按预期失败**
+- [x] **Step 4: 运行拒绝路径测试并确认按预期失败**
 
 Run:
 
@@ -94,7 +94,7 @@ node --test --test-name-pattern='不完整或不安全' scripts/__tests__/spawn-
 
 Expected: FAIL，当前生成器只看 `SLEUTH_CDP_PORT`，不会拒绝缺失、远程或不匹配地址。
 
-- [ ] **Step 5: 实现最小的目标校验与提示生成**
+- [x] **Step 5: 实现最小的目标校验与提示生成**
 
 在 `scripts/spawn-subagent.mjs` 中读取两个环境变量，并加入只服务 search role 的校验函数：
 
@@ -127,7 +127,7 @@ function resolveCdpTarget() {
 
 `buildSearchContract()` 调用一次 `resolveCdpTarget()`，并把结果显式传给 `cdpSection(agentName, cdpTarget)`；没有目标时保留现有 `BROWSER_CONTROL_REQUIRED` 文本。所有当前端口前缀改为完整地址前缀，同时写明地址失效后必须重新 full 检查。
 
-- [ ] **Step 6: 运行角色测试并确认通过**
+- [x] **Step 6: 运行角色测试并确认通过**
 
 Run:
 
@@ -137,7 +137,7 @@ node --test scripts/__tests__/spawn-subagent.test.mjs
 
 Expected: 全部通过；错误路径 exit 2，合法提示不含仅端口执行前缀。
 
-- [ ] **Step 7: 提交 Task 1**
+- [x] **Step 7: 提交 Task 1**
 
 ```bash
 git add scripts/spawn-subagent.mjs scripts/__tests__/spawn-subagent.test.mjs
@@ -162,7 +162,7 @@ git commit -m "fix: 使用已核验的 Chrome 完整调试地址"
 - Consumes: Task 1 的 `SLEUTH_CDP_PORT` + `SLEUTH_CDP_WS` 双值契约。
 - Produces: 主 Agent、搜索 Agent 和使用者看到的一致执行规则；端口只用于身份比对，完整地址用于执行。
 
-- [ ] **Step 1: 写当前文档契约的失败测试**
+- [x] **Step 1: 写当前文档契约的失败测试**
 
 更新 `SKILL.md` 契约测试，并新增跨文档断言：
 
@@ -180,7 +180,7 @@ test('当前浏览器规则使用同次 full 检查的完整地址', () => {
 });
 ```
 
-- [ ] **Step 2: 运行文档契约并确认按预期失败**
+- [x] **Step 2: 运行文档契约并确认按预期失败**
 
 Run:
 
@@ -190,7 +190,7 @@ node --test scripts/__tests__/references-structure.test.mjs
 
 Expected: FAIL，当前文档仍把 `$SLEUTH_CDP_PORT` 当作执行目标。
 
-- [ ] **Step 3: 最小修改当前规则**
+- [x] **Step 3: 最小修改当前规则**
 
 统一写法：
 
@@ -206,7 +206,7 @@ agent-browser --cdp '<full 检查输出的 SLEUTH_CDP_WS>' --idle-timeout 1h <co
 - 完整地址只允许本机回环地址，Chrome 重启后必须重新 full 检查。
 - 同一时刻只把这一对值交给一个搜索 Agent，继续串行操作标签页。
 
-- [ ] **Step 4: 标记旧规格和旧计划已被替代**
+- [x] **Step 4: 标记旧规格和旧计划已被替代**
 
 在以下文件顶部加入醒目状态说明，但保留历史测试证据：
 
@@ -219,7 +219,7 @@ Files:
 - `docs/superpowers/specs/2026-08-09-agent-browser-daemon-lifecycle-design.md`
 - `docs/superpowers/plans/2026-08-09-agent-browser-daemon-lifecycle.md`
 
-- [ ] **Step 5: 运行相关测试和文档检查**
+- [x] **Step 5: 运行相关测试和文档检查**
 
 Run:
 
@@ -231,7 +231,7 @@ git diff --check
 
 Expected: 全部通过，当前可执行文档不再要求仅端口前缀。
 
-- [ ] **Step 6: 提交 Task 2**
+- [x] **Step 6: 提交 Task 2**
 
 ```bash
 git add SKILL.md README.md AGENTS.md CLAUDE.md references/search.md references/tool-guide.md scripts/AGENTS.md scripts/__tests__/references-structure.test.mjs docs/superpowers/specs/2026-08-09-agent-browser-daemon-lifecycle-design.md docs/superpowers/plans/2026-08-09-agent-browser-daemon-lifecycle.md
@@ -253,7 +253,7 @@ git commit -m "docs: 对齐 Chrome 完整调试地址规则"
 - Consumes: Task 1 的安全校验行为、2026-08-10 真实 Chrome 验收数据。
 - Produces: 可重复执行的验收步骤和不夸大的当前状态记录。
 
-- [ ] **Step 1: 扩展当前文档契约测试**
+- [x] **Step 1: 扩展当前文档契约测试**
 
 ```js
 test('当前测试文档记录端口超时与完整地址验收', () => {
@@ -268,7 +268,7 @@ test('当前测试文档记录端口超时与完整地址验收', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试并确认按预期失败**
+- [x] **Step 2: 运行测试并确认按预期失败**
 
 Run:
 
@@ -278,7 +278,7 @@ node --test --test-name-pattern='端口超时与完整地址验收' scripts/__te
 
 Expected: FAIL，当前文档只记录旧后台进程根因，没有 0.33.2 的 2 秒缺陷和直连实测。
 
-- [ ] **Step 3: 更新设计与测试步骤**
+- [x] **Step 3: 更新设计与测试步骤**
 
 `docs/TESTING.md` 的真实命令统一为：
 
@@ -292,7 +292,7 @@ lsof -nP -iTCP:<full 输出的 cdp_port>
 
 合格标准增加：首次完整地址连接可等待用户授权；后两条命令不再等待；完整地址、端口、进程身份来自同一次 full 结果。
 
-- [ ] **Step 4: 更新真实问题记录**
+- [x] **Step 4: 更新真实问题记录**
 
 在 `docs/TEST-ISSUES.md` 增加单独问题项：
 
@@ -302,7 +302,7 @@ lsof -nP -iTCP:<full 输出的 cdp_port>
 - 一个默认 PID、一个 `default.sock`、一条已建立连接、6 个原有标签、无测试浏览器和其他代理。
 - 结论严格写成“同一连接不重复授权”，不承诺未来新连接永久免确认。
 
-- [ ] **Step 5: 运行文档契约和检查**
+- [x] **Step 5: 运行文档契约和检查**
 
 Run:
 
@@ -314,7 +314,7 @@ git diff --check
 
 Expected: 全部通过。
 
-- [ ] **Step 6: 提交 Task 3**
+- [x] **Step 6: 提交 Task 3**
 
 ```bash
 git add docs/DESIGN-v3.md docs/TESTING.md docs/CHROME-DEBUG-ISSUE.md docs/TEST-ISSUES.md scripts/__tests__/references-structure.test.mjs
@@ -335,7 +335,7 @@ git commit -m "docs: 记录 Chrome 144 授权直连实测"
 - Consumes: Tasks 1-3 的提交。
 - Produces: 自动测试、文档、语法、真实研究任务和真实 Chrome 五类完成证据。
 
-- [ ] **Step 1: 运行完整自动测试**
+- [x] **Step 1: 运行完整自动测试**
 
 ```bash
 node --test scripts/__tests__/*.mjs
@@ -343,7 +343,7 @@ node --test scripts/__tests__/*.mjs
 
 Expected: 0 failed；记录实时测试总数，不在长期文档中写死未来数量。
 
-- [ ] **Step 2: 运行语法、文档和差异检查**
+- [x] **Step 2: 运行语法、文档和差异检查**
 
 ```bash
 for file in scripts/*.mjs scripts/lib/*.mjs scripts/__tests__/*.mjs; do node --check "$file"; done
@@ -354,7 +354,7 @@ git diff --check
 
 Expected: 全部 exit 0。
 
-- [ ] **Step 3: 重跑“神逻辑”真实任务审计**
+- [x] **Step 3: 重跑“神逻辑”真实任务审计**
 
 ```bash
 node scripts/audit-run.mjs /Users/weixili/.sleuth/output/shenluoji-deep-dive-20260802 --stage all
@@ -362,7 +362,7 @@ node scripts/audit-run.mjs /Users/weixili/.sleuth/output/shenluoji-deep-dive-202
 
 Expected: raw、归一化、深度、边界、就绪、草稿和审查全部通过。
 
-- [ ] **Step 4: 核对真实 Chrome 证据仍成立**
+- [x] **Step 4: 核对真实 Chrome 证据仍成立**
 
 只读检查当前后台状态：
 
@@ -374,11 +374,11 @@ find ~/.agent-browser -maxdepth 1 -type s -print
 
 Expected: 一个默认后台进程、一个 `default.sock`、一条已建立连接、无命名会话、无其他代理或测试浏览器。若连接已因 1 小时闲置退出，不重新弹窗凑证据，使用 Task 3 已记录的现场时间与命令结果，并把“当前已闲置退出”作为符合设计的补充证据。
 
-- [ ] **Step 5: 做逐项完成审计**
+- [x] **Step 5: 做逐项完成审计**
 
 逐项核对规格的 8 条不可变边界，确认每项都有代码、自动测试、文档或真实运行证据；任何一项证据缺失都不得标记完成。
 
-- [ ] **Step 6: 检查提交和工作树**
+- [x] **Step 6: 检查提交和工作树**
 
 ```bash
 git log -5 --oneline
