@@ -8,6 +8,10 @@ import { fileURLToPath } from 'node:url';
 const SCRIPT = fileURLToPath(new URL('../spawn-subagent.mjs', import.meta.url));
 const TASK = '/tmp/sleuth-task';
 const SEARCH_ARGS = ['--role', 'search', '--goal', '验证定价', '--task-dir', TASK, '--agent-name', 'pricing', '--round', '2', '--subquestion-id', '1'];
+const CDP_ENV = {
+  SLEUTH_CDP_PORT: '9222',
+  SLEUTH_CDP_WS: 'ws://127.0.0.1:9222/devtools/browser/abc-123',
+};
 
 function run(args, env = {}) {
   return execFileSync('node', [SCRIPT, ...args], { encoding: 'utf8', env: { ...process.env, ...env } });
@@ -38,11 +42,11 @@ test('search prompt 注入 must-verify、known-clue、deliverable 和 stop', () 
   for (const text of ['价格数字', '参照结论', '对比表', '两个独立源']) assert.match(prompt, new RegExp(text));
 });
 
-test('search prompt 有浏览器端口时使用字面值', () => {
-  const prompt = run(SEARCH_ARGS, { SLEUTH_CDP_PORT: '9222' });
-  assert.match(prompt, /--cdp 9222/);
-  assert.match(prompt, /agent-browser --cdp 9222 --idle-timeout 1h/);
-  assert.doesNotMatch(prompt, /--cdp \$SLEUTH_CDP_PORT/);
+test('search prompt 使用 full 检查核验后的完整本机调试地址', () => {
+  const prompt = run(SEARCH_ARGS, CDP_ENV);
+  assert.match(prompt, /agent-browser --cdp 'ws:\/\/127\.0\.0\.1:9222\/devtools\/browser\/abc-123' --idle-timeout 1h/);
+  assert.doesNotMatch(prompt, /agent-browser --cdp 9222 --idle-timeout 1h/);
+  assert.doesNotMatch(prompt, /--cdp ['"]?\$SLEUTH_CDP_WS['"]?/);
   assert.match(prompt, /用户现有的登录态 Chrome/);
   assert.match(prompt, /独占浏览器操作权/);
   assert.match(prompt, /tab new --label pricing/);
@@ -50,10 +54,11 @@ test('search prompt 有浏览器端口时使用字面值', () => {
   assert.match(prompt, /禁止使用 `--session` 或 `--namespace`/);
   assert.match(prompt, /禁止启动或复用其他常驻 CDP 代理/);
   assert.match(prompt, /禁止裸跑 `agent-browser open`/);
+  assert.match(prompt, /Chrome 重启.*重新.*full 检查/);
 });
 
 test('search prompt 没有浏览器端口时及时交回主 Agent', () => {
-  const prompt = run(SEARCH_ARGS, { SLEUTH_CDP_PORT: '' });
+  const prompt = run(SEARCH_ARGS, { SLEUTH_CDP_PORT: '', SLEUTH_CDP_WS: '' });
   assert.match(prompt, /BROWSER_CONTROL_REQUIRED/);
   assert.match(prompt, /保留已经写入的 raw，不写 `agent_done`/);
   assert.match(prompt, /唯一例外是浏览器控制未就绪/);
@@ -64,9 +69,28 @@ test('search prompt 没有浏览器端口时及时交回主 Agent', () => {
 });
 
 test('search prompt 不会误关用户原有标签页', () => {
-  const prompt = run(SEARCH_ARGS, { SLEUTH_CDP_PORT: '9222' });
+  const prompt = run(SEARCH_ARGS, CDP_ENV);
   assert.match(prompt, /绝不使用 `close --all`/);
   assert.match(prompt, /绝不关闭用户原有标签页/);
+});
+
+test('search prompt 拒绝不完整或不安全的浏览器目标', () => {
+  const badEnvs = [
+    { SLEUTH_CDP_PORT: '9222', SLEUTH_CDP_WS: '' },
+    { SLEUTH_CDP_PORT: '', SLEUTH_CDP_WS: CDP_ENV.SLEUTH_CDP_WS },
+    { SLEUTH_CDP_PORT: '9222', SLEUTH_CDP_WS: 'wss://remote.example/devtools/browser/abc' },
+    { SLEUTH_CDP_PORT: '9222', SLEUTH_CDP_WS: 'ws://127.0.0.1:9333/devtools/browser/abc' },
+    { SLEUTH_CDP_PORT: '9222', SLEUTH_CDP_WS: 'ws://127.0.0.1:9222/devtools/page/abc' },
+    { SLEUTH_CDP_PORT: '9222', SLEUTH_CDP_WS: 'ws://user@127.0.0.1:9222/devtools/browser/abc' },
+  ];
+  for (const env of badEnvs) {
+    const result = spawnSync('node', [SCRIPT, ...SEARCH_ARGS], {
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+    });
+    assert.equal(result.status, 2, JSON.stringify(env));
+    assert.match(result.stderr, /SLEUTH_CDP_PORT.*SLEUTH_CDP_WS|本机.*调试地址|端口.*一致/);
+  }
 });
 
 test('visual-required 形成独立硬要求', () => {

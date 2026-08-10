@@ -46,7 +46,7 @@ test('search prompt 使用 full 检查核验后的完整本机调试地址', () 
   const prompt = run(SEARCH_ARGS, CDP_ENV);
   assert.match(prompt, /agent-browser --cdp 'ws:\/\/127\.0\.0\.1:9222\/devtools\/browser\/abc-123' --idle-timeout 1h/);
   assert.doesNotMatch(prompt, /agent-browser --cdp 9222 --idle-timeout 1h/);
-  assert.doesNotMatch(prompt, /\$SLEUTH_CDP_WS/);
+  assert.doesNotMatch(prompt, /--cdp ['"]?\$SLEUTH_CDP_WS['"]?/);
   assert.match(prompt, /Chrome 重启.*重新.*full 检查/);
 });
 ```

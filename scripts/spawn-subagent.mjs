@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 // ${CLAUDE_SKILL_DIR} 替换为绝对路径——消除对运行时变量替换的依赖。
 const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CDP_PORT = process.env.SLEUTH_CDP_PORT || '';
+const CDP_WS = process.env.SLEUTH_CDP_WS || '';
 
 const VALID_ROLES = new Set(['scout', 'search', 'boundary', 'review', 'synthesize']);
 
@@ -109,10 +110,36 @@ if (!VALID_ROLES.has(role)) {
 
 // --- helpers ---
 
-function cdpSection(agentName) {
-  return CDP_PORT
-    ? `【agent-browser 端口】当前已连接用户现有的登录态 Chrome，且主 Agent 已把本时段的独占浏览器操作权交给你。所有命令使用 \`agent-browser --cdp ${CDP_PORT} --idle-timeout 1h <command>\` 并复用默认后台服务，**不要**用 \`\$SLEUTH_CDP_PORT\` shell 变量——你的运行时可能没有这个环境变量。禁止使用 \`--session\` 或 \`--namespace\` 创建额外后台服务，禁止启动或复用其他常驻 CDP 代理；同一个 CDP 连接会共享“当前标签页”，不要依赖 \`--session\` 隔离；发现别的 Agent 也在操作时立即交回主 Agent，不要并发抢标签。先执行 \`tab new --label ${agentName}\`，再执行 \`tab ${agentName}\`，最后单独 \`open <url>\` 并用 \`get url\` 或 \`get title\` 核验；不要把 URL 直接跟在 \`tab new --label\` 后面，0.28.0 实测可能仍停在 about:blank。references/tool-guide.md 中出现的 \`\$SLEUTH_CDP_PORT\` 是文档写法，执行时替换为 \`${CDP_PORT}\`。禁止裸跑 \`agent-browser open\`，禁止 \`--profile\`，禁止 \`agent-browser install\`，禁止关闭任何任务开始前已经存在的标签页。`
-    : `【浏览器兜底尚未就绪】如果网络搜索或 WebFetch / reader 失败，不要继续等待，也不要把它静默写成最终 gap。保留已经写入的 raw，不写 \`agent_done\`，立即向主 Agent 返回一行：\`BROWSER_CONTROL_REQUIRED: <目标 URL + 失败原因>\`。主 Agent 会安装或升级 agent-browser CLI，并引导用户在现有登录态 Chrome 开启控制；恢复后你用同一 Agent 名续跑。禁止裸跑 \`agent-browser open\`、\`agent-browser install\`、\`--profile\` 或自行启动 Chrome。`;
+function resolveCdpTarget() {
+  if (!CDP_PORT && !CDP_WS) return null;
+  if (!CDP_PORT || !CDP_WS) fail('浏览器使用权必须同时提供 SLEUTH_CDP_PORT 和 SLEUTH_CDP_WS');
+  if (!/^\d+$/.test(CDP_PORT) || Number(CDP_PORT) < 1 || Number(CDP_PORT) > 65535) {
+    fail('SLEUTH_CDP_PORT 必须是有效端口');
+  }
+
+  let parsed;
+  try { parsed = new URL(CDP_WS); }
+  catch { fail('SLEUTH_CDP_WS 必须是本机完整调试地址'); }
+  if (
+    parsed.protocol !== 'ws:'
+    || parsed.hostname !== '127.0.0.1'
+    || parsed.port !== CDP_PORT
+    || parsed.username
+    || parsed.password
+    || !/^\/devtools\/browser\/[A-Za-z0-9._-]+$/.test(parsed.pathname)
+    || parsed.search
+    || parsed.hash
+  ) fail('SLEUTH_CDP_WS 必须是端口一致的本机浏览器级调试地址');
+
+  return { port: CDP_PORT, wsUrl: CDP_WS, commandTarget: `'${CDP_WS}'` };
+}
+
+function cdpSection(agentName, cdpTarget) {
+  if (!cdpTarget) {
+    return `【浏览器兜底尚未就绪】如果网络搜索或 WebFetch / reader 失败，不要继续等待，也不要把它静默写成最终 gap。保留已经写入的 raw，不写 \`agent_done\`，立即向主 Agent 返回一行：\`BROWSER_CONTROL_REQUIRED: <目标 URL + 失败原因>\`。主 Agent 会安装或升级 agent-browser CLI，并引导用户在现有登录态 Chrome 开启控制；恢复后你用同一 Agent 名续跑。禁止裸跑 \`agent-browser open\`、\`agent-browser install\`、\`--profile\` 或自行启动 Chrome。`;
+  }
+  const prefix = `agent-browser --cdp ${cdpTarget.commandTarget} --idle-timeout 1h`;
+  return `【agent-browser 完整调试地址】full 检查已确认这是用户现有的登录态 Chrome，且主 Agent 已把本时段的独占浏览器操作权交给你。所有命令使用 \`${prefix} <command>\` 并复用默认后台服务，**不要**用 \`\$SLEUTH_CDP_WS\` shell 变量——你的运行时可能没有这个环境变量。禁止把完整地址改回仅端口模式；agent-browser 0.33.2 的 Chrome 144+ 端口发现只有约 2 秒授权等待。禁止使用 \`--session\` 或 \`--namespace\` 创建额外后台服务，禁止启动或复用其他常驻 CDP 代理；同一个 CDP 连接会共享“当前标签页”，不要依赖 \`--session\` 隔离；发现别的 Agent 也在操作时立即交回主 Agent，不要并发抢标签。先执行 \`tab new --label ${agentName}\`，再执行 \`tab ${agentName}\`，最后单独 \`open <url>\` 并用 \`get url\` 或 \`get title\` 核验；不要把 URL 直接跟在 \`tab new --label\` 后面，0.28.0 实测可能仍停在 about:blank。Chrome 重启或完整地址失效时，保留 raw、不写 \`agent_done\`，返回 \`BROWSER_CONTROL_REQUIRED\` 让主 Agent 重新运行 full 检查；禁止猜测新地址。禁止裸跑 \`agent-browser open\`，禁止 \`--profile\`，禁止 \`agent-browser install\`，禁止关闭任何任务开始前已经存在的标签页。`;
 }
 
 // --- search role ---
@@ -123,6 +150,7 @@ function buildSearchContract(v) {
   if (!/^\d+$/.test(v.round || '') || Number(v.round) < 1) fail('search role requires positive --round');
   if (!v['subquestion-id']?.length) fail('search role requires --subquestion-id');
 
+  const cdpTarget = resolveCdpTarget();
   const agentName = v['agent-name'];
   const rawFileName = `search-r${v.round}-${agentName}`;
   const rawFilePath = `${v['task-dir']}/raw/${rawFileName}.jsonl`;
@@ -157,7 +185,7 @@ function buildSearchContract(v) {
 **本 skill 根目录**：
 - \`${SKILL_ROOT}\`
 - 文档在 \`${SKILL_ROOT}/references/\` 子目录下
-${CDP_PORT ? `- Chrome 调试端口：\`${CDP_PORT}\`（命令前缀为 \`agent-browser --cdp ${CDP_PORT} --idle-timeout 1h\`）` : '- Chrome 调试端口：**未设置**——agent-browser 命令不可用'}
+${cdpTarget ? `- Chrome 完整调试地址：\`${cdpTarget.wsUrl}\`（端口 \`${cdpTarget.port}\`；命令前缀为 \`agent-browser --cdp ${cdpTarget.commandTarget} --idle-timeout 1h\`）` : '- Chrome 调试目标：**未设置**——agent-browser 命令不可用'}
 - 文档里的相对路径（如 \`references/tool-guide.md\`）都相对于本 skill 根目录，用 Read 工具时拼上根目录路径
 - 文档中的工具名是**能力描述**——使用你运行时对应的工具。浏览器操控命令参考见 \`references/tool-guide.md\`
 
@@ -172,7 +200,7 @@ ${CDP_PORT ? `- Chrome 调试端口：\`${CDP_PORT}\`（命令前缀为 \`agent-
 **网络失败处理**（避免无谓重试和无限卡死）：
 - WebSearch 返回空、受限或超时 → 只允许一次有实质变化的查询改写，不固定等待；仍失败就立即升级 agent-browser
 - WebFetch / reader 返回空、登录墙、脚本空壳或超时 → 不对同一 URL 做 2s / 5s / 10s 定时重试，立即升级 agent-browser
-- 有 CDP 端口时，只用 \`agent-browser --cdp <字面端口> --idle-timeout 1h <command>\` 连接用户现有登录态 Chrome；没有端口时按下方 \`BROWSER_CONTROL_REQUIRED\` 交接，不能自行新开浏览器
+- 有完整 CDP 地址时，只用提示中经过校验的 \`agent-browser --cdp '<本机完整地址>' --idle-timeout 1h <command>\` 连接用户现有登录态 Chrome；禁止改回仅端口模式；没有完整地址时按下方 \`BROWSER_CONTROL_REQUIRED\` 交接，不能自行新开浏览器
 - agent-browser 超时 → 只做一次 eval / network 诊断，然后换同一 Chrome 内的入口或一手来源；仍失败才写 gap，明示"该来源未能验证"，不伪装成已验证
 - 整体退出条件（必须满足第 1 条，或第 2+3 条同时成立）：
   1. 所有 must-verify 项已验证（回原始来源确认，不是 WebSearch snippet）
@@ -245,7 +273,7 @@ finding 示例：
 - 核心事实已验证（回原始来源）
 - 只关闭你在本任务中新建且能明确识别的标签页；绝不使用 \`close --all\`，绝不关闭用户原有标签页
 
-${cdpSection(agentName)}
+${cdpSection(agentName, cdpTarget)}
 
 【启动检查清单——收到任务后，先按序完成，不跳过】：
 1. Read \`${SKILL_ROOT}/references/search.md\`（搜索逻辑 + 返回格式）
