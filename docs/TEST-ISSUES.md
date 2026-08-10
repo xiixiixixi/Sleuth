@@ -70,12 +70,13 @@
 本次按 `TESTING.md` 复验结果：
 
 1. `agent-browser` 已从 0.28.0 升级到 0.33.2；当天重新查询 npm，线上 latest 也是 0.33.2，且官方运行要求为 Node.js ≥ 24。只升级 CLI，未运行 `agent-browser install`。
-2. `node --test scripts/__tests__/*.mjs`：139 passed，0 failed；覆盖 Node 版本阻断、浏览器真实身份、CLI 自动安装/升级、轻量失败及时交接、单一后台连接、归一化更新、任务分类和完整检查门。
+2. `node --test scripts/__tests__/*.mjs`：142 passed，0 failed；覆盖 Node 版本阻断、浏览器真实身份、CLI 自动安装/升级、轻量失败及时交接、完整地址安全校验、单一后台连接、归一化更新、任务分类和完整检查门。
 3. 浏览器生命周期专项测试已按“先失败、再修复”的方式覆盖：必须统一使用同次 full 检查核验的完整地址和 `--idle-timeout 1h`，禁止只传端口等待授权，禁止新建命名会话和其他常驻 CDP 代理。
 4. `shenluoji-deep-dive-20260802` 真实任务重新执行 `audit-run.mjs --stage all`，raw、深度、边界、草稿和审查门全部通过。
 5. 历史独立实例的 full 检查为 `ready:false`、`browser_identity: rejected-non-user-browser`、`rejected_browser_reason: non-default-user-data-dir`；用户正常重开日常 Chrome 后，当前 full 检查为 `ready:true`、`browser_identity: verified-user-chrome`、端口 9222。没有运行启动器，也没有关闭或重启用户 Chrome。
-6. 全部 Node / Bash 语法、`git diff --check` 和 25 个 Markdown 文档检查通过；`shenluoji-deep-dive-20260802` 的 raw、归一化、深度、边界、草稿和审查检查门重新全通过。
+6. 全部 Node / Bash 语法、`git diff --check` 和 27 个 Markdown 文档检查通过；`shenluoji-deep-dive-20260802` 的 raw、归一化、深度、边界、草稿和审查检查门重新全通过。
 7. 2026-08-10 授权复验使用 `agent-browser` 0.33.2：端口模式多次约 2 秒超时；完整地址模式等待约 6.6 秒后成功。用户点击“允许”后，后续 `get url` 与 `tab list` 合计约 0.1 秒，没有再弹；9222 只有一条已建立的 `agent-browser` 连接，未发现测试版、开发版、Chromium、新 Chrome 或其他常驻代理。
+8. 最终检查期间发现另一个工具刚启动的孤立 `cdp-proxy.mjs`：它没有 3456 客户端，却额外占用一条 9222 连接。只向该确切代理进程发送正常退出信号后，Chrome、用户标签和默认 `agent-browser` 均未受影响；复查只剩 `default.sock` 和一条 9222 已建立连接。
 
 ### 旧浏览器验证记录（其中身份结论已由 #032 作废）
 
