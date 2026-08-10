@@ -197,23 +197,27 @@ node scripts/launch-chrome.mjs --confirm-close-browser
 2. 模拟缺少或过旧 `agent-browser`：full 执行模式必须准确调用 `npm i -g agent-browser@latest` 并重新验版本，不能跳过；安装失败或复验失败必须保持 `ready:false`；`--check-only` 必须只报告且没有安装副作用。
 3. 模拟 Chrome for Testing、Chrome Dev、Chromium、普通进程参数伪装，以及稳定版 Chrome 加 `~/.sleuth/chrome-live` 非默认用户目录：即使端口可连，full 检查也必须 `ready:false` 并写明拒绝原因。明确指向日常默认目录时不能误拒绝。
 4. 提示用户在平时使用、已经登录的 Chrome 打开 `chrome://inspect/#remote-debugging`；禁止要求另开 Chrome，也禁止 Agent 代替用户关闭可疑实例。
-5. full 检查只有在 `browser_identity: verified-user-chrome` 时才允许把字面端口 `--cdp <port>` 注入搜索 prompt。
-6. 没有合格端口且轻量工具失败时，搜索 Agent 必须返回 `BROWSER_CONTROL_REQUIRED`，保留 raw 且不写 `agent_done`，不能静默结束。
+5. full 检查只有在 `browser_identity: verified-user-chrome` 时，才允许把同次输出的 `SLEUTH_CDP_PORT` 和完整 `SLEUTH_CDP_WS` 一起注入搜索 prompt；生成后的真实命令必须内联 `ws://127.0.0.1:<port>/devtools/browser/<id>`。
+6. 没有同次核验过的端口与完整调试地址，或者两者端口不一致时，搜索 Agent 必须返回 `BROWSER_CONTROL_REQUIRED`，保留 raw 且不写 `agent_done`，不能静默结束。
 7. prompt 不得包含 2s / 5s / 10s 固定重试、裸 `agent-browser open`、`agent-browser install`、`--profile` 或 `close --all` 作为可执行兜底。
-8. prompt 和当前文档必须统一使用 `agent-browser --cdp <字面端口> --idle-timeout 1h <command>`；禁止使用 `--session` 或 `--namespace` 为同一个 Chrome 创建额外后台服务，也禁止启动或复用其他常驻 CDP 代理。
+8. prompt 和当前文档必须统一使用 `agent-browser --cdp '<完整 cdp_ws>' --idle-timeout 1h <command>`；禁止退回只传端口，禁止使用 `--session` 或 `--namespace` 为同一个 Chrome 创建额外后台服务，也禁止启动或复用其他常驻 CDP 代理。
 
 真实环境还要人工确认：连接后看到的是用户原有标签页；目标网站本来已登录时能直接读取；任务结束没有关闭用户原有标签页。
 
 后台连接生命周期需要这样验证：
 
 ```bash
-agent-browser --cdp 9222 --idle-timeout 1h get title
-agent-browser --cdp 9222 --idle-timeout 1h get url
+SLEUTH_CDP_PORT=9222
+SLEUTH_CDP_WS='ws://127.0.0.1:9222/devtools/browser/<full-check-id>'
+agent-browser --cdp "$SLEUTH_CDP_WS" --idle-timeout 1h get title
+agent-browser --cdp "$SLEUTH_CDP_WS" --idle-timeout 1h get url
 ps -axo pid,ppid,etime,command | grep agent-browser
 lsof -nP -iTCP:9222
 ```
 
-这里的 `9222` 必须替换为 full 检查实际输出。合格标准：连续命令复用同一个默认后台服务；9222 只有一条已建立的 `agent-browser` 连接；`~/.agent-browser/` 下没有由当前任务新建的命名 `.sock` 会话；没有其他常驻 CDP 客户端连接 9222。Chrome 重启或后台服务退出后的第一次连接仍可能弹一次官方授权，这是正常安全确认；同一连接内反复弹才算失败。
+两个值必须来自同一次 full 检查，示例中的端口和 `<full-check-id>` 都要替换，不能自己拼接。`agent-browser` 0.33.2 只传端口时会在约 2 秒内结束发现，来不及等待用户点击 Chrome 144 的“允许”；这一步必须改用完整调试地址，让第一次命令持续等待用户确认。合格标准：用户点击一次“允许”后，第一条命令成功；后续命令没有再弹；连续命令复用同一个默认后台服务；9222 只有一条已建立的 `agent-browser` 连接；`~/.agent-browser/` 下没有由当前任务新建的命名 `.sock` 会话；没有其他常驻 CDP 客户端连接 9222；进程中没有 Chrome for Testing、Chrome Dev、Chromium 或新的 Chrome 实例。Chrome 重启或后台服务退出后的新连接仍可能再弹一次，这是正常安全确认，不能承诺永久不弹。
+
+2026-08-10 本机实测基线：`agent-browser` 0.33.2 使用端口模式多次约 2 秒超时；改用 full 检查返回的完整地址后，用户在约 6.6 秒内点击允许，首条命令成功。紧接的 `get url` 与 `tab list` 合计约 0.1 秒完成，没有再弹授权框；系统只看到默认后台服务、默认 `.sock` 和一条连向 9222 的已建立连接，用户原有标签页仍在。
 
 ## 七、文档一致性
 

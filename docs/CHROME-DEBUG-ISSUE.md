@@ -1,10 +1,12 @@
 # Chrome 远程调试授权边界
 
-> 更新：2026-08-09。本文只记录当前确认过的行为，不再把“开启授权模式”写成“永久免确认”。
+> 更新：2026-08-10。本文只记录当前确认过的行为，不再把“开启授权模式”写成“永久免确认”。
 
 ## 一句话结论
 
-Sleuth 的浏览器兜底必须连接用户当前使用、已经登录的 Chrome。Chrome 144+ 对新的调试连接可能弹出一次授权确认；同一 Chrome、同一调试连接内不应每个页面或每条命令都重复弹。`agent-browser` 连接用户现有 Chrome 时，后台服务默认不会按普通规则闲置退出，因此 Sleuth 必须复用同一个默认后台服务并显式设置 `--idle-timeout 1h`。`devtools.remote_debugging.user-enabled = true` 和企业策略 `RemoteDebuggingAllowed = true` 只表示允许进入远程调试流程，不等于自动批准每个新连接。
+Sleuth 的浏览器兜底必须连接用户当前使用、已经登录的 Chrome。Chrome 144+ 对新的调试连接可能弹出一次授权确认；同一 Chrome、同一调试连接内不应每个页面或每条命令都重复弹。当前 `agent-browser` 0.33.2 的端口自动发现约 2 秒就超时，用户往往还没来得及点“允许”；Sleuth 因此先用 full 检查核验浏览器身份，再把该次检查返回的完整 WebSocket（网页即时通信）地址交给命令，让首次连接可以等用户确认。`agent-browser` 必须复用同一个默认后台服务并显式设置 `--idle-timeout 1h`。`devtools.remote_debugging.user-enabled = true` 和企业策略 `RemoteDebuggingAllowed = true` 只表示允许进入远程调试流程，不等于自动批准每个新连接。
+
+这个 2 秒行为来自 `agent-browser` 0.33.2 的官方源码；上游已有延长授权等待的 [PR #1119](https://github.com/vercel-labs/agent-browser/pull/1119)，但截至本次验证仍未合并。Chrome 官方说明也明确要求用户在授权框点击 Allow（允许）：[Chrome DevTools 配置说明](https://developer.chrome.com/docs/devtools/agents/get-started/configuration)。Sleuth 不安装未发布版本，也不引入第二套浏览器控制器。
 
 ## 正常与异常
 
@@ -36,13 +38,13 @@ npm i -g agent-browser@latest
 
 5. 检查会核对端口背后进程的真实可执行文件。Chrome for Testing、Chrome Dev、Chromium、非默认用户目录、手工调试启动实例和普通进程参数伪装都会被拒绝。
 6. 用户在平时使用、已经登录的 Chrome 打开 `chrome://inspect/#remote-debugging` 并开启控制，批准本次连接。
-7. 只有输出 `browser_identity: verified-user-chrome` 后，才使用检查结果中的字面端口：
+7. 只有输出 `browser_identity: verified-user-chrome` 后，才使用同次检查结果中的完整调试地址：
 
 ```bash
-agent-browser --cdp 9222 --idle-timeout 1h open https://example.com
+agent-browser --cdp 'ws://127.0.0.1:9222/devtools/browser/<full-check-id>' --idle-timeout 1h open https://example.com
 ```
 
-这里的 `9222` 只是示例，必须使用本次检查真实输出的端口。
+这里的端口和 `<full-check-id>` 都只是示例，必须逐字使用本次检查真实输出的 `cdp_ws`，不能自己拼接。`cdp_port` 只用于核对监听者确实是用户日常 Chrome。Chrome 重启后地址会变化，必须重新运行 full 检查。
 
 ## 后台服务生命周期
 
@@ -51,10 +53,10 @@ agent-browser --cdp 9222 --idle-timeout 1h open https://example.com
 Sleuth 的所有命令统一使用：
 
 ```bash
-agent-browser --cdp <字面端口> --idle-timeout 1h <command>
+agent-browser --cdp '<同次 full 检查返回的完整 cdp_ws>' --idle-timeout 1h <command>
 ```
 
-禁止使用 `--session` 或 `--namespace` 创建额外后台服务，也禁止启动或复用其他常驻 CDP 代理。任务结束只关闭本任务新建的标签页，不使用 `agent-browser close` 或 `close --all` 结束用户 Chrome；后台服务闲置 1 小时后自行断开。
+禁止只传端口反复等待授权，禁止使用 `--session` 或 `--namespace` 创建额外后台服务，也禁止启动或复用其他常驻 CDP 代理。任务结束只关闭本任务新建的标签页，不使用 `agent-browser close` 或 `close --all` 结束用户 Chrome；后台服务闲置 1 小时后自行断开。
 
 ## 明确禁止
 
@@ -87,15 +89,23 @@ macOS 的 `devtools.remote_debugging.user-enabled = true` 表示用户开启过�
 | Node.js 版本不足时不安装不兼容 CLI | 已自动验证 |
 | 缺少 `agent-browser` 时 full 执行模式自动安装 CLI | 已自动验证 |
 | Chrome for Testing / Dev / Chromium / 独立用户目录不会冒充用户 Chrome | 已自动验证 |
-| 搜索子任务没有端口时返回 `BROWSER_CONTROL_REQUIRED` | 已自动验证任务契约 |
-| 所有浏览器命令强制使用 `--cdp <port>` | 已自动验证任务契约 |
+| 搜索子任务没有同次核验的端口与完整地址时返回 `BROWSER_CONTROL_REQUIRED` | 已自动验证任务契约 |
+| 所有浏览器命令强制使用经过校验的完整本地调试地址 | 已自动验证任务契约 |
 | 所有浏览器命令显式使用 `--idle-timeout 1h` 并复用默认后台服务 | 已自动验证任务契约 |
 | 主流程不会把 `launch-chrome.mjs` 当研究兜底 | 已做文档与契约检查 |
 | 目标网站在现有 Chrome 中是否已经登录 | 必须按网站人工确认 |
-| 同一连接是否异常重复弹授权框 | 已确认多后台服务和另一个长期 CDP 客户端会制造重复连接；单连接仍需最终人工允许验证 |
+| 同一连接是否异常重复弹授权框 | 已真实验证：用户点击一次允许后，后续两条命令没有再弹 |
 
 ## 用户看到重复弹窗时怎么判断
 
 先不要安装“永久免弹窗”修复，也不要重开另一个 Chrome。记录三件事：Chrome 是否重启过、调试端口是否变化、是否是同一任务内连续弹。只有“同一任务、同一连接连续弹”才应继续排查连接复用；新连接首次弹一次不属于故障。
 
-如果同一任务连续弹，先检查系统里是否存在多个 `agent-browser` 后台服务、多个 `~/.agent-browser/*.sock`，或其他长期连接 9222 的 CDP 客户端。只停止已经确认属于旧任务的控制进程，不关闭 Chrome；随后只用默认会话和 `--idle-timeout 1h` 重建一次连接。
+如果同一任务连续弹，先检查系统里是否存在多个 `agent-browser` 后台服务、多个 `~/.agent-browser/*.sock`，或其他长期连接 9222 的 CDP 客户端。只停止已经确认属于旧任务的控制进程，不关闭 Chrome；随后用同次 full 检查的完整地址、默认会话和 `--idle-timeout 1h` 重建一次连接。
+
+## 2026-08-10 真实授权结果
+
+- full 检查返回 `ready:true`、`browser_identity: verified-user-chrome`、端口 9222 和完整 `cdp_ws`；版本为 `agent-browser` 0.33.2。
+- 只传端口的命令多次在约 2 秒结束，没有建立 9222 连接；这是工具等待窗口太短，不是用户没点对。
+- 改用同次检查的完整地址后，首条 `get title` 在约 6.6 秒完成。用户点击“允许”后，后续 `get url` 与 `tab list` 合计约 0.1 秒完成，没有再弹授权框。
+- 用户原有 Google、链家、贝壳等标签页均可见；系统里只有默认 `agent-browser` 后台服务、`default.sock` 和 9222 一条已建立连接，没有 Chrome for Testing、Chrome Dev、Chromium、新 Chrome 或常驻 CDP 代理。
+- 这个结果证明“同一条连接内授权一次即可复用”，不证明 Chrome 重启后永久不弹；Chrome 重启会产生新连接，仍可能要求再确认一次。

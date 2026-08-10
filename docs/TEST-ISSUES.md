@@ -1,10 +1,10 @@
 # Sleuth 测试问题账本
 
-> 更新：2026-08-09。每个问题只保留一个当前状态；“代码已改”和“真实环境已验证”分开写。
+> 更新：2026-08-10。每个问题只保留一个当前状态；“代码已改”和“真实环境已验证”分开写。
 
 ## 当前结论
 
-核心数据链、跨 Agent 线索、检查门、视觉证据和审查交付已经通过自动化测试和真实任务。轻量工具失败后的浏览器交接、CLI 自动安装、Node 版本边界和“只连接现有登录态 Chrome”已有行为测试。当前 9222 端口已经核验为用户日常使用的稳定版 Google Chrome，Google 页面也显示用户原有登录账号；浏览器兜底不再接受 `~/.sleuth/chrome-live`、Chrome for Testing、Chrome for Dev、Chromium 或其他独立用户目录。重复授权框的代码侧修复已经完成，最后还需用户在一次干净连接中点击“允许”，验证同一个控制进程可以连续执行两条命令且不再重复弹框。
+核心数据链、跨 Agent 线索、检查门、视觉证据和审查交付已经通过自动化测试和真实任务。轻量工具失败后的浏览器交接、CLI 自动安装、Node 版本边界和“只连接现有登录态 Chrome”已有行为测试。当前 9222 端口已经核验为用户日常使用的稳定版 Google Chrome，Google 页面也显示用户原有登录账号；浏览器兜底不再接受 `~/.sleuth/chrome-live`、Chrome for Testing、Chrome for Dev、Chromium 或其他独立用户目录。Chrome 144 授权已完成真实复验：同次 full 检查返回的完整地址可以等待用户点击“允许”，随后同一默认后台服务连续执行命令，没有再次弹框。
 
 ## 历史行为问题
 
@@ -42,7 +42,7 @@
 | # | 问题 | 当前状态 | 修复证据 |
 |---|---|---|---|
 | 022 | WebFetch 单 URL 固定等待 2s / 5s / 10s，失败后只记 gap，主 Agent 不知道该请用户开启浏览器 | 已修复 | WebSearch 只允许一次实质改写；WebFetch / reader 失败立即升级；无端口返回 `BROWSER_CONTROL_REQUIRED`，保留 raw 且不写 `agent_done`；prompt 专项测试通过 |
-| 023 | 浏览器命令可能裸跑并启动新浏览器，任务结束还允许 `close --all` | 已修复 | 所有命令强制 `--cdp <字面端口>`；禁止 `agent-browser install` / `--profile` / 自动 launcher；只关闭本任务明确新建的标签页；规则与 prompt 测试通过 |
+| 023 | 浏览器命令可能裸跑并启动新浏览器，任务结束还允许 `close --all` | 已修复 | 所有命令强制使用同次 full 检查核验的完整本地调试地址；禁止 `agent-browser install` / `--profile` / 自动 launcher；只关闭本任务明确新建的标签页；规则与 prompt 测试通过 |
 | 024 | full 检查缺 CLI 时提示顺序不清，且没有机器可读的下一步 | 已修复 | JSON 新增 `connectionTarget: existing-user-chrome` 和顺序化 `nextActions`；缺 CLI 时先给 `npm i -g agent-browser@latest`，再引导现有 Chrome 开启控制 |
 | 025 | Chrome 文档和许可脚本把 `user-enabled=true` / `RemoteDebuggingAllowed=true` 误写成“压住弹窗” | 已修复到事实边界 | 文档改为“新连接仍可能确认一次”；许可脚本 help/check 不再承诺永久免确认；专项测试防止误导表述回归 |
 | 026 | `docs/STATUS.md` 声称当前文档随仓维护，但 `.gitignore` 实际忽略整个 `docs/` | 已修复 | `.gitignore` 改为只忽略 `docs/local/`；`check-docs.mjs` 和契约测试会阻止整个 docs 再次被忽略 |
@@ -54,7 +54,7 @@
 |---|---|---|---|
 | 028 | 同一 `claim_key` 跨轮合并时只按字数选正文，导致 R2 把时间下限从 2013 推进到 2012 后，派生结果仍保留更长的 R1 旧结论 | 已修复并经实题验证 | `normalize.mjs` 改为优先采用最新轮次正文，同轮才按信息长度选择；新增“后轮短句替换前轮长旧句”回归测试；实题重新归一化后保留 2012-11-12 更新结论 |
 | 029 | `lines_written` 写成“总行数”，4 个搜索角色把 `agent_done` 本身也计入，虽然检查门会拦，但角色反复自称校验通过 | 已修复提示契约 | `references/search.md` 和搜索 prompt 明确只数 `agent_done` 之前的 finding/gap/red_flag；补 4+1 必须写 4 的例子和 prompt 契约测试 |
-| 030 | 多个搜索角色并发使用同一现有 Chrome 时，“当前标签页”会串页；`--session` 不能隔离同一 CDP 连接的活动标签 | 已修复调度规则并做真实 CLI 验证 | 主流程改为轻量搜索可并行、浏览器操作必须串行，同一时刻只给一个 Agent 端口；实测两个会话分别打开 example.com / example.org 后都会读到后切换的 example.org；新增唯一标签三步法，测试标签均已关闭 |
+| 030 | 多个搜索角色并发使用同一现有 Chrome 时，“当前标签页”会串页；`--session` 不能隔离同一 CDP 连接的活动标签 | 已修复调度规则并做真实 CLI 验证 | 主流程改为轻量搜索可并行、浏览器操作必须串行，同一时刻只给一个 Agent 同次核验的端口与完整地址；实测两个会话分别打开 example.com / example.org 后都会读到后切换的 example.org；新增唯一标签三步法，测试标签均已关闭 |
 | 031 | “深度调研……并说明区别”被 `区别` 抢先误判为 comparison | 已修复 | `deep_dive` 的强信号优先，并新增“深度调研 + 区别”冲突回归测试；同题现返回 `deep_dive` |
 
 ## 2026-08-09 浏览器身份与 CLI 自动安装复验
@@ -62,7 +62,8 @@
 | # | 问题 | 当前状态 | 修复证据 |
 |---|---|---|---|
 | 032 | full 检查只看 `DevToolsActivePort` 和端口存活，把 `~/.sleuth/chrome-live` 独立实例误报成用户登录态 Chrome；缺 CLI 时也只提示、不自动补齐 | 已修复并完成日常 Chrome 实测 | 新检查核对端口监听进程的真实可执行文件，拒绝 Chrome for Testing / Dev / Chromium / 非默认用户目录 / 手工调试实例 / 普通进程参数伪装；full 执行模式在 Node.js ≥ 24 时自动安装或升级 CLI，`--check-only` 保持只读。历史独立实例被拒绝后，用户正常重开日常 Chrome；当前 9222 返回 `verified-user-chrome`，Google 页面显示原有登录账号，并完成一次现场搜索 |
-| 033 | 每条浏览器命令可能新建一个长期驻留的控制进程，其他常驻 CDP 代理也可能持续占用 9222，导致 Chrome 反复弹出远程调试授权框 | 代码和规则已修复，待最后一次授权实测 | 当前环境发现 11 个旧 `agent-browser` 后台进程，以及一个已运行 21 天并仍连接 9222 的其他常驻 CDP 代理；已只停止这些明确的旧控制进程，未关闭 Chrome 或用户标签页。所有浏览器命令现在统一复用默认后台进程，并显式传 `--idle-timeout 1h`；禁止 `--session`、`--namespace` 和启动其他常驻 CDP 代理。专项契约测试已覆盖；还需用户在一次干净连接中点“允许”，再连续执行两条命令确认只授权一次 |
+| 033 | 每条浏览器命令可能新建一个长期驻留的控制进程，其他常驻 CDP 代理也可能持续占用 9222，导致 Chrome 反复弹出远程调试授权框 | 已修复并完成真实授权复验 | 当前环境曾发现 11 个旧 `agent-browser` 后台进程和一个长期 CDP 代理；已只停止这些旧控制进程，未关闭 Chrome 或用户标签页。当前只复用默认后台服务并显式传 `--idle-timeout 1h`；用户点击允许后，后续两条命令没有再弹，9222 只有一条已建立连接 |
+| 034 | `agent-browser` 0.33.2 只传端口时约 2 秒就停止发现，Chrome 144 的人工授权来不及完成 | 已绕开并完成真实验证；上游修复尚未发布 | full 检查同时输出端口和完整 `cdp_ws`；搜索提示校验两者属于同一 `127.0.0.1` 端口后，内联完整地址。首条命令约 6.6 秒完成授权，后续命令约 0.1 秒且不再弹。上游 PR #1119 截至本次测试仍未合并，因此不安装未发布版本、不退回端口模式 |
 
 本次旧证据修正：2026-08-02 记录中的 `ready:true` 和 `connected:true` 只能证明 9222 可连接，不能证明它属于用户日常登录态 Chrome。2026-08-09 先查明当时的端口实际由稳定版 Google Chrome 程序配合 `~/.sleuth/chrome-live` 独立用户目录监听，因此那次身份判断作废；用户随后正常重开日常 Chrome，新的身份检查和页面账号核验均已通过。两个阶段必须分开理解，不能把历史误判写成当前状态。
 
@@ -70,10 +71,11 @@
 
 1. `agent-browser` 已从 0.28.0 升级到 0.33.2；当天重新查询 npm，线上 latest 也是 0.33.2，且官方运行要求为 Node.js ≥ 24。只升级 CLI，未运行 `agent-browser install`。
 2. `node --test scripts/__tests__/*.mjs`：139 passed，0 failed；覆盖 Node 版本阻断、浏览器真实身份、CLI 自动安装/升级、轻量失败及时交接、单一后台连接、归一化更新、任务分类和完整检查门。
-3. 浏览器生命周期专项测试已按“先失败、再修复”的方式覆盖：必须统一使用 `--cdp <端口> --idle-timeout 1h`，禁止新建命名会话和其他常驻 CDP 代理。
+3. 浏览器生命周期专项测试已按“先失败、再修复”的方式覆盖：必须统一使用同次 full 检查核验的完整地址和 `--idle-timeout 1h`，禁止只传端口等待授权，禁止新建命名会话和其他常驻 CDP 代理。
 4. `shenluoji-deep-dive-20260802` 真实任务重新执行 `audit-run.mjs --stage all`，raw、深度、边界、草稿和审查门全部通过。
 5. 历史独立实例的 full 检查为 `ready:false`、`browser_identity: rejected-non-user-browser`、`rejected_browser_reason: non-default-user-data-dir`；用户正常重开日常 Chrome 后，当前 full 检查为 `ready:true`、`browser_identity: verified-user-chrome`、端口 9222。没有运行启动器，也没有关闭或重启用户 Chrome。
 6. 全部 Node / Bash 语法、`git diff --check` 和 25 个 Markdown 文档检查通过；`shenluoji-deep-dive-20260802` 的 raw、归一化、深度、边界、草稿和审查检查门重新全通过。
+7. 2026-08-10 授权复验使用 `agent-browser` 0.33.2：端口模式多次约 2 秒超时；完整地址模式等待约 6.6 秒后成功。用户点击“允许”后，后续 `get url` 与 `tab list` 合计约 0.1 秒，没有再弹；9222 只有一条已建立的 `agent-browser` 连接，未发现测试版、开发版、Chromium、新 Chrome 或其他常驻代理。
 
 ### 旧浏览器验证记录（其中身份结论已由 #032 作废）
 

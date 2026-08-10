@@ -194,3 +194,19 @@ test('用户文档统一说明现有 Chrome 的单后台服务和闲置退出', 
   assert.match(issue, /后台服务默认不会.*闲置退出/);
   assert.match(issue, /复用同一个默认后台服务/);
 });
+
+test('Chrome 144 授权实测记录与验收方法使用完整地址', () => {
+  const testing = read('docs/TESTING.md');
+  const chromeIssue = read('docs/CHROME-DEBUG-ISSUE.md');
+  const testIssues = read('docs/TEST-ISSUES.md');
+  const current = [testing, chromeIssue, testIssues].join('\n');
+  assert.match(testing, /SLEUTH_CDP_WS/);
+  assert.match(testing, /完整.*调试地址/);
+  assert.doesNotMatch(testing, /agent-browser --cdp 9222 --idle-timeout 1h/);
+  assert.match(current, /端口.*约 2 秒/);
+  assert.match(current, /0\.33\.2/);
+  assert.match(current, /约 6\.6 秒/);
+  assert.match(current, /约 0\.1 秒/);
+  assert.match(current, /9222.*一条.*已建立/);
+  assert.match(current, /用户点击.*允许.*后续.*没有再弹/);
+});
