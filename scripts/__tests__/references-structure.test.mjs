@@ -57,14 +57,25 @@ test('SKILL.md 把现有登录态 Chrome 定义为及时且唯一的浏览器兜
   assert.match(skill, /npm i -g agent-browser@latest/);
   assert.match(skill, /平时使用、已经登录的 Chrome/);
   assert.match(skill, /BROWSER_CONTROL_REQUIRED/);
-  assert.match(skill, /SLEUTH_CDP_PORT=<port>/);
-  assert.match(skill, /同一时刻只给一个搜索 Agent 注入 `SLEUTH_CDP_PORT`/);
+  assert.match(skill, /SLEUTH_CDP_PORT=<port> SLEUTH_CDP_WS=<ws-url>/);
+  assert.match(skill, /同一时刻只给一个搜索 Agent 注入.*SLEUTH_CDP_PORT.*SLEUTH_CDP_WS/);
   assert.match(skill, /禁止依赖 `--session` 隔离/);
   assert.match(skill, /--idle-timeout 1h/);
   assert.match(skill, /禁止使用 `--session` 或 `--namespace`/);
   assert.match(skill, /禁止启动或复用其他常驻 CDP 代理/);
   assert.match(skill, /禁止裸跑 `agent-browser open`/);
   assert.match(skill, /禁止运行 `agent-browser install`/);
+});
+
+test('当前浏览器规则使用同次 full 检查的完整地址', () => {
+  const skill = read('SKILL.md');
+  const search = read('references/search.md');
+  const tool = read('references/tool-guide.md');
+  const current = [skill, search, tool, read('README.md')].join('\n');
+  assert.match(current, /完整.*WebSocket|完整.*调试地址/);
+  assert.match(current, /ws:\/\/127\.0\.0\.1:<port>\/devtools\/browser\/<id>/);
+  assert.match(current, /Chrome 重启.*重新.*full 检查/);
+  assert.doesNotMatch(tool, /agent-browser --cdp \$SLEUTH_CDP_PORT --idle-timeout 1h/);
 });
 
 test('search.md 定义可审计的多来源 finding', () => {

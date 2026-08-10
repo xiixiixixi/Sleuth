@@ -1,5 +1,7 @@
 # agent-browser 后台连接生命周期实施计划
 
+> **历史状态：部分被替代。** 本计划已经完成；其中只传端口的连接步骤已被 `2026-08-10-chrome-approval-direct-websocket.md` 替代，默认后台服务与 1 小时闲置退出规则仍然保留。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让 Sleuth 只复用一个连接用户日常 Chrome 的 `agent-browser` 后台服务，并在闲置 1 小时后自动断开，避免授权弹窗因残留会话反复出现。

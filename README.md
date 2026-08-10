@@ -56,7 +56,7 @@ node scripts/check-deps.mjs --mode full
 npm i -g agent-browser@latest
 ```
 
-这里只安装 CLI，不会下载测试浏览器；`--check-only` 仍是纯诊断。Sleuth 只通过 `--cdp <port>` 连接用户当前使用、已经登录的 Chrome，并核对端口背后的程序身份。Chrome for Testing、Chrome Dev、Chromium、独立用户目录或手工调试启动实例即使端口可连也会被拒绝。用户在日常 Chrome 打开 `chrome://inspect/#remote-debugging` 开启控制即可；所有命令复用同一个默认后台服务并带 `--idle-timeout 1h`，闲置后只断开控制，不关闭 Chrome。禁止使用 `--session` 或 `--namespace` 另建后台服务，也禁止启动或复用其他常驻 CDP 代理；不会裸跑 `agent-browser open`，不会运行 `agent-browser install` 下载另一个浏览器，也不会自动启动、关闭或重启 Chrome。`scripts/launch-chrome.mjs` 只保留为用户主动选择的独立诊断工具，不属于研究兜底路径。
+这里只安装 CLI，不会下载测试浏览器；`--check-only` 仍是纯诊断。Sleuth 会先核对端口背后的程序身份，再使用同次 full 检查返回的完整调试地址 `ws://127.0.0.1:<port>/devtools/browser/<id>` 连接用户当前使用、已经登录的 Chrome。Chrome for Testing、Chrome Dev、Chromium、独立用户目录或手工调试启动实例即使端口可连也会被拒绝。用户在日常 Chrome 打开 `chrome://inspect/#remote-debugging` 开启控制即可；所有命令复用同一个默认后台服务并带 `--idle-timeout 1h`，闲置后只断开控制，不关闭 Chrome。只传端口的授权发现窗口过短，禁止用它反复等待；Chrome 重启后必须重新运行 full 检查取得新地址。禁止使用 `--session` 或 `--namespace` 另建后台服务，也禁止启动或复用其他常驻 CDP 代理；不会裸跑 `agent-browser open`，不会运行 `agent-browser install` 下载另一个浏览器，也不会自动启动、关闭或重启 Chrome。`scripts/launch-chrome.mjs` 只保留为用户主动选择的独立诊断工具，不属于研究兜底路径。
 
 ## 测试
 

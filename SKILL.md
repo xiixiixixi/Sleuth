@@ -22,7 +22,7 @@ node scripts/check-deps.mjs --mode light --task-name <task-name>
 
 只有确定需要动态页面、登录态或交互时才运行 `--mode full`。浏览器是轻量工具全部失效后的最终兜底：网络搜索返回空、受限或超时后最多改写一次查询；网页读取返回空、登录墙、脚本空壳或超时后不要原地等待，立即升级浏览器。
 
-浏览器兜底必须连接用户平时使用、已经登录的 Chrome：运行 `node scripts/check-deps.mjs --mode full`。浏览器兜底要求 Node.js ≥ 24；版本不足时必须先明确报错，不尝试安装不兼容包。Node 版本合格但 CLI 缺少或过旧时，这个命令必须自动执行 `npm i -g agent-browser@latest` 补齐 CLI；`--check-only` 只用于不改环境的诊断。随后请用户在现有 Chrome 打开 `chrome://inspect/#remote-debugging` 并开启控制。检查必须核对调试端口背后的真实可执行程序和用户目录；Chrome for Testing、Chrome Dev、Chromium、带非默认 `--user-data-dir` 或手工调试启动参数的实例一律拒绝，不能仅凭端口可连或命令参数里出现 Chrome 名称就标成登录态 Chrome。所有命令必须复用默认后台服务并带检查结果中的字面端口与显式闲置时间：`agent-browser --cdp <port> --idle-timeout 1h <command>`；禁止使用 `--session` 或 `--namespace` 另建后台服务，禁止启动或复用其他常驻 CDP 代理，禁止裸跑 `agent-browser open`、禁止 `--profile`、禁止运行 `agent-browser install` 下载另一个浏览器。
+浏览器兜底必须连接用户平时使用、已经登录的 Chrome：运行 `node scripts/check-deps.mjs --mode full`。浏览器兜底要求 Node.js ≥ 24；版本不足时必须先明确报错，不尝试安装不兼容包。Node 版本合格但 CLI 缺少或过旧时，这个命令必须自动执行 `npm i -g agent-browser@latest` 补齐 CLI；`--check-only` 只用于不改环境的诊断。随后请用户在现有 Chrome 打开 `chrome://inspect/#remote-debugging` 并开启控制。检查必须核对调试端口背后的真实可执行程序和用户目录；Chrome for Testing、Chrome Dev、Chromium、带非默认 `--user-data-dir` 或手工调试启动参数的实例一律拒绝，不能仅凭端口可连或命令参数里出现 Chrome 名称就标成登录态 Chrome。浏览器命令必须使用同次 full 检查返回的完整 WebSocket（网页即时通信）调试地址：`agent-browser --cdp 'ws://127.0.0.1:<port>/devtools/browser/<id>' --idle-timeout 1h <command>`；端口只用于核对浏览器身份，禁止只传端口重试授权。所有命令必须复用默认后台服务；禁止使用 `--session` 或 `--namespace` 另建后台服务，禁止启动或复用其他常驻 CDP 代理，禁止裸跑 `agent-browser open`、禁止 `--profile`、禁止运行 `agent-browser install` 下载另一个浏览器。Chrome 重启后完整地址会失效，必须重新运行 full 检查，绝不猜测或复用旧地址。
 
 禁止自动运行 `launch-chrome.mjs`；它不是研究兜底路径。不得为了继续任务另开、重启或替换一个 Chrome 实例。
 
@@ -71,9 +71,9 @@ node scripts/validate-state.mjs <task-dir> --phase 3-findings
 node scripts/calc-novelty.mjs <task-dir>
 ```
 
-搜索 Agent 返回 `BROWSER_CONTROL_REQUIRED` 时，不要把它当普通缺口，也不要继续等：立即执行 full 检查并按第 1 步引导用户。浏览器就绪后，用检查结果中的端口重新生成同一搜索任务，例如 `SLEUTH_CDP_PORT=<port> node scripts/spawn-subagent.mjs ...`；让 Agent 续写原 raw 文件，完成前不要运行 `3-raw`。
+搜索 Agent 返回 `BROWSER_CONTROL_REQUIRED` 时，不要把它当普通缺口，也不要继续等：立即执行 full 检查并按第 1 步引导用户。浏览器就绪后，用同一次检查结果中的端口和完整调试地址重新生成同一搜索任务，例如 `SLEUTH_CDP_PORT=<port> SLEUTH_CDP_WS=<ws-url> node scripts/spawn-subagent.mjs ...`；让 Agent 续写原 raw 文件，完成前不要运行 `3-raw`。
 
-轻量搜索可以并行，浏览器操作必须串行：同一个现有 Chrome 的 `agent-browser --cdp` 连接会共享“当前标签页”，主 Agent 同一时刻只给一个搜索 Agent 注入 `SLEUTH_CDP_PORT`。该 Agent 完成或交回后才能把端口给下一个；禁止依赖 `--session` 隔离并发 CDP 标签状态，也禁止使用 `--session` 或 `--namespace` 创建额外后台服务。
+轻量搜索可以并行，浏览器操作必须串行：同一个现有 Chrome 的 `agent-browser --cdp` 连接会共享“当前标签页”，主 Agent 同一时刻只给一个搜索 Agent 注入同次 full 检查得到的 `SLEUTH_CDP_PORT` 和 `SLEUTH_CDP_WS`。该 Agent 完成或交回后才能把这对值给下一个；禁止依赖 `--session` 隔离并发 CDP 标签状态，也禁止使用 `--session` 或 `--namespace` 创建额外后台服务。
 
 `raw/` 是唯一原始账本；`normalize.mjs` 每次确定性重建结果。禁止修改 `findings.jsonl`，禁止凭印象改统计。每个搜索 Agent 必须在 `agent_done.visual_scan.pages[]` 逐页说明检查了多少图片候选；有用原图或截图进入 finding 的 `visuals[]`。
 

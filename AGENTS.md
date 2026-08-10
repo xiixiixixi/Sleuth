@@ -99,7 +99,8 @@ sleuth/
 **禁止行为**：
 - 自起 Chrome（**只走 approval mode**，chrome://inspect toggle，没开就报错；唯一例外是用户主动跑 `scripts/launch-chrome.mjs`，那是用户调用的启动器，不是 agent 自起）
 - 用 `--profile`（与 `--cdp` 互斥）
-- 在 `--cdp` 同时传 `ws://` URL（agent-browser 0.27 有 403 bug，必须 0.28+）
+- 只传 CDP 端口等待 Chrome 授权；必须使用同次 full 检查返回并核验过的本地完整 `ws://127.0.0.1:<port>/devtools/browser/<id>` 地址
+- 猜测、手工拼接或复用 Chrome 重启前的完整调试地址
 - 替用户按状态变更按钮（CHECKPOINT 硬规则）
 - 绕付费墙 / 提取 cookie / 对敏感页截图
 - 把 WebSearch snippet 当一手事实
@@ -164,7 +165,7 @@ node scripts/validate-state.mjs ~/.sleuth/output/<task-name>/ --phase 3-findings
 # 找本地浏览器历史/书签 URL
 node scripts/find-url.mjs "关键词" --since 7d
 
-# 升级 agent-browser（注意必须 ≥ 0.28，0.27 有 ws:// 403 bug）
+# 升级 agent-browser（必须 ≥ 0.28；0.27 的完整地址连接有已知 403 bug）
 npm i -g agent-browser@latest
 ```
 
@@ -173,6 +174,6 @@ npm i -g agent-browser@latest
 - **测试数量不写死在文档里**：以 `node --test scripts/__tests__/*.mjs` 的实时输出为准。核心覆盖包括两轮确定性归一化、完成条件、7 种跨轮关系、收敛规则、边界/草稿/审查检查门和角色交接。
 - **环境脚本测试边界**：浏览器发现与“未经确认不得关闭 Chrome”可自动测；真正启动 Chrome、系统策略和真实历史数据库需要人工环境测试。
 - **agent-browser 版本敏感**：0.27.1 的 `--cdp <ws-url>` 有 HTTP 预检 403 bug，必须 0.28+
-- **浏览器兜底只连现有 Chrome**：轻量工具失败后用 `--cdp <port>` 接入用户当前登录态；禁止裸 `agent-browser open`、`agent-browser install`、`--profile` 和自动 `launch-chrome.mjs`
+- **浏览器兜底只连现有 Chrome**：轻量工具失败后先核对端口身份，再用同次 full 检查返回的完整本地 WebSocket 地址接入用户当前登录态；禁止只传端口重试授权，禁止裸 `agent-browser open`、`agent-browser install`、`--profile` 和自动 `launch-chrome.mjs`
 - **chrome://inspect toggle 不持久**：Chrome 重启会重置，用户需重新勾选
 - **`extract-subtitles.sh` + `srt_to_transcript.py`** 在 `scripts/` 下，混语言（Node + Bash + Python），无 README 解释边界

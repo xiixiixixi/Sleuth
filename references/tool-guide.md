@@ -2,7 +2,7 @@
 
 ## 连接
 
-前提：浏览器已通过 `scripts/check-deps.mjs --mode full` 就绪，而且输出中的 `browser_identity` 是 `verified-user-chrome`。这里连接的是用户平时使用、已经登录的 Chrome，不是由工具新开的浏览器。`check-deps` 输出会告诉你当前端口。
+前提：浏览器已通过 `scripts/check-deps.mjs --mode full` 就绪，而且输出中的 `browser_identity` 是 `verified-user-chrome`。这里连接的是用户平时使用、已经登录的 Chrome，不是由工具新开的浏览器。`check-deps` 会在同一次输出中给出端口和完整 WebSocket（网页即时通信）调试地址。
 
 浏览器兜底要求 Node.js ≥ 24，因为当前支持的 `agent-browser` 版本都声明这个运行要求。full 检查会先验 Node 版本；合格后发现 CLI 缺失或过旧才会自动运行：
 
@@ -15,18 +15,21 @@ npm i -g agent-browser@latest
 检查还必须核对监听端口进程的真实可执行文件和用户目录。Chrome for Testing、Chrome Dev、Chromium、`~/.sleuth/chrome-live` 等独立用户目录，哪怕端口能连也必须拒绝；普通程序即使把 Chrome 路径放进自己的参数也不能通过。不能把 `connected:true` 当成“已经接入用户登录态 Chrome”。
 
 ```bash
-# check-deps 输出的 SLEUTH_CDP_PORT 变量
+# 同次 full 检查输出的 SLEUTH_CDP_PORT 与 SLEUTH_CDP_WS
+# 端口用于身份核对，实际命令使用完整地址
 
 # 正确用法
-agent-browser --cdp $SLEUTH_CDP_PORT --idle-timeout 1h open https://example.com
+agent-browser --cdp 'ws://127.0.0.1:<port>/devtools/browser/<id>' --idle-timeout 1h open https://example.com
 
 # 错误：不带 --cdp 会启动另一个无登录态浏览器
 agent-browser open https://example.com
 ```
 
+完整地址必须逐字来自同次 full 检查，不允许手工拼接、猜测或使用其他主机；生成搜索提示时会把经过校验的地址直接写入命令。Chrome 重启后地址会变化，必须重新运行 full 检查。只传端口会走一个约 2 秒的自动发现窗口，在 Chrome 144 的人工授权框来不及操作，因此禁止用端口模式原地重试。
+
 连接用户现有 Chrome 的 `agent-browser` 后台服务默认不会按普通闲置规则退出，所以所有命令必须复用默认后台服务并显式带 `--idle-timeout 1h`。禁止使用 `--session` 或 `--namespace` 创建额外后台服务，禁止启动或复用其他常驻 CDP 代理。任务结束只关闭本任务明确新建的标签页；禁止使用 `agent-browser close` 或 `close --all`，避免关闭用户 Chrome。
 
-> 以下所有命令省略 `agent-browser --cdp $SLEUTH_CDP_PORT --idle-timeout 1h` 前缀，实际调用时必须带上（端口号用字面值，不是 shell 变量）。不要用 `--profile`（与 `--cdp` 互斥），不要用 `--auto-connect` 猜浏览器，不要调用 `launch-chrome.mjs` 重开 Chrome。
+> 以下所有命令省略 `agent-browser --cdp 'ws://127.0.0.1:<port>/devtools/browser/<id>' --idle-timeout 1h` 前缀，实际调用时必须带上同次 full 检查返回的字面地址。不要用 `--profile`（与 `--cdp` 互斥），不要用 `--auto-connect` 猜浏览器，不要调用 `launch-chrome.mjs` 重开 Chrome。
 
 ## 核心姿势
 
@@ -148,7 +151,7 @@ screenshot --annotate     # 带 @ref 标注
 
 ```bash
 # 截图后搬到 output 目录
-agent-browser --cdp $SLEUTH_CDP_PORT --idle-timeout 1h screenshot
+agent-browser --cdp 'ws://127.0.0.1:<port>/devtools/browser/<id>' --idle-timeout 1h screenshot
 cp ~/.agent-browser/tmp/screenshots/screenshot-*.png <outputDir>/screenshots/
 ```
 

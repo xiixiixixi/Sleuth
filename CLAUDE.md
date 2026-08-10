@@ -39,7 +39,7 @@ node scripts/spawn-subagent.mjs --help
 - 边界和审查报告使用 JSON，禁止退回无法严格解析的 YAML 文本匹配。
 - 普通研究默认逐页检查图片；`visual_scan.pages[]` 证明检查过哪些来源页，`visuals[]` 中的图必须全部进入草稿和视觉审查。
 - 不允许重新引入 session、deliver、research-index、managed browser 或 AppleScript bridge。
-- 研究兜底只用 `--cdp <port>` 连接用户现有登录态 Chrome；禁止裸 `agent-browser open`、`agent-browser install` 和 `--profile`。
+- 研究兜底先用 full 检查核对端口身份，再把同次检查返回的完整本地 WebSocket 调试地址交给 `--cdp`，连接用户现有登录态 Chrome；禁止只传端口重试授权，禁止裸 `agent-browser open`、`agent-browser install` 和 `--profile`。
 - `launch-chrome.mjs` 只允许用户主动运行并传 `--confirm-close-browser`；它不是研究兜底，Sleuth 不自动启动或关闭 Chrome。
 
 ## 修改位置
