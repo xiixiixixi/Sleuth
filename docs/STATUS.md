@@ -9,6 +9,7 @@
 | `TESTING.md` | 当前 | 自动测试、任务目录验收和真实行为测试方法 |
 | `TEST-ISSUES.md` | 当前 | 历史问题的唯一状态账本 |
 | `CHROME-DEBUG-ISSUE.md` | 当前 | Chrome 调试授权的真实边界：每个新连接可能仍需用户确认，不承诺永久免弹窗 |
+| `superpowers/specs/2026-08-11-shared-agent-browser-connection-design.md` | 当前 | 默认连接持续复用、搜索并行、单条浏览器命令短暂排队和页面核验 |
 
 维护规则：
 

@@ -44,17 +44,34 @@ test('search prompt 注入 must-verify、known-clue、deliverable 和 stop', () 
 
 test('search prompt 使用 full 检查核验后的完整本机调试地址', () => {
   const prompt = run(SEARCH_ARGS, CDP_ENV);
-  assert.match(prompt, /agent-browser --cdp 'ws:\/\/127\.0\.0\.1:9222\/devtools\/browser\/abc-123' --idle-timeout 1h/);
-  assert.doesNotMatch(prompt, /agent-browser --cdp 9222 --idle-timeout 1h/);
-  assert.doesNotMatch(prompt, /--cdp ['"]?\$SLEUTH_CDP_WS['"]?/);
+  assert.match(prompt, /SLEUTH_CDP_PORT=9222 SLEUTH_CDP_WS='ws:\/\/127\.0\.0\.1:9222\/devtools\/browser\/abc-123' node .*scripts\/shared-browser\.mjs'? exec --owner sl-[a-f0-9]{16}-pricing --tab sl-[a-f0-9]{16}-pricing --/);
+  assert.doesNotMatch(prompt, /agent-browser --cdp/);
   assert.match(prompt, /用户现有的登录态 Chrome/);
-  assert.match(prompt, /独占浏览器操作权/);
-  assert.match(prompt, /tab new --label pricing/);
-  assert.match(prompt, /不要依赖 `--session` 隔离/);
+  assert.match(prompt, /轻量搜索.*继续并行/);
+  assert.match(prompt, /只有.*单条浏览器命令.*短暂排队/);
+  assert.match(prompt, /自动.*选择.*pricing.*URL.*标题/);
+  assert.match(prompt, /执行命令后再次选回/);
+  assert.match(prompt, /禁止跨命令复用 `@eN`/);
+  assert.match(prompt, /禁止 `--new-tab` 或 `window\.open`/);
+  assert.doesNotMatch(prompt, /acquire --owner|release --owner|独占浏览器操作权/);
   assert.match(prompt, /禁止使用 `--session` 或 `--namespace`/);
   assert.match(prompt, /禁止启动或复用其他常驻 CDP 代理/);
   assert.match(prompt, /禁止裸跑 `agent-browser open`/);
   assert.match(prompt, /Chrome 重启.*重新.*full 检查/);
+});
+
+test('不同任务中同名 Agent 获得不同的浏览器标签身份', () => {
+  const first = run(SEARCH_ARGS, CDP_ENV);
+  const secondArgs = [...SEARCH_ARGS];
+  secondArgs[secondArgs.indexOf('--task-dir') + 1] = '/tmp/another-sleuth-task';
+  const second = run(secondArgs, CDP_ENV);
+
+  const extractId = (prompt) => prompt.match(/exec --owner (sl-[a-f0-9]{16}-pricing) --tab \1 --/)?.[1];
+  const firstId = extractId(first);
+  const secondId = extractId(second);
+  assert.ok(firstId);
+  assert.ok(secondId);
+  assert.notEqual(firstId, secondId);
 });
 
 test('search prompt 没有浏览器端口时及时交回主 Agent', () => {
@@ -114,6 +131,18 @@ test('search 缺关键绑定参数会拒绝生成', () => {
     ['--role', 'search', '--goal', 'x', '--task-dir', TASK, '--agent-name', 'a', '--subquestion-id', '1'],
     ['--role', 'search', '--goal', 'x', '--task-dir', TASK, '--agent-name', 'a', '--round', '1'],
   ]) assert.equal(spawnSync('node', [SCRIPT, ...args]).status, 2);
+});
+
+test('search 的 Agent 名必须能安全用于文件名、标签和共享命令', () => {
+  for (const agentName of ['../other', 'two words', 'a;touch-x', '']) {
+    const args = [...SEARCH_ARGS];
+    args[args.indexOf('--agent-name') + 1] = agentName;
+    const result = spawnSync('node', [SCRIPT, ...args], {
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 2, agentName);
+    assert.match(result.stderr, /requires --agent-name|agent-name.*字母.*数字/);
+  }
 });
 
 test('boundary 直接写 JSON 报告并负责跨 Agent 线索', () => {

@@ -58,7 +58,7 @@
 
 **升级时限（硬规则）**：网络搜索失败后只允许一次有实质变化的查询改写，不允许靠 sleep 等它恢复；网页读取失败不做 2s / 5s / 10s 之类的定时重试，直接升级浏览器。浏览器是最终兜底，不是放弃信号。
 
-**登录态（硬规则）**：浏览器必须通过同次 full 检查返回的完整调试地址连接用户当前正在使用、已经登录的 Chrome：`agent-browser --cdp 'ws://127.0.0.1:<port>/devtools/browser/<id>' --idle-timeout 1h <command>`，而且检查结果中的 `browser_identity` 必须是 `verified-user-chrome`。端口只用于核对浏览器身份；禁止只传端口等待授权，也禁止猜测、拼接或复用旧的完整地址。Chrome 重启或连接地址失效时，保留已有 raw、不写 `agent_done`，返回 `BROWSER_CONTROL_REQUIRED`，由主 Agent 重新执行 full 检查。所有命令复用默认后台服务；禁止使用 `--session` 或 `--namespace` 创建额外后台服务，禁止启动或复用其他常驻 CDP 代理。Chrome for Testing、Chrome Dev、Chromium、独立 `--user-data-dir` 或手工调试启动实例即使端口可连也不允许使用。禁止裸跑 `agent-browser open`，禁止 `--profile`，禁止运行 `agent-browser install` 下载新的测试浏览器，也禁止自动调用 `launch-chrome.mjs` 重开 Chrome。
+**登录态（硬规则）**：浏览器必须通过同次 full 检查返回的端口和完整调试地址连接用户当前正在使用、已经登录的 Chrome，而且检查结果中的 `browser_identity` 必须是 `verified-user-chrome`。所有操作只使用 `scripts/shared-browser.mjs exec`；协调器内部用完整本机地址和 `--idle-timeout 0` 复用默认后台服务。非浏览器工作继续并行，只有单条浏览器命令短暂排队；协调器在命令前后都选回调用者自己的唯一标签，再核对最终 URL 和标题。禁止只传端口等待授权，禁止猜测、拼接或复用旧地址，禁止手动 `acquire/release`，禁止跨命令复用 `@eN`，禁止 `--new-tab` / `window.open` 新建无归属标签。Chrome 重启或连接地址失效时，保留已有 raw、不写 `agent_done`，返回 `BROWSER_CONTROL_REQUIRED`，由主 Agent重新执行 full 检查。禁止使用 `--session` 或 `--namespace` 创建额外后台服务，禁止启动或复用其他常驻 CDP 代理。Chrome for Testing、Chrome Dev、Chromium、独立 `--user-data-dir` 或手工调试启动实例即使端口可连也不允许使用。禁止裸跑 `agent-browser open`，禁止 `--profile`，禁止运行 `agent-browser install` 下载新的测试浏览器，也禁止自动调用 `launch-chrome.mjs` 重开 Chrome。
 
 ---
 

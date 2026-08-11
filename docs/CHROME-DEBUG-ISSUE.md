@@ -1,10 +1,10 @@
 # Chrome 远程调试授权边界
 
-> 更新：2026-08-10。本文只记录当前确认过的行为，不再把“开启授权模式”写成“永久免确认”。
+> 更新：2026-08-11。本文只记录当前确认过的行为，不再把“开启授权模式”写成“永久免确认”。
 
 ## 一句话结论
 
-Sleuth 的浏览器兜底必须连接用户当前使用、已经登录的 Chrome。Chrome 144+ 对新的调试连接可能弹出一次授权确认；同一 Chrome、同一调试连接内不应每个页面或每条命令都重复弹。当前 `agent-browser` 0.33.2 的端口自动发现约 2 秒就超时，用户往往还没来得及点“允许”；Sleuth 因此先用 full 检查核验浏览器身份，再把该次检查返回的完整 WebSocket（网页即时通信）地址交给命令，让首次连接可以等用户确认。`agent-browser` 必须复用同一个默认后台服务并显式设置 `--idle-timeout 1h`。`devtools.remote_debugging.user-enabled = true` 和企业策略 `RemoteDebuggingAllowed = true` 只表示允许进入远程调试流程，不等于自动批准每个新连接。
+Sleuth 的浏览器兜底必须连接用户当前使用、已经登录的 Chrome。Chrome 144+ 对新的调试连接可能弹出一次授权确认；同一 Chrome、同一调试连接内不应每个页面或每条命令都重复弹。当前 `agent-browser` 0.33.2 的端口自动发现约 2 秒就超时，用户往往还没来得及点“允许”；Sleuth 因此先用 full 检查核验浏览器身份，再把该次检查返回的完整 WebSocket（网页即时通信）地址交给 `scripts/shared-browser.mjs`。协调器复用同一个默认后台服务，并用 `--idle-timeout 0` 保持连接。多个搜索 Agent 继续并行，只有单条浏览器命令短暂排队。`devtools.remote_debugging.user-enabled = true` 和企业策略 `RemoteDebuggingAllowed = true` 只表示允许进入远程调试流程，不等于自动批准每个新连接。
 
 这个 2 秒行为来自 `agent-browser` 0.33.2 的官方源码；上游已有延长授权等待的 [PR #1119](https://github.com/vercel-labs/agent-browser/pull/1119)，但截至本次验证仍未合并。Chrome 官方说明也明确要求用户在授权框点击 Allow（允许）：[Chrome DevTools 配置说明](https://developer.chrome.com/docs/devtools/agents/get-started/configuration)。Sleuth 不安装未发布版本，也不引入第二套浏览器控制器。
 
@@ -41,22 +41,24 @@ npm i -g agent-browser@latest
 7. 只有输出 `browser_identity: verified-user-chrome` 后，才使用同次检查结果中的完整调试地址：
 
 ```bash
-agent-browser --cdp 'ws://127.0.0.1:9222/devtools/browser/<full-check-id>' --idle-timeout 1h open https://example.com
+SLEUTH_CDP_PORT=9222 SLEUTH_CDP_WS='ws://127.0.0.1:9222/devtools/browser/<full-check-id>' \
+node scripts/shared-browser.mjs exec --owner <browser-identity> --tab <browser-identity> -- open https://example.com
 ```
 
-这里的端口和 `<full-check-id>` 都只是示例，必须逐字使用本次检查真实输出的 `cdp_ws`，不能自己拼接。`cdp_port` 只用于核对监听者确实是用户日常 Chrome。Chrome 重启后地址会变化，必须重新运行 full 检查。
+这里的端口和 `<full-check-id>` 都只是示例，必须逐字使用本次检查真实输出的 `cdp_ws`，不能自己拼接。`<browser-identity>` 也必须原样复制搜索 prompt；它由任务目录、轮次和 Agent 名共同生成，禁止手工用普通 Agent 名替代。`cdp_port` 只用于核对监听者确实是用户日常 Chrome。Chrome 重启后地址会变化，必须重新运行 full 检查。
 
 ## 后台服务生命周期
 
-`agent-browser` 第一次执行命令时会启动后台服务，后续命令通过它复用同一条 Chrome 连接。连接用户现有 Chrome 的后台服务默认不会自动闲置退出；如果每个搜索角色使用不同的 `--session` 或 `--namespace`，这些服务会长期残留。其他常驻 CDP 客户端也可能独立重连同一个端口；Chrome 会把这些重连视为新的外部控制请求。
+`agent-browser` 第一次执行命令时会启动后台服务，后续命令通过它复用同一条 Chrome 连接。协调器显式使用 `--idle-timeout 0`，避免默认后台服务因为闲置而退出；如果每个搜索角色使用不同的 `--session` 或 `--namespace`，仍会产生多个连接。其他常驻 CDP 客户端也可能独立重连同一个端口；Chrome 会把这些重连视为新的外部控制请求。
 
 Sleuth 的所有命令统一使用：
 
 ```bash
-agent-browser --cdp '<同次 full 检查返回的完整 cdp_ws>' --idle-timeout 1h <command>
+SLEUTH_CDP_PORT=<同次检查端口> SLEUTH_CDP_WS='<同次检查完整地址>' \
+node scripts/shared-browser.mjs exec --owner <browser-identity> --tab <browser-identity> -- <command>
 ```
 
-禁止只传端口反复等待授权，禁止使用 `--session` 或 `--namespace` 创建额外后台服务，也禁止启动或复用其他常驻 CDP 代理。任务结束只关闭本任务新建的标签页，不使用 `agent-browser close` 或 `close --all` 结束用户 Chrome；后台服务闲置 1 小时后自行断开。
+禁止只传端口反复等待授权，禁止使用 `--session` 或 `--namespace` 创建额外后台服务，也禁止启动或复用其他常驻 CDP 代理。搜索、读取、分析继续并行，只有单条浏览器命令短暂排队；脚本自动选择调用者标签，执行命令后再次选回该标签，再核对 URL/标题，然后自动释放。任务结束只通过同一入口关闭自己的标签，不使用裸 `agent-browser close` 或 `close --all` 结束用户 Chrome。
 
 ## 明确禁止
 
@@ -91,7 +93,8 @@ macOS 的 `devtools.remote_debugging.user-enabled = true` 表示用户开启过�
 | Chrome for Testing / Dev / Chromium / 独立用户目录不会冒充用户 Chrome | 已自动验证 |
 | 搜索子任务没有同次核验的端口与完整地址时返回 `BROWSER_CONTROL_REQUIRED` | 已自动验证任务契约 |
 | 所有浏览器命令强制使用经过校验的完整本地调试地址 | 已自动验证任务契约 |
-| 所有浏览器命令显式使用 `--idle-timeout 1h` 并复用默认后台服务 | 已自动验证任务契约 |
+| 所有浏览器命令经 `shared-browser.mjs` 使用 `--idle-timeout 0` 并复用默认后台服务 | 已自动验证任务契约 |
+| 单条浏览器命令短暂排队，失败自动释放且不会读错调用者标签 | 已自动验证多进程行为 |
 | 主流程不会把 `launch-chrome.mjs` 当研究兜底 | 已做文档与契约检查 |
 | 目标网站在现有 Chrome 中是否已经登录 | 必须按网站人工确认 |
 | 同一连接是否异常重复弹授权框 | 已真实验证：用户点击一次允许后，后续两条命令没有再弹 |
@@ -100,7 +103,7 @@ macOS 的 `devtools.remote_debugging.user-enabled = true` 表示用户开启过�
 
 先不要安装“永久免弹窗”修复，也不要重开另一个 Chrome。记录三件事：Chrome 是否重启过、调试端口是否变化、是否是同一任务内连续弹。只有“同一任务、同一连接连续弹”才应继续排查连接复用；新连接首次弹一次不属于故障。
 
-如果同一任务连续弹，先检查系统里是否存在多个 `agent-browser` 后台服务、多个 `~/.agent-browser/*.sock`，或其他长期连接 9222 的 CDP 客户端。只停止已经确认属于旧任务的控制进程，不关闭 Chrome；随后用同次 full 检查的完整地址、默认会话和 `--idle-timeout 1h` 重建一次连接。
+如果同一任务连续弹，先检查系统里是否存在多个 `agent-browser` 后台服务、多个 `~/.agent-browser/*.sock`，或其他长期连接 9222 的 CDP 客户端。只停止已经确认属于旧任务的控制进程，不关闭 Chrome；随后重新运行 full 检查，并通过 `shared-browser.mjs`、默认会话和 `--idle-timeout 0` 重建一条连接。
 
 ## 2026-08-10 真实授权结果
 

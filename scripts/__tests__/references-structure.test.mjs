@@ -58,9 +58,10 @@ test('SKILL.md 把现有登录态 Chrome 定义为及时且唯一的浏览器兜
   assert.match(skill, /平时使用、已经登录的 Chrome/);
   assert.match(skill, /BROWSER_CONTROL_REQUIRED/);
   assert.match(skill, /SLEUTH_CDP_PORT=<port> SLEUTH_CDP_WS=<ws-url>/);
-  assert.match(skill, /同一时刻只给一个搜索 Agent 注入.*SLEUTH_CDP_PORT.*SLEUTH_CDP_WS/);
-  assert.match(skill, /禁止依赖 `--session` 隔离/);
-  assert.match(skill, /--idle-timeout 1h/);
+  assert.match(skill, /shared-browser\.mjs exec/);
+  assert.match(skill, /非浏览器工作.*并行|轻量搜索.*并行/);
+  assert.match(skill, /单条浏览器命令.*短暂排队/);
+  assert.match(skill, /--idle-timeout 0/);
   assert.match(skill, /禁止使用 `--session` 或 `--namespace`/);
   assert.match(skill, /禁止启动或复用其他常驻 CDP 代理/);
   assert.match(skill, /禁止裸跑 `agent-browser open`/);
@@ -75,7 +76,7 @@ test('当前浏览器规则使用同次 full 检查的完整地址', () => {
   assert.match(current, /完整.*WebSocket|完整.*调试地址/);
   assert.match(current, /ws:\/\/127\.0\.0\.1:<port>\/devtools\/browser\/<id>/);
   assert.match(current, /Chrome 重启.*重新.*full 检查/);
-  assert.doesNotMatch(tool, /agent-browser --cdp \$SLEUTH_CDP_PORT --idle-timeout 1h/);
+  assert.doesNotMatch(tool, /agent-browser --cdp/);
 });
 
 test('search.md 定义可审计的多来源 finding', () => {
@@ -102,7 +103,7 @@ test('search.md 失败时不固定等待并交接现有 Chrome', () => {
   assert.match(search, /网页读取失败不做 2s \/ 5s \/ 10s/);
   assert.match(search, /BROWSER_CONTROL_REQUIRED/);
   assert.match(search, /现有登录态 Chrome/);
-  assert.match(search, /--idle-timeout 1h/);
+  assert.match(search, /shared-browser\.mjs exec/);
   assert.match(search, /禁止启动或复用其他常驻 CDP 代理/);
   assert.match(search, /禁止裸跑 `agent-browser open`/);
 });
@@ -156,13 +157,14 @@ test('tool guide 只连接现有 Chrome，不下载或误关用户浏览器', ()
   assert.match(tool, /`agent-browser install`.*禁止运行/);
   assert.match(tool, /不带 --cdp 会启动另一个无登录态浏览器/);
   assert.match(tool, /最多一次；不能拿它重试失败工具/);
-  assert.match(tool, /浏览器操作必须串行/);
-  assert.match(tool, /--idle-timeout 1h/);
+  assert.match(tool, /只有单条浏览器命令.*短暂排队/);
+  assert.match(tool, /非浏览器工作.*继续并行/);
+  assert.match(tool, /--idle-timeout 0/);
   assert.match(tool, /禁止使用 `--session` 或 `--namespace`/);
   assert.match(tool, /禁止启动或复用其他常驻 CDP 代理/);
   assert.match(tool, /禁止使用 `agent-browser close` 或 `close --all`/);
-  assert.match(tool, /tab new --label <agent-name>/);
-  assert.match(tool, /about:blank/);
+  assert.match(tool, /shared-browser\.mjs exec/);
+  assert.match(tool, /禁止跨命令复用 `@eN`/);
 });
 
 test('references 不反向引用 SKILL.md', () => {
@@ -186,13 +188,19 @@ test('当前 docs 随仓维护，只忽略 docs/local 个人草稿', () => {
   assert.match(gitignore, /^docs\/local\/$/m);
 });
 
-test('用户文档统一说明现有 Chrome 的单后台服务和闲置退出', () => {
+test('用户文档统一说明现有 Chrome 的单后台服务和动作级短锁', () => {
   for (const file of ['README.md', 'docs/CHROME-DEBUG-ISSUE.md', 'docs/DESIGN-v3.md', 'docs/TESTING.md']) {
-    assert.match(read(file), /--idle-timeout 1h/, `${file} 缺少显式闲置退出规则`);
+    assert.match(read(file), /--idle-timeout 0/, `${file} 缺少连接保持规则`);
+    assert.match(read(file), /shared-browser\.mjs/, `${file} 缺少共享执行入口`);
   }
   const issue = read('docs/CHROME-DEBUG-ISSUE.md');
-  assert.match(issue, /后台服务默认不会.*闲置退出/);
+  assert.match(issue, /单条浏览器命令.*短暂排队/);
   assert.match(issue, /复用同一个默认后台服务/);
+  const guide = read('references/tool-guide.md');
+  assert.match(guide, /browser-identity/);
+  assert.doesNotMatch(guide, /--owner <agent-name>|--tab <agent-name>/);
+  assert.doesNotMatch(guide, /eval --stdin <<|click .*--new-tab/);
+  assert.match(guide, /再次选回该标签/);
 });
 
 test('Chrome 144 授权实测记录与验收方法使用完整地址', () => {
@@ -202,7 +210,7 @@ test('Chrome 144 授权实测记录与验收方法使用完整地址', () => {
   const current = [testing, chromeIssue, testIssues].join('\n');
   assert.match(testing, /SLEUTH_CDP_WS/);
   assert.match(testing, /完整.*调试地址/);
-  assert.doesNotMatch(testing, /agent-browser --cdp 9222 --idle-timeout 1h/);
+  assert.doesNotMatch(testing, /agent-browser --cdp/);
   assert.match(current, /端口.*约 2 秒/);
   assert.match(current, /0\.33\.2/);
   assert.match(current, /约 6\.6 秒/);

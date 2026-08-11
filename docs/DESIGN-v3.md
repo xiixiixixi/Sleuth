@@ -163,7 +163,7 @@ Boundary 从全局 findings 提炼 3-5 条 hint，每条必须带 `source_claim_
 - WebFetch / reader 返回空、登录墙、脚本空壳或超时后，立即升级浏览器，不对同一 URL 做 2s / 5s / 10s 重试。
 - `--mode full` 要求 Node.js ≥ 24、`agent-browser` ≥ 0.28 和可连接 Chrome；Node 版本不足时必须先报错且不安装不兼容包。版本合格后，执行模式缺少或过旧 CLI 时必须自动运行 `npm i -g agent-browser@latest`，`--check-only` 保持只读并只报告下一步。
 - 浏览器只连接用户当前使用、已经登录的 Chrome：用户在现有 Chrome 开启 `chrome://inspect/#remote-debugging`；full 检查同时返回身份核对用的 `cdp_port` 和命令使用的完整 `cdp_ws`。
-- 所有浏览器命令复用同一个默认 `agent-browser` 后台服务，并使用同次 full 检查返回的 `agent-browser --cdp '<完整 cdp_ws>' --idle-timeout 1h <command>`。端口模式在 Chrome 144 授权场景中只有约 2 秒发现窗口，禁止用它原地重试；禁止使用 `--session` 或 `--namespace` 创建额外后台服务，禁止启动或复用其他常驻 CDP 代理；闲置退出只断开控制，不关闭用户 Chrome。
+- 所有浏览器命令通过 `scripts/shared-browser.mjs exec` 复用同一个默认 `agent-browser` 后台服务；协调器使用同次 full 检查的完整 `cdp_ws` 和 `--idle-timeout 0` 保持连接。搜索、读取和分析继续并行，只有单条浏览器命令短暂排队；协调器在同一批次选择调用者唯一标签、执行命令、再次选回该标签，再核对 URL/标题。端口模式授权窗口过短，禁止原地重试；也禁止 `--session`、`--namespace`、无归属新标签和其他常驻 CDP 代理。
 - full 检查不能只验证端口或模糊搜索命令参数；还必须核对监听进程的真实可执行文件。只有日常稳定版 Google Chrome 且未使用非默认 `--user-data-dir`、手工调试启动参数时才返回 `browser_identity: verified-user-chrome`。Chrome for Testing、Chrome Dev、Chromium、独立自动化目录和把 Chrome 路径塞进参数的普通进程一律拒绝。
 - 禁止裸跑 `agent-browser open`、禁止 `--profile`、禁止 `agent-browser install`、禁止自动启动或关闭 Chrome。
 - Search 必须同时拿到同次 full 检查核验过的 `SLEUTH_CDP_PORT` 和 `SLEUTH_CDP_WS`；缺少任一项、两者端口不一致、地址不是本机或 Chrome 重启导致地址失效时，返回 `BROWSER_CONTROL_REQUIRED`，保留未完成 raw 且不写 `agent_done`；主 Agent 重新检查后以同一 Agent 名续跑。
@@ -184,7 +184,7 @@ Boundary 从全局 findings 提炼 3-5 条 hint，每条必须带 `source_claim_
 - 用户未确认时，Chrome 启动脚本不得执行关闭动作。
 - 搜索/读取失败契约不能包含 2s / 5s / 10s 固定重试；没有同次核验的端口与完整地址时必须产生 `BROWSER_CONTROL_REQUIRED` 交接。
 - full 检查缺 CLI 时必须给出安装命令，并明确目标是现有登录态 Chrome；搜索任务禁止 `close --all`。
-- 浏览器任务契约必须包含同次 full 检查的完整本地 WebSocket 地址和 `--idle-timeout 1h`，禁止只传端口，也禁止 `--session` / `--namespace` 生成额外控制连接。
+- 浏览器任务契约必须包含同次 full 检查的端口、完整本地 WebSocket 地址和 `shared-browser.mjs exec` 单一入口；必须覆盖短锁互斥、正常失败自动释放、异常残留锁禁止强拆、命令前后选回唯一标签与最终 URL/标题核验，禁止只传端口或生成额外控制连接。
 
 具体命令见 `TESTING.md`。
 

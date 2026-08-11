@@ -16,10 +16,11 @@ npm i -g agent-browser@latest
 
 ```bash
 # 同次 full 检查输出的 SLEUTH_CDP_PORT 与 SLEUTH_CDP_WS
-# 端口用于身份核对，实际命令使用完整地址
+# owner 与 tab 必须原样复制搜索 prompt 生成的唯一 browser-identity，禁止手工用 Agent 名拼接
 
 # 正确用法
-agent-browser --cdp 'ws://127.0.0.1:<port>/devtools/browser/<id>' --idle-timeout 1h open https://example.com
+SLEUTH_CDP_PORT=<port> SLEUTH_CDP_WS='ws://127.0.0.1:<port>/devtools/browser/<id>' \
+node scripts/shared-browser.mjs exec --owner <browser-identity> --tab <browser-identity> -- open https://example.com
 
 # 错误：不带 --cdp 会启动另一个无登录态浏览器
 agent-browser open https://example.com
@@ -27,16 +28,16 @@ agent-browser open https://example.com
 
 完整地址必须逐字来自同次 full 检查，不允许手工拼接、猜测或使用其他主机；生成搜索提示时会把经过校验的地址直接写入命令。Chrome 重启后地址会变化，必须重新运行 full 检查。只传端口会走一个约 2 秒的自动发现窗口，在 Chrome 144 的人工授权框来不及操作，因此禁止用端口模式原地重试。
 
-连接用户现有 Chrome 的 `agent-browser` 后台服务默认不会按普通闲置规则退出，所以所有命令必须复用默认后台服务并显式带 `--idle-timeout 1h`。禁止使用 `--session` 或 `--namespace` 创建额外后台服务，禁止启动或复用其他常驻 CDP 代理。任务结束只关闭本任务明确新建的标签页；禁止使用 `agent-browser close` 或 `close --all`，避免关闭用户 Chrome。
+所有命令必须通过 `scripts/shared-browser.mjs exec` 复用默认后台服务。协调器内部显式使用 `--idle-timeout 0`，关闭后台服务的闲置退出；只要用户 Chrome 和连接仍健康就继续复用。禁止使用 `--session` 或 `--namespace` 创建额外后台服务，禁止启动或复用其他常驻 CDP 代理。任务结束只通过相同入口关闭本任务标签；禁止使用 `agent-browser close` 或 `close --all`，避免关闭用户 Chrome。
 
-> 以下所有命令省略 `agent-browser --cdp 'ws://127.0.0.1:<port>/devtools/browser/<id>' --idle-timeout 1h` 前缀，实际调用时必须带上同次 full 检查返回的字面地址。不要用 `--profile`（与 `--cdp` 互斥），不要用 `--auto-connect` 猜浏览器，不要调用 `launch-chrome.mjs` 重开 Chrome。
+> 以下命令只展示 `--` 后面的浏览器命令。实际调用必须原样使用搜索 prompt 给出的完整 `shared-browser.mjs exec --owner <browser-identity> --tab <browser-identity> --` 前缀；这个身份由任务目录、轮次和 Agent 名共同生成，禁止手工改成普通 Agent 名。不要手动取得或释放锁，不要用 `--profile` 或 `--auto-connect` 猜浏览器，也不要调用 `launch-chrome.mjs` 重开 Chrome。
 
 ## 核心姿势
 
 - **eval first**：观察和提取 → 先 eval 读 DOM
-- **snapshot for interaction**：点击、填表 → 先 snapshot 拿 @ref
+- **snapshot for observation**：快照用于观察；共享模式禁止跨命令复用 `@eN`
 - **screenshot sparingly**：只在视觉证据重要时
-- **tab / network when needed**：比较页面、追 API
+- **network when needed**：需要时追 API；标签选择交给协调器
 
 ## 命令速查
 
@@ -45,18 +46,11 @@ agent-browser open https://example.com
 ```bash
 eval "document.body.innerText"                              # 全页文本
 eval "document.title"                                       # 快速确认页面
-eval --stdin <<'EOF'                                        # 结构化提取（IIFE 防重跑冲突）
-(function() {
-  const rows = document.querySelectorAll("table tr");
-  return Array.from(rows).map(r => ({
-    name: r.cells[0]?.innerText, price: r.cells[1]?.innerText
-  }));
-})()
-EOF
+eval "Array.from(document.querySelectorAll('table tr')).map(r => ({name: r.cells[0]?.innerText, price: r.cells[1]?.innerText}))" # 结构化提取；wrapper 的标准输入保留给内部批次，禁止 eval --stdin
 
-get text @e1              # 元素文本
-get html @e1              # 元素 HTML
-get attr @e1 href         # 属性值
+get text "article h1"     # 用稳定 CSS 选择器读取元素文本
+get html "main"           # 元素 HTML
+get attr "a.docs" href    # 属性值
 get title                 # 页面标题
 get url                   # 当前 URL
 ```
@@ -72,22 +66,23 @@ reload                    # 刷新
 ### 快照与交互
 
 ```bash
-snapshot -i               # 交互快照（交互前必须拿，@ref 每次重新分配）
+snapshot -i               # 观察交互元素；不要把本次 @eN 留到下一条共享命令
 snapshot -i --json        # JSON 格式
 
-click @e1                 # 点击
-click @e1 --new-tab       # 新 tab 打开
-fill @e1 "text"           # 清空 + 输入
-type @e1 "text"           # 追加输入
+click "button.submit"     # 用稳定选择器点击
+get attr "a.docs" href    # 先读目标地址；禁止 --new-tab
+open "<上一步读到的地址>" # 再在自己的标签打开
+fill "input[name=q]" "text" # 清空 + 输入
+type "textarea" "text"   # 追加输入
 press Enter               # 按键
-select @e1 "value"        # 下拉选择
-hover @e1                 # 悬停
+select "select[name=kind]" "value" # 下拉选择
+hover ".menu"             # 悬停
 ```
 
 ### 等待
 
 ```bash
-wait @e1                  # 等元素出现
+wait ".result"            # 等元素出现
 wait --text "Success"     # 等文本
 wait --url "**/dashboard" # 等 URL 变化
 wait --load networkidle   # 等网络空闲
@@ -98,7 +93,7 @@ wait 2000                 # 只用于已确认的页面动画，最多一次；�
 
 ```bash
 scroll down 500           # 向下滚（触发懒加载）
-scrollintoview @e1        # 滚到元素可见
+scrollintoview "#details" # 滚到元素可见
 ```
 
 ### 轻量定位
@@ -109,34 +104,32 @@ find role button click --name "Submit" # 按角色找
 find label "Email" fill "user@x.com"   # 按标签找
 ```
 
-### Tab
+### 标签
 
 ```bash
-tab                       # 列出
-tab new <url>             # 新建
-tab t2                    # 切换（用 t0/t1/t2 格式，不接受纯数字）
-tab close t2              # 关闭
+tab close <browser-identity> # 唯一允许的标签命令；身份必须原样复制 prompt
 ```
+
+列出、创建和切换标签全部由协调器完成。调用者禁止执行 `tab`、`tab new` 或 `tab <id>`，也禁止 `--new-tab`；需要跟随新窗口链接时先读 `href`，再用 `open` 在自己的标签导航。
 
 ### 多 Agent 并发时的标签边界
 
-同一个现有 Chrome 的 CDP 连接会共享“当前标签页”。在最低支持版本 agent-browser 0.28.0 的真实测试中，两个 `--session` 连接仍会读到后一个连接切换的页面，因此**浏览器操作必须串行**：主 Agent 同一时刻只把 CDP 端口交给一个搜索 Agent，不能让多个 Agent 并发执行 `open / eval / snapshot / click`。禁止使用 `--session` 或 `--namespace` 另建后台服务规避串行限制。
+同一个现有 Chrome 的 CDP 连接会共享“当前标签页”。在真实测试中，两个独立调用如果直接切换标签，可能都读到后切换的页面。解决方式不是让搜索 Agent 一个等一个完成：**所有非浏览器工作继续并行，只有单条浏览器命令通过 `shared-browser.mjs exec` 短暂排队**。
 
-拿到浏览器操作权的 Agent 必须用自己的唯一名字标记标签，并分三步执行：
+协调器自动完成：
 
-```bash
-tab new --label <agent-name>   # 只创建自己的空白标签
-tab <agent-name>               # 明确切换到自己的标签
-open <url>                     # 再单独导航，并用 get url / get title 核验
-```
+- 标签不存在时创建调用者自己的标签。
+- 在同一批次内选择该标签、执行单条命令、再次选回该标签，再读取最终 URL 和标题。
+- 命令成功或失败后自动释放短锁，调用者绝不手动 `acquire/release`。
+- 禁止跨命令复用 `@eN`；需要交互时优先用稳定 CSS 选择器或 `find` 单命令。
 
-不要依赖 `tab new --label <name> <url>` 一步完成导航：agent-browser 0.28.0 连接现有 Chrome 时实测可能仍停在 `about:blank`。任务结束只运行 `tab close <agent-name>`，禁止关闭别人的标签。
+任务结束仍使用相同入口，把浏览器命令写成 `tab close <browser-identity>`。这个身份必须原样复制搜索 prompt；协调器只允许 owner 关闭自己的标签，禁止关闭别人的标签。
 
 ### 状态检查
 
 ```bash
-is visible @e1            # 可见？
-is enabled @e1            # 可用？
+is visible ".result"      # 可见？
+is enabled "button.submit" # 可用？
 ```
 
 ### 截图
@@ -144,15 +137,16 @@ is enabled @e1            # 可用？
 ```bash
 screenshot                # 可视区
 screenshot --full         # 全页
-screenshot --annotate     # 带 @ref 标注
+screenshot --annotate     # 带观察标注；不要跨命令使用生成的 @eN
 ```
 
 **截图默认存到 `~/.agent-browser/tmp/screenshots/`，不在当前目录。** 要搬到任务目录：
 
 ```bash
 # 截图后搬到 output 目录
-agent-browser --cdp 'ws://127.0.0.1:<port>/devtools/browser/<id>' --idle-timeout 1h screenshot
-cp ~/.agent-browser/tmp/screenshots/screenshot-*.png <outputDir>/screenshots/
+SLEUTH_CDP_PORT=<port> SLEUTH_CDP_WS='<完整地址>' \
+node scripts/shared-browser.mjs exec --owner <browser-identity> --tab <browser-identity> -- \
+  screenshot <outputDir>/screenshots/page.png
 ```
 
 不要用 `--file` 参数（不是有效的 screenshot flag，会报错）。
@@ -171,7 +165,7 @@ cp ~/.agent-browser/tmp/screenshots/screenshot-*.png <outputDir>/screenshots/
 |------|------|------|
 | 1 | 看失败位置 | `network requests` + `eval` 判断是正文没渲染还是请求被拦 |
 | 2 | 换站内入口 | 从首页、帮助中心或已登录后台内导航到目标页 |
-| 3 | 模拟真实交互 | `hover @e1` → 最多一次短等待 → `click` |
+| 3 | 模拟真实交互 | 用稳定选择器 `hover ".target"` → 最多一次短等待 → `click ".target"` |
 | 4 | 逐键输入 | `keyboard type` 代替 `fill` |
 | 5 | SPA 内跳转 | `pushstate` 代替 `open`，保留当前登录态 |
 | 6 | 换一手来源 | 在同一现有 Chrome 中改查官方文档、API 或帮助中心 |
@@ -206,11 +200,10 @@ SPA 内跳转不刷新页面，保留 DOM 和登录态。`open` 会重新加载�
 
 ```bash
 frame "#iframe-selector"    # 进入 iframe
-frame @e3                   # 按 @ref 进入
 frame main                  # 返回主页面
 ```
 
-snapshot 自动内联 iframe 内容，`@ref` 可直接操作。只有 snapshot 无法展示时才手动切换。
+snapshot 自动内联 iframe 内容。共享模式不用跨命令 `@eN`；只有 snapshot 无法展示时才用稳定 iframe 选择器手动切换。
 
 ### 网络调试
 
