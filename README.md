@@ -64,8 +64,6 @@ npm i -g agent-browser@latest
 node --test scripts/__tests__/*.mjs
 ```
 
-完整测试与验收方法见 `docs/TESTING.md`，当前问题的专项验收见 `docs/CURRENT-PROBLEM.md`。
-
 ## 目录
 
 ```text
@@ -82,7 +80,6 @@ scripts/validate-state.mjs      流程检查门
 scripts/calc-novelty.mjs        统一收敛判断
 scripts/inject-hints.mjs        下一轮线索注入
 scripts/spawn-subagent.mjs      5 种子 Agent 的任务契约
-docs/                            当前设计、问题、测试和状态文档
 ```
 
 ## 安全边界

@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +12,7 @@ const read = (relative) => readFileSync(path.join(ROOT, relative), 'utf8');
 
 test('references 只保留当前 5 个角色/工具文档', () => {
   const files = readdirSync(path.join(ROOT, 'references')).filter((file) => !file.startsWith('.')).sort();
-  assert.deepEqual(files, ['AGENTS.md', 'boundary.md', 'review.md', 'scout.md', 'search.md', 'tool-guide.md']);
+  assert.deepEqual(files, ['boundary.md', 'review.md', 'scout.md', 'search.md', 'tool-guide.md']);
 });
 
 test('已废弃 references 和会话系统不会回归', () => {
@@ -174,53 +174,29 @@ test('references 不反向引用 SKILL.md', () => {
   }
 });
 
-test('README、AGENTS 和 CLAUDE 引用的核心文件都存在', () => {
-  for (const doc of ['README.md', 'AGENTS.md', 'CLAUDE.md']) {
-    const text = read(doc);
-    for (const match of text.matchAll(/`((?:scripts|references)\/[A-Za-z0-9_./-]+\.(?:mjs|md))`/g)) {
-      assert.ok(existsSync(path.join(ROOT, match[1])), `${doc} 引用了不存在的 ${match[1]}`);
-    }
+test('README 引用的核心文件都存在', () => {
+  const text = read('README.md');
+  for (const match of text.matchAll(/`((?:scripts|references)\/[A-Za-z0-9_./-]+\.(?:mjs|md))`/g)) {
+    assert.ok(existsSync(path.join(ROOT, match[1])), `README.md 引用了不存在的 ${match[1]}`);
   }
 });
 
-test('当前 docs 随仓维护，只忽略 docs/local 个人草稿', () => {
-  const gitignore = read('.gitignore');
-  assert.doesNotMatch(gitignore, /^docs\/$/m);
-  assert.match(gitignore, /^docs\/local\/$/m);
-});
-
-test('用户文档统一说明现有 Chrome 的单后台服务和动作级短锁', () => {
-  for (const file of ['README.md', 'docs/CHROME-DEBUG-ISSUE.md', 'docs/DESIGN-v3.md', 'docs/TESTING.md']) {
-    assert.match(read(file), /--idle-timeout 0/, `${file} 缺少连接保持规则`);
-    assert.match(read(file), /shared-browser\.mjs/, `${file} 缺少共享执行入口`);
+test('发布内容排除本地 docs 和开发 Agent 说明文件', () => {
+  for (const file of ['AGENTS.md', 'CLAUDE.md', 'references/AGENTS.md', 'scripts/AGENTS.md']) {
+    assert.equal(existsSync(path.join(ROOT, file)), false, `${file} 不应进入发布仓库`);
   }
-  const issue = read('docs/CHROME-DEBUG-ISSUE.md');
-  assert.match(issue, /单条浏览器命令.*短暂排队/);
-  assert.match(issue, /复用同一个默认后台服务/);
-  const guide = read('references/tool-guide.md');
-  assert.match(guide, /browser-identity/);
-  assert.doesNotMatch(guide, /--owner <agent-name>|--tab <agent-name>/);
-  assert.doesNotMatch(guide, /eval --stdin <<|click .*--new-tab/);
-  assert.match(guide, /再次选回该标签/);
+  const trackedDocs = execFileSync('git', ['ls-files', 'docs'], { cwd: ROOT, encoding: 'utf8' }).trim();
+  assert.equal(trackedDocs, '', 'docs/ 不应被 Git 跟踪');
+  const ignoredDoc = execFileSync('git', ['check-ignore', '--no-index', 'docs/TESTING.md'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  }).trim();
+  assert.equal(ignoredDoc, 'docs/TESTING.md', 'docs/ 必须由 .gitignore 阻止再次误传');
 });
 
-test('Chrome 144 授权实测记录与验收方法使用完整地址', () => {
-  const testing = read('docs/TESTING.md');
-  const chromeIssue = read('docs/CHROME-DEBUG-ISSUE.md');
-  const testIssues = read('docs/TEST-ISSUES.md');
-  const current = [testing, chromeIssue, testIssues].join('\n');
-  assert.match(testing, /SLEUTH_CDP_WS/);
-  assert.match(testing, /完整.*调试地址/);
-  assert.doesNotMatch(testing, /agent-browser --cdp/);
-  assert.match(current, /端口.*约 2 秒/);
-  assert.match(current, /0\.33\.2/);
-  assert.match(current, /约 6\.6 秒/);
-  assert.match(current, /约 0\.1 秒/);
-  assert.match(current, /9222.*一条.*已建立/);
-  assert.match(current, /用户点击.*允许.*后续.*没有再弹/);
-});
-
-test('check-docs 全绿：全部 Markdown 无悬空引用、无过时文件名', () => {
-  const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'check-docs.mjs')], { encoding: 'utf8' });
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+test('check-docs 全绿：仓库 Markdown 无悬空引用、无过时文件名', () => {
+  assert.doesNotThrow(() => execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'check-docs.mjs')], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  }));
 });
