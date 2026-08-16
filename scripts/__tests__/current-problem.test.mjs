@@ -69,6 +69,7 @@ for (const [taskType, relationship] of Object.entries(relationships)) {
 
     const audit = run('audit-run.mjs', [dir, '--stage', 'all']);
     assert.equal(audit.status, 0, `${audit.stdout}\n${audit.stderr}`);
+    assert.match(audit.stdout, /完整验收通过：raw、research、draft、final 全部通过/);
     const findings = fs.readFileSync(path.join(dir, 'findings.jsonl'), 'utf8');
     assert.match(findings, new RegExp(`"relationship":"${relationship}"`));
     fs.rmSync(dir, { recursive: true, force: true });

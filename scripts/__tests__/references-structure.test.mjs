@@ -34,7 +34,7 @@ test('SKILL.md 保持精简且只承担主调度', () => {
 
 test('SKILL.md 的机器步骤顺序完整', () => {
   const skill = read('SKILL.md');
-  const commands = ['check-deps.mjs', 'spawn-subagent.mjs --role scout', '--phase 1.5', '--phase 2', '--phase 2-typecheck', '--role search', '--phase 3-raw', 'normalize.mjs', 'check-depth.mjs', '--phase 3-findings', 'calc-novelty.mjs', '--role boundary', '--phase 4', 'inject-hints.mjs', '--phase 7-ready', '--role synthesize', '--phase 7-draft', '--role review', '--phase 8-audit'];
+  const commands = ['check-deps.mjs', 'spawn-subagent.mjs --role scout', '--phase 1.5', '--phase 2', '--phase 2-typecheck', '--role search', '--phase 3-raw', 'normalize.mjs', 'check-depth.mjs', '--phase 3-findings', 'calc-novelty.mjs', '--role boundary', '--phase 4', 'inject-hints.mjs', '--phase 7-ready', '--role synthesize', '--phase 7-draft', '--role review', '--phase 8-audit', 'audit-run.mjs <task-dir> --stage all'];
   let cursor = -1;
   for (const command of commands) {
     const next = skill.indexOf(command, cursor + 1);
@@ -48,7 +48,7 @@ test('SKILL.md 不自动启动 Chrome，并保留安全边界', () => {
   assert.match(skill, /禁止自动运行 `launch-chrome\.mjs`/);
   assert.match(skill, /最多并行 5/);
   assert.match(skill, /改变范围前必须询问用户/);
-  assert.match(skill, /只有 `8-audit` 通过才能交付/);
+  assert.match(skill, /只有独立运行 `audit-run\.mjs <task-dir> --stage all` 并通过，才能交付/);
 });
 
 test('SKILL.md 把现有登录态 Chrome 定义为及时且唯一的浏览器兜底', () => {

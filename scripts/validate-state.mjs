@@ -405,4 +405,8 @@ if (errors.length) {
   for (const message of errors) err(`  - ${message}`);
   process.exit(1);
 }
-log(`✓ 检查门 ${phase} 通过`);
+if (phase === '8-audit' || phase === '7-post') {
+  log(`✓ 检查门 ${phase} 通过；这只代表审查报告自身通过。最终交付前必须独立运行 node scripts/audit-run.mjs <task-dir> --stage all`);
+} else {
+  log(`✓ 检查门 ${phase} 通过`);
+}
