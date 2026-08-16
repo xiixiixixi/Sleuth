@@ -2,6 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -217,4 +218,9 @@ test('Chrome 144 授权实测记录与验收方法使用完整地址', () => {
   assert.match(current, /约 0\.1 秒/);
   assert.match(current, /9222.*一条.*已建立/);
   assert.match(current, /用户点击.*允许.*后续.*没有再弹/);
+});
+
+test('check-docs 全绿：全部 Markdown 无悬空引用、无过时文件名', () => {
+  const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'check-docs.mjs')], { encoding: 'utf8' });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });

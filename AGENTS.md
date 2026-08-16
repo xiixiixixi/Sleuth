@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-07-18
+**Generated:** 2026-08-16
 **Commit:** 当前工作树（以 `git rev-parse HEAD` 为准）
 **Branch:** main
 
@@ -33,8 +33,8 @@ sleuth/
 | 加搜索策略 / 查询规则 / 多模态提取 / 搜索循环 | `references/search.md` | 搜索子 Agent |
 | 加边界评估规则 | `references/boundary.md` | 边界子 Agent |
 | 加审查 Agent 规则 | `references/review.md` | 审查子 Agent |
-| 合成 / 证据分层 / 交付 | `SKILL.md` §7 | 主 Agent |
-| 改子 Agent 角色 / 任务分析 / loop / 长程任务行为 | `SKILL.md` 第 1-2 步（任务分析）+ 第 3-7 步（主 Agent loop：搜索/边界/审查）+「状态文件 schema」+「长程任务行为」段 | 4 角色（主/搜索/边界/审查）+ state schema + 零交互 / 就绪即执行 |
+| 合成 / 证据分层 / 交付 | `SKILL.md` §5 | 主 Agent |
+| 改主 Agent loop / 长程任务行为 | `SKILL.md` 第 1-5 步 +「硬边界」段 | 主 Agent 只调度和跑检查门；5 种子 Agent 角色（scout/search/boundary/synthesize/review）；零交互 / 就绪即执行 |
 | 改 agent-browser 命令参考 / 反爬降级 / 特殊内容类型 | `references/tool-guide.md` | 完整命令速查 |
 | 用户主动启动带 CDP 调试的 Chrome | `scripts/launch-chrome.mjs` | 仅用户明确选择并传 `--confirm-close-browser`；主流程禁止自动运行 |
 | 检查或设置 Chrome 远程调试许可 | `scripts/fix-chrome-debug-permission.mjs` | 可选人工环境工具；不承诺免确认。macOS 改 Local State，Linux/Windows 设置策略；支持 `--check` / `--uninstall` |
@@ -46,6 +46,7 @@ sleuth/
 | 改检查门 | `scripts/validate-state.mjs` | 7 个 phase 检查；不通过 exit(1) |
 | 改本地 URL 搜索 | `scripts/find-url.mjs` | 341 行单体脚本（注意：未测试） |
 | 加测试 | `scripts/__tests__/<name>.test.mjs` | 用 `node:test`，不要 jest/vitest |
+| 查文档引用悬空 / 过时文件名 | `scripts/check-docs.mjs` | 已并入测试套件；同时强制 docs/ 随仓维护 |
 | 当前架构与决策 | `docs/DESIGN-v3.md` + `docs/STATUS.md` | 只写当前事实；历史问题在 TEST-ISSUES.md |
 | 测试步骤与检查命令 | `docs/TESTING.md` | 怎么测：case 要求 + 检查清单 |
 | 测试问题追踪 | `docs/TEST-ISSUES.md` | 测出了什么：问题清单 + 解决状态 |
@@ -114,7 +115,7 @@ sleuth/
 - **3 套参数解析风格并存**（**tech debt**，未统一）：`check-deps.mjs` 手撸 flag、`spawn-subagent.mjs` 用 `util.parseArgs`、`find-url.mjs` 手撸位置参数
 - **SKILL.md 全部用相对路径**：`scripts/check-deps.mjs`、`references/search.md`——所有路径从 SKILL.md 所在目录（skill 根目录）解析。Agent 正在读这份文档就知道根目录在哪。子 Agent 的 prompt 由 `spawn-subagent.mjs` 在运行时解析为绝对路径。
 - **`spawn-subagent.mjs` 在 Node.js 运行时自感知 skill 根目录**：通过 `import.meta.url` 解析绝对路径，将 `${CLAUDE_SKILL_DIR}` 替换为绝对路径后输出——消除子 Agent 对运行时变量替换的依赖
-- **output 目录按 task-name 不按日期**：`~/.sleuth/output/<task-name>/`（多 Agent 协作需独立 task 目录；旧 `lib/output.mjs` 按日期，与新 loop 模式不兼容——见 SKILL.md「状态文件 schema」）
+- **output 目录按 task-name 不按日期**：`~/.sleuth/output/<task-name>/`（多 Agent 协作需独立 task 目录；旧 `lib/output.mjs` 按日期，与新 loop 模式不兼容）
 - **`check-deps-core.mjs` 已移除旧 `ensureCDP` 别名**：环境检查现在显式区分 `--mode light` 与 `--mode full`，只有 full 要求浏览器就绪
 - **`output.mjs` task-name 模式（2026-06-19）**：`resolveOutputDir(taskName?)` 支持两种模式——传 taskName 则按 `~/.sleuth/output/<task-name>/`（多 Agent 协作需独立 task 目录），不传则按 `YYYY-MM-DD/`（向后兼容）。`sanitizeTaskName` 拒路径分隔符 / `..` / 特殊字符（只允许 `[a-zA-Z0-9-_.]`），防注入。空字符串视为「已传入但非法」会抛错（`if (taskName !== undefined)` 不是 truthy 检查）。check-deps CLI 通过 `--task-name <name>` 传入。
 - **`spawn-subagent.mjs` 的 5 role 模板**：`scout` / `search` / `boundary` / `review` / `synthesize`。各角色直接写自己的文件：landscape.json / raw JSONL / boundary-report.json / audit-report.json / draft.md；回复只报状态。
