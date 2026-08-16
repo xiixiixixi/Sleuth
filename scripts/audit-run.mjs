@@ -39,10 +39,13 @@ const steps = {
 
 let selected;
 if (stage === 'all') {
-  selected = [...steps.raw];
-  if (fs.existsSync(path.join(dir, 'boundary-report.json'))) selected.push(...steps.research);
-  if (fs.existsSync(path.join(dir, 'draft.md'))) selected.push(...steps.draft);
-  if (fs.existsSync(path.join(dir, 'audit-report.json'))) selected.push(...steps.final);
+  const requiredArtifacts = ['boundary-report.json', 'draft.md', 'audit-report.json'];
+  const missingArtifacts = requiredArtifacts.filter((file) => !fs.existsSync(path.join(dir, file)));
+  if (missingArtifacts.length) {
+    console.error(`✗ 完整验收缺少必须产物：${missingArtifacts.join(', ')}`);
+    process.exit(1);
+  }
+  selected = [...steps.raw, ...steps.research, ...steps.draft, ...steps.final];
 } else selected = steps[stage];
 
 for (const [script, ...scriptArgs] of selected) {
@@ -55,4 +58,5 @@ for (const [script, ...scriptArgs] of selected) {
     process.exit(result.status || 1);
   }
 }
-console.log('\n✓ 所选阶段全部通过');
+if (stage === 'all') console.log('\n✓ 完整验收通过：raw、research、draft、final 全部通过');
+else console.log('\n✓ 所选阶段全部通过');

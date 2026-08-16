@@ -109,11 +109,13 @@ node scripts/spawn-subagent.mjs --role synthesize --task-dir <task-dir>
 node scripts/validate-state.mjs <task-dir> --phase 7-draft
 node scripts/spawn-subagent.mjs --role review --goal "审计报告" --task-dir <task-dir> --draft-path <task-dir>/draft.md
 node scripts/validate-state.mjs <task-dir> --phase 8-audit
+node scripts/audit-run.mjs <task-dir> --stage all
 ```
 
 - `non_critical`：把问题作为 `--audit-fix` 重派合成，再重新审查。
 - `critical`：带 `suggested_search` 回到搜索轮次。
-- 只有 `8-audit` 通过才能交付 `draft.md`；禁止把“未通过审查”说成完成。
+- `8-audit` 只证明审查报告自身合格；只有独立运行 `audit-run.mjs <task-dir> --stage all` 并通过，才能交付 `draft.md`。
+- 完整验收命令必须单独运行并检查退出状态，禁止接 `| tail` 或其他管道后宣称完成。
 - `visuals[]` 中登记的图片必须全部进入草稿，并由 Review 逐张检查来源、图注和相关性。
 
 ## 硬边界

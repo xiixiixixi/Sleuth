@@ -210,7 +210,14 @@ test('phase 8-audit 要求问题清零、passed=true 且抽样足够', () => {
   const root = dir();
   writeJson(root, 'stats-summary.json', { by_tier: { T1: 6, T2: 4, T3: 2 } });
   writeJson(root, 'audit-report.json', { schema_version: 2, critical: [], non_critical: [], sampled_stats: { total_t1: 6, sampled_t1: 5, total_t2: 4, sampled_t2: 2, total_t3: 2, sampled_t3: 2 }, passed: true });
-  assert.equal(run(root, '8-audit').status, 0);
+  const reportOnly = run(root, '8-audit');
+  assert.equal(reportOnly.status, 0);
+  assert.match(reportOnly.stdout, /只代表审查报告自身通过/);
+  assert.match(reportOnly.stdout, /audit-run\.mjs.*--stage all/);
+  const legacyReportOnly = run(root, '7-post');
+  assert.equal(legacyReportOnly.status, 0);
+  assert.match(legacyReportOnly.stdout, /只代表审查报告自身通过/);
+  assert.match(legacyReportOnly.stdout, /audit-run\.mjs.*--stage all/);
   writeJson(root, 'audit-report.json', { schema_version: 2, critical: [], non_critical: [{ issue: '缺引用' }], sampled_stats: { total_t1: 6, sampled_t1: 5, total_t2: 4, sampled_t2: 2, total_t3: 2, sampled_t3: 2 }, passed: false });
   assert.equal(run(root, '8-audit').status, 1);
   fs.rmSync(root, { recursive: true, force: true });
