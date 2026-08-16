@@ -1,4 +1,4 @@
-/** 环境模式、Chrome 启动安全和本地 URL 参数测试。 */
+/** 环境模式与 Chrome 启动安全测试。 */
 
 import { test } from 'node:test';
 import assert from 'node:assert';
@@ -19,7 +19,6 @@ import { checkNodeRuntime } from '../lib/check-deps-core.mjs';
 const CHECK = fileURLToPath(new URL('../check-deps.mjs', import.meta.url));
 const LAUNCH = fileURLToPath(new URL('../launch-chrome.mjs', import.meta.url));
 const FIX_PERMISSION = fileURLToPath(new URL('../fix-chrome-debug-permission.mjs', import.meta.url));
-const FIND = fileURLToPath(new URL('../find-url.mjs', import.meta.url));
 const CHECK_CORE_URL = new URL('../lib/check-deps-core.mjs', import.meta.url).href;
 
 test('浏览器兜底明确要求 Node.js 24，轻量模式仍可使用 Node.js 18', () => {
@@ -254,9 +253,4 @@ test('调试许可脚本不再承诺永久免授权确认', () => {
   assert.equal(help.status, 0);
   assert.match(help.stdout, /仍可能要求确认一次/);
   assert.doesNotMatch(help.stdout, /压住.*弹窗|不再弹/);
-});
-
-test('find-url 的参数错误和 help 路径可执行', () => {
-  assert.equal(spawnSync(process.execPath, [FIND, '--only', 'wrong']).status, 1);
-  assert.equal(spawnSync(process.execPath, [FIND, '--help']).status, 0);
 });

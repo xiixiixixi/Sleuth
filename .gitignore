@@ -12,3 +12,5 @@ docs/
 .codegraph/
 .zcode/
 test/
+outputs/
+tmp/

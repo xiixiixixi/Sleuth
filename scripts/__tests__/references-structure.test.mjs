@@ -194,6 +194,16 @@ test('发布内容排除本地 docs 和开发 Agent 说明文件', () => {
   assert.equal(ignoredDoc, 'docs/TESTING.md', 'docs/ 必须由 .gitignore 阻止再次误传');
 });
 
+test('本地产物目录不会进入 Git 待提交清单', () => {
+  for (const localFile of ['outputs/example.xlsx', 'tmp/example.png']) {
+    const ignored = execFileSync('git', ['check-ignore', '--no-index', localFile], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    }).trim();
+    assert.equal(ignored, localFile, `${localFile} 必须被 .gitignore 忽略`);
+  }
+});
+
 test('check-docs 全绿：仓库 Markdown 无悬空引用、无过时文件名', () => {
   assert.doesNotThrow(() => execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'check-docs.mjs')], {
     cwd: ROOT,
